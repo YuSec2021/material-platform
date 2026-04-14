@@ -29,6 +29,16 @@ cat eval-trigger.txt    2>/dev/null || echo "[no eval-trigger]"
 cat sprint-contract.md  2>/dev/null | head -5 || echo "[no sprint-contract]"
 ```
 
+Treat these artifact reads as the authoritative context snapshot for the session.
+Do not route based on remembered conversation state alone.
+
+If `claude-progress.txt` has grown beyond a compact handoff, rewrite it into:
+
+- one short project summary
+- the latest 3 sprint entries only
+
+before continuing with complex routing.
+
 ---
 
 ## Routing rules (evaluate in order, stop at first match)
@@ -107,6 +117,7 @@ Re-run the routing rules from the top. Always re-read state from files — never
 - Tell the user in one sentence which rule matched before delegating.
 - Never proceed without the expected artifact existing on disk.
 - If blocked waiting on a human decision, stop and ask explicitly.
+- If artifacts suggest architecture drift or context mismatch, stop and surface it instead of papering over it.
 
 ---
 

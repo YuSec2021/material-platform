@@ -61,6 +61,40 @@ State lives in files, never in conversation memory.
 
 ---
 
+## Context Hygiene Rules
+
+Long-running projects must resist context bloat and patch-on-patch AI code drift.
+
+### Shared rules
+
+- Always prefer current file state over remembered conversation state.
+- Re-read the minimum required artifacts at the start of each phase instead of relying on prior chat context.
+- Keep `claude-progress.txt` as a compact handoff log, not a narrative transcript.
+- Do not append long retrospectives, design essays, or duplicate test output to `claude-progress.txt`.
+- If a file artifact and the conversation disagree, trust the file artifact and resolve the discrepancy explicitly.
+
+### `claude-progress.txt` policy
+
+Treat `claude-progress.txt` as a rolling summary with a hard cap:
+
+- Keep only the latest project summary plus the latest 3 sprint entries.
+- Each sprint entry should be 3 to 5 lines maximum.
+- Include only:
+  - sprint number and timestamp
+  - status
+  - key files or behavior changed
+  - blockers or evaluator-required follow-up
+- Delete or compress older entries instead of appending forever.
+
+### Anti-slop rules
+
+- Never preserve a bad abstraction just because it already exists in model context.
+- On each sprint, prefer small coherent changes over opportunistic extra refactors.
+- If a failed sprint requires broad unrelated cleanup, stop and surface that as a planning problem instead of smuggling it into the retry.
+- Do not create placeholder architecture, fake extensibility, or generic helper layers unless the current sprint truly needs them.
+
+---
+
 ## Agent 1 — Planner (Claude Code)
 
 **Runs**: once per project, triggered by a new user prompt.
@@ -118,6 +152,14 @@ bash init.sh                   # start dev server
 
 After `init.sh`, run one smoke test before touching any code. If it fails, diagnose and fix first.
 
+Before writing any code, re-read only the artifacts needed for the current sprint:
+
+- `planner-spec.json`
+- `sprint-contract.md`
+- latest relevant `eval-result-{N}.md` when retrying
+
+Do not treat old chat context as authoritative.
+
 ### Sprint workflow
 
 **Step 1 — Identify current sprint**
@@ -152,6 +194,8 @@ Then stop. The Orchestrator routes this to Evaluator for contract review.
 - Follow the Visual Design Language for all UI work.
 - Write tests alongside implementation — never after.
 - Never use inline styles in React/frontend components.
+- Do not carry forward abstractions, helpers, or TODO scaffolding unless they are required by the current sprint.
+- Prefer editing or deleting weak code over wrapping it in another layer.
 
 **Step 4 — Self-check**
 
@@ -162,6 +206,14 @@ Fix any failures before committing.
 pytest -q           # unit tests must pass
 git diff --stat     # review scope of changes
 ```
+
+Also do one context hygiene pass before commit:
+
+- remove dead code introduced during the sprint
+- remove temporary debug output
+- collapse duplicated logic created during iteration
+- check that file names, components, and helpers still match the current architecture
+- ensure the change set is still about the approved sprint, not opportunistic extras
 
 **Step 5 — Commit**
 
@@ -177,6 +229,9 @@ echo "## Sprint <N> — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
 echo "Status: committed, pending Evaluator CHECK" >> claude-progress.txt
 echo "sprint=<N>" > eval-trigger.txt
 ```
+
+When updating `claude-progress.txt`, keep the file compact per the policy above.
+If necessary, rewrite older entries into a short summary before appending the new one.
 
 ### Handling SPRINT FAIL
 
@@ -195,6 +250,8 @@ When invoked after a SPRINT FAIL:
 - Never remove or modify existing tests.
 - Never commit with failing tests.
 - Use `git revert` (not patches) to recover from broken state.
+- Never let `claude-progress.txt` grow into a full transcript.
+- Never justify keeping low-quality code by citing earlier conversation context.
 
 ---
 
@@ -271,6 +328,7 @@ Observation: <what you saw in the browser>
 - Never write application code.
 - Never approve without running live Playwright test steps.
 - Never approve where any Functionality criterion failed.
+- When failing a sprint, cite generic scaffolding, duplicate logic, fake interactivity, or patch-on-patch code smell if they materially hurt craft or functionality.
 
 ---
 

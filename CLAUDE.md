@@ -56,6 +56,27 @@ Primary state lives in files, not conversation memory:
 
 ---
 
+## Context Hygiene
+
+This harness is designed to reduce long-run context pollution and AI patch drift.
+
+Core rules:
+
+- Re-read artifacts before routing instead of trusting prior conversation state.
+- Keep `claude-progress.txt` short and summary-oriented.
+- Prefer current repo reality over remembered intent.
+- Do not let Claude or Codex accumulate a second unofficial state machine in chat.
+
+`claude-progress.txt` should stay compact:
+
+- keep the latest project summary plus the latest 3 sprint entries
+- keep each sprint entry to 3 to 5 lines
+- summarize older entries instead of appending forever
+
+If artifacts and chat context disagree, treat artifacts as authoritative and resolve the mismatch explicitly.
+
+---
+
 ## Claude Subagents
 
 Subagents live in `.claude/agents/` in a consuming project, or are mirrored by
@@ -218,6 +239,9 @@ PY
 - Do not let Claude evaluate by code inspection alone when browser validation is required.
 - Keep generator logic in Codex, not in a Claude subagent.
 - Prefer simple, file-backed state over conversation-memory assumptions.
+- Keep `claude-progress.txt` compressed and rewrite it when it becomes a transcript.
+- When routing retries, favor the latest `eval-result-{N}.md` and current files over historical discussion.
+- Surface architecture drift explicitly instead of letting it accumulate across sprints.
 
 ---
 

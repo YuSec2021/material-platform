@@ -27,6 +27,14 @@ bash init.sh
 After `init.sh`, run one smoke test before touching any code. If the smoke test
 fails, diagnose and fix that first.
 
+Before implementation, re-read only the current sprint artifacts you need:
+
+- `planner-spec.json`
+- `sprint-contract.md`
+- latest relevant `eval-result-{N}.md` if retrying
+
+Do not rely on prior chat context as your source of truth.
+
 ---
 
 ## Sprint workflow
@@ -67,6 +75,8 @@ Implementation rules:
 - Follow the Visual Design Language from the spec for all UI work
 - Write tests alongside implementation
 - Never use inline styles in React components
+- Prefer small coherent edits over layering more code on top of weak code
+- Delete temporary scaffolding, dead branches, and debug helpers before commit
 
 ### Step 4 — Self-check
 
@@ -79,6 +89,13 @@ For each success criterion in `sprint-contract.md`:
 pytest -q
 git diff --stat
 ```
+
+Also do a cleanup pass:
+
+- remove dead code created during iteration
+- remove temporary logging and debug UI
+- collapse duplicate logic introduced by retries
+- make sure the final diff still matches the approved sprint scope
 
 ### Step 5 — Commit
 
@@ -94,6 +111,8 @@ echo "## Sprint <N> — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
 echo "Status: committed, pending Evaluator CHECK" >> claude-progress.txt
 echo "sprint=<N>" > eval-trigger.txt
 ```
+
+Keep `claude-progress.txt` compact by rewriting older entries into a short summary when needed.
 
 ---
 
@@ -125,3 +144,5 @@ echo "sprint=<N>-retry" > eval-trigger.txt
 - Remove or modify existing tests
 - Commit with failing tests
 - Introduce a second planning/state system outside the agreed harness artifacts
+- Turn `claude-progress.txt` into a verbose transcript
+- Preserve low-quality abstractions just because they exist in prior context
