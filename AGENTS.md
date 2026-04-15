@@ -56,8 +56,51 @@ State lives in files, never in conversation memory.
 | `sprint-contract.md` | Generator + Evaluator | Current sprint definition of done |
 | `eval-result-{N}.md` | Evaluator | Per-sprint scores and critique |
 | `eval-trigger.txt` | Generator | Signal file: `sprint=N` written after commit |
+| `run-state.json` | Orchestrator | Unattended mode state, retry counters, pause/escalation flags |
 | `init.sh` | Planner | Reproducible dev server startup |
 | `git history` | Generator | State recovery and audit trail |
+
+---
+
+## Unattended Mode
+
+This harness may run in an unattended loop, but only as a bounded, pauseable system.
+The goal is hands-off progress with explicit stop conditions, not infinite autonomous iteration.
+
+### Principles
+
+- Unattended mode must always be resumable from files alone.
+- Unattended mode must have explicit retry limits.
+- Unattended mode must pause on repeated failure, architecture drift, or environment instability.
+- Unattended mode must leave a clear machine-readable state for the next run.
+
+### Required unattended artifacts
+
+When unattended mode is enabled, maintain `run-state.json` with at least:
+
+- current mode: `planning`, `contract`, `implementing`, `checking`, `paused`, `complete`
+- current sprint number
+- retry count for the current sprint
+- last successful sprint
+- last failure reason
+- whether human escalation is required
+- timestamp of last orchestration run
+
+### Required stop conditions
+
+Unattended mode must pause instead of looping forever when any of these occurs:
+
+- the same sprint fails more than 2 times
+- `init.sh` fails repeatedly
+- the sprint contract must change materially after implementation has started
+- the evaluator identifies broad architecture drift instead of a local defect
+- required secrets, environment variables, or services are unavailable
+
+When pausing, write the reason into `run-state.json` and a short human-readable summary into `claude-progress.txt`.
+
+### Required completion condition
+
+Unattended mode stops cleanly when every sprint in `planner-spec.json` has a corresponding `SPRINT PASS`.
 
 ---
 
@@ -92,6 +135,7 @@ Treat `claude-progress.txt` as a rolling summary with a hard cap:
 - On each sprint, prefer small coherent changes over opportunistic extra refactors.
 - If a failed sprint requires broad unrelated cleanup, stop and surface that as a planning problem instead of smuggling it into the retry.
 - Do not create placeholder architecture, fake extensibility, or generic helper layers unless the current sprint truly needs them.
+- In unattended mode, prefer pausing with escalation over silently compounding low-quality code.
 
 ---
 
@@ -241,6 +285,7 @@ When invoked after a SPRINT FAIL:
 2. Fix only what the Evaluator cited.
 3. `git commit -m "fix(sprint-<N>): address evaluator failure"`
 4. `echo "sprint=<N>-retry" > eval-trigger.txt`
+5. Ensure `run-state.json` retry count is incremented by the orchestrator before the next unattended loop.
 
 ### Hard rules
 
@@ -252,6 +297,7 @@ When invoked after a SPRINT FAIL:
 - Use `git revert` (not patches) to recover from broken state.
 - Never let `claude-progress.txt` grow into a full transcript.
 - Never justify keeping low-quality code by citing earlier conversation context.
+- Never keep retrying indefinitely in unattended mode once pause conditions are met.
 
 ---
 
@@ -329,6 +375,7 @@ Observation: <what you saw in the browser>
 - Never approve without running live Playwright test steps.
 - Never approve where any Functionality criterion failed.
 - When failing a sprint, cite generic scaffolding, duplicate logic, fake interactivity, or patch-on-patch code smell if they materially hurt craft or functionality.
+- In unattended mode, prefer a clear `SPRINT FAIL` plus escalation signal over vague partial approval.
 
 ---
 

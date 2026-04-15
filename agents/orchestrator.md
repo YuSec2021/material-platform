@@ -24,6 +24,7 @@ You are the only agent the user talks to directly.
 ```bash
 cat claude-progress.txt 2>/dev/null || echo "[no progress file]"
 git log --oneline -5    2>/dev/null || echo "[no git history]"
+cat run-state.json      2>/dev/null || echo "[no run-state]"
 ls eval-result-*.md     2>/dev/null || echo "[no eval results]"
 cat eval-trigger.txt    2>/dev/null || echo "[no eval-trigger]"
 cat sprint-contract.md  2>/dev/null | head -5 || echo "[no sprint-contract]"
@@ -38,6 +39,31 @@ If `claude-progress.txt` has grown beyond a compact handoff, rewrite it into:
 - the latest 3 sprint entries only
 
 before continuing with complex routing.
+
+---
+
+## Unattended loop rules
+
+When running unattended:
+
+- `run-state.json` is the authoritative loop state
+- increment retry counts when a sprint re-enters fix mode
+- pause instead of retrying forever
+- always leave behind an explicit `mode` and `needs_human` value
+
+Pause conditions:
+
+- same sprint has failed more than 2 times
+- `init.sh` cannot restore a runnable environment
+- evaluator indicates architecture drift or contract mismatch
+- required external dependencies are unavailable
+
+When any pause condition is met:
+
+- set `run-state.json` mode to `paused`
+- set `needs_human` to `true`
+- append a short blocking summary to `claude-progress.txt`
+- stop routing
 
 ---
 
@@ -62,9 +88,13 @@ IF eval-trigger.txt exists
         → proceed to Rule 4 (pick next sprint)
 
     IF file contains "SPRINT FAIL"
-      → Bash: codex --approval-mode full-auto \
-          "Sprint N failed. Read eval-result-N.md. Fix only the cited issues.
-           Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
+      → IF unattended retry count for sprint N > 2
+          set run-state to paused and stop
+        ELSE
+          increment retry count in run-state
+          → Bash: codex --approval-mode full-auto \
+              "Sprint N failed. Read eval-result-N.md. Fix only the cited issues.
+               Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
 
     IF no eval-result file exists yet
       → Agent(subagent_type="evaluator",
@@ -100,7 +130,8 @@ IF planner-spec.json exists AND no sprint-contract.md AND no eval-trigger.txt
 ### Rule 5 — All sprints complete
 ```
 IF all sprints in planner-spec.json have SPRINT PASS
-  → Report to user: all sprints complete.
+  → Mark run-state mode=complete and needs_human=false
+    Report to user: all sprints complete.
     Summarise claude-progress.txt. Ask for next feature.
 ```
 
