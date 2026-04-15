@@ -65,6 +65,13 @@ When any pause condition is met:
 - append a short blocking summary to `claude-progress.txt`
 - stop routing
 
+When branch-per-sprint mode is enabled:
+
+- create or switch to the current sprint branch before implementation routing
+- keep retries on the same sprint branch
+- set `active_branch` in `run-state.json`
+- never route a new sprint onto the previous sprint branch
+
 ---
 
 ## Routing rules (evaluate in order, stop at first match)

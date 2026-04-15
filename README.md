@@ -61,6 +61,17 @@
 
 这意味着随着项目变长，系统依赖的是“可重建上下文”，不是“累积上下文”。
 
+### Sprint 分支设计
+
+当前推荐采用“每个 sprint 一条 Git 分支”的工作方式，而不是所有实现都直接堆在 `main` 上。
+
+这样做的好处：
+
+- 每个 sprint 的实现和重试历史彼此隔离
+- Evaluator 失败后更容易回溯和修复
+- `main` 只承载已经通过验收的进度
+- 无人值守模式可以明确记录当前活跃分支并从该分支恢复
+
 ### 主文档分层
 
 仓库目前分成三层说明：
@@ -183,6 +194,8 @@ Generator 在进入实现前，应该只重读：
 - `last_successful_sprint`
 - `last_failure_reason`
 - `needs_human`
+- `active_branch`
+- `base_branch`
 - `last_run_at`
 
 ### 推荐运行模式
@@ -220,9 +233,11 @@ Generator 在进入实现前，应该只重读：
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── skills
-│   └── harness-observability
+│   ├── harness-observability
 │       ├── SKILL.md
 │       └── references
+│   └── harness-branching
+│       └── SKILL.md
 └── agents
     ├── evaluator.md
     ├── generator.md
@@ -232,17 +247,19 @@ Generator 在进入实现前，应该只重读：
 
 ## 本地 Skill
 
-仓库当前包含一个面向运行治理的本地 skill：
+仓库当前包含两个面向运行治理的本地 skill：
 
 - [skills/harness-observability/SKILL.md](./skills/harness-observability/SKILL.md)
+- [skills/harness-branching/SKILL.md](./skills/harness-branching/SKILL.md)
 
-它负责把以下能力封装成可复用工作流：
+它们负责把以下能力封装成可复用工作流：
 
 - 无人值守运行状态维护
 - 结构化事件日志
 - Orchestrator 路由审计
 - 人工接管摘要
 - `claude-progress.txt` 压缩与上下文清洁
+- 每个 sprint 的分支创建、切换和合并前约束
 
 仓库里同时提供了最小模板：
 
@@ -399,6 +416,7 @@ cat eval-trigger.txt
 - 保证 `init.sh` 幂等，可重复执行
 - 让 `pytest -q` 和浏览器 smoke test 都可在本地稳定通过
 - 为每个 sprint 保持单次 clean commit
+- 为每个 sprint 使用单独的 Git 分支，推荐命名 `codex/sprint-<N>-<slug>`
 - 不让 Generator 和 Evaluator 修改彼此负责的产物
 - 让 Orchestrator 始终基于文件状态做判断，而不是基于对话记忆猜测
 - 定期压缩 `claude-progress.txt`，避免它重新变成长上下文容器
@@ -412,3 +430,7 @@ cat eval-trigger.txt
 - 当前仓库仍然是“规范仓库”，还没有配套的最小可运行示例项目。
 - 当前仓库只定义了无人值守模式的状态模型和规则，还没有附带真正的守护脚本或定时任务实现。
 - 如果你准备继续演进这个仓库，下一步最值得做的是补一套最小可运行示例项目，并让 `init.sh`、测试、验收链路和守护循环可以直接跑通。
+
+## 参考文献
+
+- [Anthropic Engineering: Harness Design for Long-Running Apps](https://www.anthropic.com/engineering/harness-design-long-running-apps)

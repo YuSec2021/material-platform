@@ -77,6 +77,8 @@ Recommended `run-state.json` fields:
 - `last_failure_reason`
 - `needs_human`
 - `last_run_at`
+- `active_branch`
+- `base_branch`
 
 Recommended pause conditions:
 
@@ -107,6 +109,30 @@ Core rules:
 - summarize older entries instead of appending forever
 
 If artifacts and chat context disagree, treat artifacts as authoritative and resolve the mismatch explicitly.
+
+---
+
+## Sprint Branching
+
+This harness works best with one Git branch per sprint.
+
+Recommended naming:
+
+- `codex/sprint-<N>-<short-slug>`
+
+Why this helps:
+
+- isolates each sprint's implementation and retry history
+- makes evaluator failures easier to inspect
+- keeps `main` cleaner
+- gives unattended mode an explicit active branch to resume from
+
+Recommended rules:
+
+- create or switch to the sprint branch before implementation starts
+- keep retries on the same sprint branch
+- track `active_branch` and `base_branch` in `run-state.json`
+- only merge a sprint branch after `SPRINT PASS`
 
 ---
 
@@ -276,6 +302,7 @@ PY
 - When routing retries, favor the latest `eval-result-{N}.md` and current files over historical discussion.
 - Surface architecture drift explicitly instead of letting it accumulate across sprints.
 - In unattended mode, route to `paused` instead of retrying forever once stop conditions are met.
+- Prefer one Git branch per sprint instead of implementing directly on `main`.
 
 ---
 

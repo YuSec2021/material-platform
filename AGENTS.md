@@ -85,6 +85,7 @@ When unattended mode is enabled, maintain `run-state.json` with at least:
 - last failure reason
 - whether human escalation is required
 - timestamp of last orchestration run
+- active sprint branch name
 
 ### Required stop conditions
 
@@ -136,6 +137,42 @@ Treat `claude-progress.txt` as a rolling summary with a hard cap:
 - If a failed sprint requires broad unrelated cleanup, stop and surface that as a planning problem instead of smuggling it into the retry.
 - Do not create placeholder architecture, fake extensibility, or generic helper layers unless the current sprint truly needs them.
 - In unattended mode, prefer pausing with escalation over silently compounding low-quality code.
+
+---
+
+## Git Branching Rules
+
+This harness uses one Git branch per sprint.
+
+### Why
+
+- isolate each sprint's implementation and retry history
+- make evaluator failures easier to inspect and revert
+- keep `main` or trunk clean until a sprint is accepted
+- make unattended recovery safer because the active branch is explicit
+
+### Branch policy
+
+- Create a fresh branch before implementation begins for each sprint.
+- Branch naming should be stable and machine-friendly:
+  - preferred: `codex/sprint-<N>-<short-slug>`
+  - acceptable fallback: `codex/sprint-<N>`
+- Contract drafting may happen on the sprint branch or on the current working branch, but implementation commits must happen on the sprint branch.
+- Retries for a failed sprint stay on the same sprint branch.
+- A new sprint always gets a new branch; never reuse the previous sprint branch.
+
+### Branch state tracking
+
+When branch-per-sprint mode is used, `run-state.json` should also track:
+
+- `active_branch`
+- `base_branch`
+
+### Merge expectation
+
+- `main` should represent accepted progress only.
+- Merge or fast-forward a sprint branch only after its evaluator result is `SPRINT PASS`.
+- If a sprint is abandoned or re-planned, keep the branch for audit or close it explicitly; do not silently reuse it for a different sprint.
 
 ---
 
@@ -204,6 +241,12 @@ Before writing any code, re-read only the artifacts needed for the current sprin
 
 Do not treat old chat context as authoritative.
 
+Before implementation starts, ensure you are on the correct sprint branch:
+
+- if the sprint branch does not exist, create it from the base branch
+- if it exists, switch to it
+- verify `git branch --show-current` matches the sprint branch recorded in `run-state.json` when unattended mode is active
+
 ### Sprint workflow
 
 **Step 1 — Identify current sprint**
@@ -240,6 +283,7 @@ Then stop. The Orchestrator routes this to Evaluator for contract review.
 - Never use inline styles in React/frontend components.
 - Do not carry forward abstractions, helpers, or TODO scaffolding unless they are required by the current sprint.
 - Prefer editing or deleting weak code over wrapping it in another layer.
+- Do not implement a sprint on `main` when branch-per-sprint mode is enabled.
 
 **Step 4 — Self-check**
 
@@ -265,6 +309,8 @@ Also do one context hygiene pass before commit:
 git add -A
 git commit -m "feat(sprint-<N>): <imperative description, 72 chars max>"
 ```
+
+Confirm the commit is on the active sprint branch before signaling the evaluator.
 
 **Step 6 — Signal Evaluator**
 
@@ -298,6 +344,8 @@ When invoked after a SPRINT FAIL:
 - Never let `claude-progress.txt` grow into a full transcript.
 - Never justify keeping low-quality code by citing earlier conversation context.
 - Never keep retrying indefinitely in unattended mode once pause conditions are met.
+- Never start a new sprint on the previous sprint's branch.
+- Never merge an unapproved sprint branch into `main`.
 
 ---
 
