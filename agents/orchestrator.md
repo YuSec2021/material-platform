@@ -35,10 +35,16 @@ Do not route based on remembered conversation state alone.
 
 If `claude-progress.txt` has grown beyond a compact handoff, rewrite it into:
 
-- one short project summary
-- the latest 3 sprint entries only
+- one short project summary (≤ 5 lines)
+- the latest 3 sprint entries only (3–5 lines each)
 
-before continuing with complex routing.
+**Compression is mandatory (not optional) when any of the following is true:**
+
+- The file contains entries for > 3 sprints, OR
+- The file exceeds 60 lines, OR
+- The file contains full stack traces, test output dumps, or multi-paragraph narratives
+
+Rewrite the file before continuing with complex routing.
 
 ---
 
@@ -57,6 +63,8 @@ Pause conditions:
 - `init.sh` cannot restore a runnable environment
 - evaluator indicates architecture drift or contract mismatch
 - required external dependencies are unavailable
+- Playwright MCP is unavailable (eval-result contains "Playwright MCP unavailable")
+  — do NOT increment `retry_count` for this; it is an environment failure, not a code failure
 
 When any pause condition is met:
 
@@ -98,8 +106,10 @@ IF eval-trigger.txt exists
       → IF unattended retry count for sprint N > 2
           set run-state to paused and stop
         ELSE
-          increment retry count in run-state
-          → Bash: codex --approval-mode full-auto \
+          # Orchestrator owns retry_count: increment in run-state.json and update
+          # last_run_at BEFORE invoking Codex. Codex only fixes code and re-commits.
+          increment run-state.json: retry_count += 1, last_run_at = now()
+          → Bash: codex -a never exec --skip-git-repo-check \
               "Sprint N failed. Read eval-result-N.md. Fix only the cited issues.
                Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
 
@@ -112,7 +122,7 @@ IF eval-trigger.txt exists
 ```
 IF sprint-contract.md exists AND eval-trigger.txt absent
   → IF sprint-contract.md contains "CONTRACT APPROVED"
-      → Bash: codex --approval-mode full-auto \
+      → Bash: codex -a never exec --skip-git-repo-check \
           "sprint-contract.md is approved. Implement Sprint N.
            Commit and write eval-trigger.txt. Follow AGENTS.md Generator rules."
     ELSE
@@ -129,7 +139,7 @@ IF planner-spec.json exists AND no sprint-contract.md AND no eval-trigger.txt
     IF all sprints have SPRINT PASS → go to Rule 5
 
     ELSE
-      → Bash: codex --approval-mode full-auto \
+      → Bash: codex -a never exec --skip-git-repo-check \
           "Read planner-spec.json. Propose sprint-contract.md for Sprint N.
            Follow AGENTS.md Generator rules. Stop after writing the file."
 ```

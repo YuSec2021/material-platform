@@ -46,7 +46,7 @@ no corresponding `eval-result-{N}.md` containing `SPRINT PASS`.
 
 ### Step 2 — Propose sprint contract
 
-If `sprint-contract.md` does not exist, write it in this structure:
+If `sprint-contract.md` does not exist, write it following the schema below.
 
 ```markdown
 ## Sprint <N>: <title from planner-spec.json>
@@ -55,19 +55,44 @@ If `sprint-contract.md` does not exist, write it in this structure:
 - <feature from spec>
 
 ### Success criteria (browser-verifiable)
-- [ ] <observable user-facing behavior>
-
-### Evaluator test steps
-1. Navigate to <exact URL>
-2. Perform <specific action>
-3. Assert <exact expected state>
+- [ ] <observable user-facing behavior — testable without reading source code>
+  Evaluator steps:
+  1. Navigate to <exact URL, e.g. http://localhost:3000/path>
+  2. Perform <specific action, e.g. click "Submit" button>
+  3. Assert <exact expected state, e.g. toast "Saved!" is visible>
 ```
+
+**Contract schema constraints — the Evaluator will reject a contract that violates these:**
+
+- Each success criterion must describe an observable end-user state, not an
+  implementation detail.
+- Each success criterion must include its own `Evaluator steps:` block.
+- Each success criterion must have **≥ 2** mapped Evaluator test steps in that block.
+- Every navigation step must include a full URL path.
+- Every assertion step must be verifiable in a browser without reading source code.
+- The contract must have **≥ 1** success criterion and **≥ 3** total test steps.
 
 Then stop and wait for Evaluator approval.
 
 ### Step 3 — Implement
 
 Only begin coding after `sprint-contract.md` contains `CONTRACT APPROVED`.
+
+**Contract integrity check** — run this before writing any code:
+
+```bash
+# Record a checksum of the approved contract.
+sha256sum sprint-contract.md > sprint-contract.md.sha256
+
+# Later, if you need to verify it hasn't changed mid-session:
+sha256sum --check sprint-contract.md.sha256 || {
+  echo "ERROR: sprint-contract.md was modified after approval. Stop and escalate."
+  exit 1
+}
+```
+
+If the contract checksum fails mid-implementation, stop, do not commit, and
+surface the change to the Orchestrator for re-routing.
 
 Implementation rules:
 
@@ -106,10 +131,17 @@ git commit -m "feat(sprint-<N>): <imperative description>"
 
 ### Step 6 — Signal Evaluator
 
+Write `eval-trigger.txt` **before** updating `claude-progress.txt`. The trigger
+is the authoritative signal; if the progress-log write is interrupted the
+Orchestrator can still discover the committed sprint.
+
 ```bash
+# 1. Trigger first — Orchestrator polls this file.
+echo "sprint=<N>" > eval-trigger.txt
+
+# 2. Update progress log after trigger is on disk.
 echo "## Sprint <N> — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
 echo "Status: committed, pending Evaluator CHECK" >> claude-progress.txt
-echo "sprint=<N>" > eval-trigger.txt
 ```
 
 Keep `claude-progress.txt` compact by rewriting older entries into a short summary when needed.
@@ -128,10 +160,12 @@ When a sprint fails:
 git commit -m "fix(sprint-<N>): address evaluator failure"
 ```
 
-4. Update the trigger:
+4. Write `eval-trigger.txt` before updating `claude-progress.txt`:
 
 ```bash
 echo "sprint=<N>-retry" > eval-trigger.txt
+echo "## Sprint <N> retry — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
+echo "Status: fix committed, pending re-CHECK" >> claude-progress.txt
 ```
 
 ---
@@ -146,3 +180,4 @@ echo "sprint=<N>-retry" > eval-trigger.txt
 - Introduce a second planning/state system outside the agreed harness artifacts
 - Turn `claude-progress.txt` into a verbose transcript
 - Preserve low-quality abstractions just because they exist in prior context
+- Write to `run-state.json` — retry counts and mode transitions are owned by the Orchestrator

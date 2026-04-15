@@ -87,6 +87,23 @@ If `bash init.sh` fails or the server is unreachable:
 - Write `SPRINT FAIL` with reason: `Dev server failed to start`
 - Do not attempt browser evaluation
 
+### Scope verification (run before browser evaluation)
+
+```bash
+git diff "$(git merge-base HEAD main)"..HEAD --stat
+```
+
+Review the full sprint branch diff against the sprint contract.
+
+- If changed files and functions are contained within what the sprint contract
+  describes, continue to browser evaluation.
+- If the diff includes files or behaviour **not mentioned in the sprint contract**
+  (i.e. Generator added unrequested features or refactors), note this in the
+  eval result under a **Scope violations** section and deduct from the Craft
+  score. Opportunistic extras are a craft defect.
+- Scope violations do not automatically fail a sprint, but repeated or large
+  violations should push Craft below threshold.
+
 ### Evaluation process
 
 Execute each Evaluator test step from `sprint-contract.md` using Playwright MCP.
@@ -158,6 +175,31 @@ Observation: {what you saw in the browser}
 - If a route or user flow is unreachable, that criterion fails
 - Score Originality conservatively
 - Functionality below threshold always means `SPRINT FAIL`
+
+### Architecture drift — definition and pause signal
+
+Architecture drift is a condition where the failure **cannot be resolved by
+fixing the implementation alone**. Use the following objective criteria to
+distinguish drift from an ordinary local defect:
+
+| Condition | Classification |
+|-----------|---------------|
+| A fix requires changing `sprint-contract.md` or `planner-spec.json` | Architecture drift |
+| A fix would require rewriting > 50 % of the committed code | Architecture drift |
+| The contracted tech stack or dependencies are insufficient for the criterion | Architecture drift |
+| The Visual Design Language in `planner-spec.json` conflicts with what the criterion requires | Architecture drift |
+| A single criterion has failed the same root cause across 2+ retries without improvement | Architecture drift |
+| A fix can be made in < 30 lines touching < 3 files | Local defect — **not** drift |
+
+When you classify a failure as architecture drift, write in `eval-result-{N}.md`:
+
+```
+ARCHITECTURE DRIFT DETECTED
+Reason: <one sentence stating which condition above was met>
+Recommended action: <re-plan sprint / revise contract / escalate to human>
+```
+
+This signals the Orchestrator to pause instead of retrying.
 
 ---
 

@@ -86,12 +86,36 @@ Always include:
 
 Write `init.sh` as the reproducible startup entrypoint for the full project.
 
-Rules:
+### Functional rules
 
-- It must start the app stack needed for Generator smoke tests and Evaluator checks
-- It should be safe to run repeatedly
-- It should prefer explicit commands over hidden assumptions
-- It may bootstrap dependencies if required by the project
+- It must start the app stack needed for Generator smoke tests and Evaluator checks.
+- It must be **idempotent** — safe to run repeatedly without side-effects
+  (killing any already-running server processes before starting new ones,
+  skipping dependency installs if nothing changed, etc.).
+- Prefer explicit commands over hidden assumptions.
+- It may bootstrap dependencies if required by the project.
+
+### Failure isolation rules
+
+- Each major step (dependency install, database migration, server start) must
+  be a separate command with its own exit-code check.
+- The script must exit with a non-zero code if any required step fails.
+- Do not silently swallow errors with `|| true` unless the failure is genuinely
+  non-blocking.
+- Wrap long-running steps with a timeout:
+  ```bash
+  timeout 60 npm run build || { echo "Build timed out"; exit 1; }
+  ```
+
+### Idempotency contract
+
+`init.sh` is considered idempotent when:
+1. Running it twice in a row produces the same observable state.
+2. Running it on a half-started environment recovers cleanly.
+3. It does not duplicate database records, duplicate background processes,
+   or leave port conflicts between runs.
+
+### Failure documentation
 
 If the stack is not fully known yet, create the most reasonable scaffold and
 document assumptions in `claude-progress.txt`.

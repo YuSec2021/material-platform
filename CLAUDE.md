@@ -19,6 +19,24 @@ Generator is always Codex CLI. Never invoke `Agent(subagent_type="generator")`.
 
 ---
 
+## Hard Environment Requirements
+
+| Requirement | Minimum version |
+|-------------|----------------|
+| Node.js | 18 LTS |
+| npm | 9 |
+| Python | 3.9 |
+| pytest | 7 |
+| Git | 2.30 |
+| Bash | 4 |
+| Codex CLI | latest stable |
+| `OPENAI_API_KEY` env var | — |
+| Playwright MCP | pinned (see Playwright MCP section) |
+
+These are harness-level requirements. Not every item should be enforced by
+`init.sh`: app startup should validate runtime dependencies, while Codex auth
+and Playwright availability should be checked only by the phases that need them.
+
 ## Codex Prerequisites
 
 ```bash
@@ -197,14 +215,29 @@ Recommended MCP config:
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest"],
+      "args": ["@playwright/mcp@0.0.29"],
       "description": "Live browser automation for Evaluator"
     }
   }
 }
 ```
 
+Pin the version (`@0.0.29` or latest known-good release) to prevent `@latest`
+from pulling in a breaking change mid-project. Update the pin deliberately after
+verifying the new version is compatible.
+
 Configure this in `.claude/settings.json` or pass it via `--mcp-config`.
+
+### Playwright unavailability — pause protocol
+
+If the Evaluator cannot reach Playwright MCP tools (e.g. the MCP server is not
+running, or `npx @playwright/mcp` fails to start), the Evaluator must:
+
+1. Write `SPRINT FAIL` with reason: `Playwright MCP unavailable — cannot run live CHECK`.
+2. The Orchestrator treats this as a pause condition (not a retry-eligible failure).
+3. Set `run-state.json` → `mode: "paused"`, `needs_human: true`,
+   `last_failure_reason: "Playwright MCP unavailable"`.
+4. Do not increment `retry_count` for this class of failure.
 
 ---
 

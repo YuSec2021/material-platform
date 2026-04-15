@@ -74,6 +74,18 @@ The goal is hands-off progress with explicit stop conditions, not infinite auton
 - Unattended mode must pause on repeated failure, architecture drift, or environment instability.
 - Unattended mode must leave a clear machine-readable state for the next run.
 
+### Ownership of run-state.json
+
+`run-state.json` is owned exclusively by the Orchestrator.
+
+- The Orchestrator increments `retry_count` **before** invoking Codex for a retry.
+  If Codex then fails to commit, the count may be one ahead — this is intentional and
+  conservative (better to pause one iteration early than to loop forever).
+- The Orchestrator updates `last_run_at` on every routing decision.
+- The Orchestrator sets `mode`, `needs_human`, `active_branch`, and `last_failure_reason`.
+- Generator (Codex) must never write to `run-state.json`.
+- Evaluator must never write to `run-state.json`.
+
 ### Required unattended artifacts
 
 When unattended mode is enabled, maintain `run-state.json` with at least:
@@ -129,6 +141,18 @@ Treat `claude-progress.txt` as a rolling summary with a hard cap:
   - key files or behavior changed
   - blockers or evaluator-required follow-up
 - Delete or compress older entries instead of appending forever.
+
+**Compression trigger — mandatory, not optional:**
+
+Compression must happen whenever any of the following is true:
+
+- The file contains entries for > 3 sprints.
+- The file exceeds 60 lines total.
+- The file contains stack traces, test output dumps, or multi-paragraph narratives.
+
+Any agent that appends to `claude-progress.txt` must check these conditions
+**after** appending and compress the file immediately if any threshold is exceeded.
+The Orchestrator also checks at session start and compresses before routing.
 
 ### Anti-slop rules
 
@@ -194,6 +218,15 @@ When branch-per-sprint mode is used, `run-state.json` should also track:
    - Spacing unit, border radius, mood adjective
 6. Identify opportunities for AI-native features.
 7. Write `init.sh` — starts the full dev stack (frontend + backend).
+   `init.sh` must satisfy the following contract:
+   - **Idempotent**: safe to run twice in a row without side effects (kill existing
+     processes before starting, skip already-installed dependencies, etc.).
+   - **Fail-fast**: each major step (install, migrate, build, serve) must check its
+     exit code and abort with a non-zero exit if it fails.
+   - **Timeout-wrapped** for any step that could hang:
+     `timeout 60 <command> || { echo "step timed out"; exit 1; }`
+   - **No silent swallowing**: do not use `|| true` unless the failure is provably
+     non-blocking.
 8. Write `planner-spec.json`:
 
 ```json
@@ -256,7 +289,8 @@ containing "SPRINT PASS". That is the current sprint.
 
 **Step 2 — Propose sprint contract** (if `sprint-contract.md` absent)
 
-Write `sprint-contract.md`:
+Write `sprint-contract.md` following the schema below. The Evaluator enforces
+these constraints during contract review and will reject a contract that violates them.
 
 ```markdown
 ## Sprint <N>: <title from planner-spec.json>
@@ -265,17 +299,39 @@ Write `sprint-contract.md`:
 - <feature from spec>
 
 ### Success criteria (browser-verifiable)
-- [ ] <observable user-facing behavior>
-
-### Evaluator test steps
-1. Navigate to <exact URL>
-2. Perform <specific action>
-3. Assert <exact expected state>
+- [ ] <observable user-facing behavior — must be testable without reading source code>
+  Evaluator steps:
+  1. Navigate to <exact URL, e.g. http://localhost:3000/path>
+  2. Perform <specific action, e.g. click "Submit" button>
+  3. Assert <exact expected state, e.g. toast "Saved!" is visible>
 ```
+
+**Schema constraints (Evaluator will reject on violation):**
+
+- Every success criterion must be written as an observable end-user action or
+  visible state, not an implementation detail (e.g. "User sees a confirmation
+  toast after submit" ✓ — "handleSubmit sets state.ok = true" ✗).
+- Every success criterion must include its own `Evaluator steps:` block directly beneath it.
+- Every success criterion must have **at least 2 Evaluator test steps** in that block.
+- Every test step that requires navigation must include a full URL path
+  (e.g. `http://localhost:3000/settings` — not just "go to settings").
+- A test step must be executable without reading source code or inspecting the DOM.
+- The contract must have **at least 1** success criterion.
+- Total test steps across all criteria must be **≥ 3**.
 
 Then stop. The Orchestrator routes this to Evaluator for contract review.
 
 **Step 3 — Implement** (only after `sprint-contract.md` contains "CONTRACT APPROVED")
+
+Before writing any code, record a contract checksum:
+
+```bash
+sha256sum sprint-contract.md > sprint-contract.md.sha256
+```
+
+If `sprint-contract.md` is modified after this point (checksum mismatch), stop
+immediately and surface the change to the Orchestrator — do not commit code
+against a modified contract.
 
 - Read `planner-spec.json` for VDL and architecture constraints before writing code.
 - Follow the Visual Design Language for all UI work.
@@ -314,10 +370,17 @@ Confirm the commit is on the active sprint branch before signaling the evaluator
 
 **Step 6 — Signal Evaluator**
 
+Write `eval-trigger.txt` **before** updating `claude-progress.txt`. This ordering
+ensures the Orchestrator can always discover a committed sprint even if the
+progress-log write is interrupted.
+
 ```bash
+# 1. Write the trigger first — this is the authoritative signal to Orchestrator.
+echo "sprint=<N>" > eval-trigger.txt
+
+# 2. Update the progress log after the trigger is safely on disk.
 echo "## Sprint <N> — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
 echo "Status: committed, pending Evaluator CHECK" >> claude-progress.txt
-echo "sprint=<N>" > eval-trigger.txt
 ```
 
 When updating `claude-progress.txt`, keep the file compact per the policy above.
@@ -330,8 +393,14 @@ When invoked after a SPRINT FAIL:
 1. Read `eval-result-{N}.md` fully.
 2. Fix only what the Evaluator cited.
 3. `git commit -m "fix(sprint-<N>): address evaluator failure"`
-4. `echo "sprint=<N>-retry" > eval-trigger.txt`
-5. Ensure `run-state.json` retry count is incremented by the orchestrator before the next unattended loop.
+4. Write `eval-trigger.txt` **before** updating `claude-progress.txt`:
+   ```bash
+   echo "sprint=<N>-retry" > eval-trigger.txt
+   echo "## Sprint <N> retry — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
+   echo "Status: fix committed, pending re-CHECK" >> claude-progress.txt
+   ```
+5. `retry_count` is owned by the Orchestrator. Generator must not modify `run-state.json`.
+   The Orchestrator increments `retry_count` before invoking this Codex session.
 
 ### Hard rules
 
@@ -346,6 +415,7 @@ When invoked after a SPRINT FAIL:
 - Never keep retrying indefinitely in unattended mode once pause conditions are met.
 - Never start a new sprint on the previous sprint's branch.
 - Never merge an unapproved sprint branch into `main`.
+- Never write to `run-state.json` — that file is owned by the Orchestrator.
 
 ---
 
@@ -377,6 +447,17 @@ bash init.sh
 ```
 
 If `init.sh` fails → write SPRINT FAIL: "Dev server failed to start". Do not evaluate.
+
+**Scope verification** (before browser evaluation):
+
+```bash
+git diff "$(git merge-base HEAD main)"..HEAD --stat
+```
+
+Compare the full sprint branch diff against the sprint contract. Flag any files
+or behaviour outside the contracted scope as a Craft defect in
+`eval-result-{N}.md`. Scope violations do not auto-fail a sprint but reduce the
+Craft score.
 
 Navigate the live app with Playwright MCP. Execute each test step. Screenshot evidence.
 
@@ -415,6 +496,28 @@ Observation: <what you saw in the browser>
 
 ## Required fixes (if SPRINT FAIL)
 1. <concrete fix>
+```
+
+### Architecture drift — definition and pause signal
+
+Architecture drift is a failure condition that **cannot be resolved by fixing
+the implementation alone**. Objective criteria for classification:
+
+| Condition | Classification |
+|-----------|---------------|
+| Fix requires changing `sprint-contract.md` or `planner-spec.json` | Architecture drift |
+| Fix would require rewriting > 50 % of the committed code | Architecture drift |
+| Tech stack or dependencies are insufficient for the criterion | Architecture drift |
+| VDL in `planner-spec.json` conflicts with what the criterion requires | Architecture drift |
+| Same root cause has failed across 2+ retries without improvement | Architecture drift |
+| Fix can be made in < 30 lines touching < 3 files | Local defect — **not** drift |
+
+When drift is detected, write in `eval-result-{N}.md`:
+
+```
+ARCHITECTURE DRIFT DETECTED
+Reason: <one sentence stating which condition above was met>
+Recommended action: <re-plan sprint / revise contract / escalate to human>
 ```
 
 ### Hard rules
@@ -475,6 +578,45 @@ codex -a never exec  --skip-git-repo-check \
 
 ---
 
+## Hard Environment Requirements
+
+The harness will not function correctly if any of the following are missing.
+`init.sh` should validate these at startup and exit non-zero if a requirement
+is not met.
+
+### Runtime requirements for `init.sh`
+
+These are the requirements `init.sh` may enforce because they are needed to
+start or verify the application stack itself:
+
+| Requirement | Minimum version | Purpose |
+|-------------|----------------|---------|
+| Node.js | 18 LTS | frontend/backend runtime and builds |
+| npm | 9 | package management |
+| Python | 3.9 | unit testing with pytest |
+| pytest | 7 | unit test runner |
+| Git | 2.30 | version control, sprint branches |
+| Bash | 4 | `init.sh`, hooks |
+
+Recommended validation snippet for `init.sh`:
+
+```bash
+for cmd in node npm python3 pytest git bash; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required tool: $cmd"; exit 1; }
+done
+```
+
+### Agent-specific requirements
+
+These may be required by Generator or Evaluator, but must not be enforced by
+`init.sh` because not every harness phase needs all of them:
+
+| Requirement | Minimum version | Purpose |
+|-------------|----------------|---------|
+| Codex CLI (`@openai/codex`) | latest stable | Generator runtime |
+| OpenAI API key (`OPENAI_API_KEY`) | — | Codex authentication |
+| Playwright MCP (`@playwright/mcp`) | pinned (see CLAUDE.md) | Evaluator live CHECK |
+
 ## Tech Stack
 
 ```
@@ -483,6 +625,28 @@ VCS       : Git — one clean commit per sprint
 ```
 
 ---
+
+## Test Strategy Alignment
+
+Two independent test layers run in this harness. Understanding their relationship
+prevents misattributing failures.
+
+| Layer | Owner | Runner | Scope | Characteristics |
+|-------|-------|--------|-------|----------------|
+| Unit tests | Generator | `pytest -q` | Functions, components, logic | Fast, deterministic, no browser |
+| E2E tests | Evaluator | Playwright MCP | Full user flows in live browser | Slower, may be flaky on env issues |
+
+**Failure attribution rules:**
+
+- Generator's unit tests pass **and** Evaluator's E2E tests fail
+  → Likely an environment/integration issue (missing env var, wrong port, DB not seeded).
+  Diagnose `init.sh` and integration layer before blaming the code.
+- Generator's unit tests fail → Do not signal Evaluator. Fix before committing.
+- Evaluator's E2E tests fail repeatedly on the same criterion after code fixes
+  → Treat as architecture drift candidate; check the criteria above.
+
+Generator must never skip unit tests to pass Evaluator faster. Evaluator must
+never accept passing unit tests as a substitute for live browser verification.
 
 ## Build & Test Commands
 

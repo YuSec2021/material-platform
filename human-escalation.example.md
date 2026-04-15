@@ -20,8 +20,17 @@
 - `claude-progress.txt`
 - `orchestrator-log.ndjson`
 
-## Recommended Action
+## Required Human Decision
 
-- Decide whether Sprint 3 should be re-planned instead of retried.
-- If the contract scope changed, replace or revise `sprint-contract.md` before resuming.
-- Reset `retry_count` only after human review confirms the next action.
+**Choose exactly one action before resuming. The system will not proceed until
+`run-state.json` reflects a deliberate choice.**
+
+| Option | Action required |
+|--------|----------------|
+| **RETRY** | Reset `retry_count` to 0 in `run-state.json`, set `mode` to `"checking"`. Resume unattended loop. Use only if you believe the last fix attempt addressed the root cause. |
+| **REPLAN** | Revise `sprint-contract.md` or `planner-spec.json` to reflect new scope. Delete `eval-trigger.txt`. Set `mode` to `"contract"` and `retry_count` to 0. |
+| **SKIP** | Mark sprint as skipped: add `"skipped": true` to the sprint entry in `planner-spec.json`. Set `mode` to `"planning"` and `retry_count` to 0. |
+| **ABANDON** | Halt the project. Set `mode` to `"paused"`, `needs_human` to `true`, add a note explaining why. |
+
+After choosing, set `needs_human` to `false` in `run-state.json` to allow the
+next unattended run to proceed.
