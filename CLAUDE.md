@@ -52,7 +52,40 @@ Primary state lives in files, not conversation memory:
 - `sprint-contract.md`
 - `eval-result-{N}.md`
 - `eval-trigger.txt`
+- `run-state.json`
 - `init.sh`
+
+---
+
+## Unattended Mode
+
+This harness supports unattended operation only as a bounded control loop.
+
+What that means:
+
+- each run starts from file state, not chat history
+- retry counts are tracked explicitly
+- repeated failure causes pause, not endless looping
+- the system leaves behind enough state for clean resume
+
+Recommended `run-state.json` fields:
+
+- `mode`
+- `current_sprint`
+- `retry_count`
+- `last_successful_sprint`
+- `last_failure_reason`
+- `needs_human`
+- `last_run_at`
+
+Recommended pause conditions:
+
+- same sprint fails more than 2 times
+- `init.sh` cannot recover the environment
+- evaluator indicates architecture drift instead of a local fix
+- required credentials or services are missing
+
+When pausing, update `run-state.json` and write a short summary to `claude-progress.txt`.
 
 ---
 
@@ -242,6 +275,7 @@ PY
 - Keep `claude-progress.txt` compressed and rewrite it when it becomes a transcript.
 - When routing retries, favor the latest `eval-result-{N}.md` and current files over historical discussion.
 - Surface architecture drift explicitly instead of letting it accumulate across sprints.
+- In unattended mode, route to `paused` instead of retrying forever once stop conditions are met.
 
 ---
 
