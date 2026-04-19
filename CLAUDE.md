@@ -30,7 +30,7 @@ Generator is always Codex CLI. Never invoke `Agent(subagent_type="generator")`.
 | Git | 2.30 |
 | Bash | 4 |
 | Codex CLI | latest stable |
-| `OPENAI_API_KEY` env var | — |
+| Codex authenticated session or `OPENAI_API_KEY` | — |
 | Playwright MCP | pinned (see Playwright MCP section) |
 
 These are harness-level requirements. Not every item should be enforced by
@@ -40,10 +40,12 @@ and Playwright availability should be checked only by the phases that need them.
 ## Codex Prerequisites
 
 ```bash
-npm install -g @openai/codex
-export OPENAI_API_KEY=sk-...
 codex --version
 ```
+
+If Codex is already authenticated in the local environment, no extra
+`OPENAI_API_KEY` export is required. Use `OPENAI_API_KEY` only in plain CLI
+setups where Codex has not already been logged in.
 
 ---
 

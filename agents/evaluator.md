@@ -41,15 +41,21 @@ For each item in `sprint-contract.md`:
 
 ### Response format
 
-If approved, append this text directly to `sprint-contract.md`:
+If approved, **append** this block to the **end** of `sprint-contract.md`
+(after all existing content). Do not insert it in the middle of the document —
+the Orchestrator detects approval by scanning only the final section.
 
 ```text
+---
 CONTRACT APPROVED
 
 Sprint: {N}
 Approved criteria: {count}
 Notes: {optional calibration notes}
 ```
+
+The `---` separator ensures the approval block is unambiguous and cannot be
+confused with example text or criterion descriptions in the body of the contract.
 
 If changes are required:
 
@@ -78,9 +84,14 @@ Do not proceed to CHECK until the contract is approved.
 
 ```bash
 cat sprint-contract.md
-cat eval-trigger.txt
+cat eval-trigger.txt   # may contain "sprint=N" (initial) or "sprint=N-retry" (retry)
 bash init.sh
 ```
+
+`eval-trigger.txt` may contain either `sprint=N` or `sprint=N-retry`. In both
+cases, N is the sprint number and you write (or overwrite) `eval-result-N.md`.
+The `-retry` suffix is metadata for the Orchestrator only; it does not affect
+your evaluation process or output file name.
 
 If `bash init.sh` fails or the server is unreachable:
 
@@ -90,10 +101,22 @@ If `bash init.sh` fails or the server is unreachable:
 ### Scope verification (run before browser evaluation)
 
 ```bash
-git diff "$(git merge-base HEAD main)"..HEAD --stat
+# Safe diff: falls back to HEAD~1 if merge-base with main is unavailable
+# (e.g. first sprint in a fresh repo, or non-standard base branch name).
+BASE=$(git merge-base HEAD main 2>/dev/null \
+       || git merge-base HEAD master 2>/dev/null \
+       || git rev-parse HEAD~1 2>/dev/null \
+       || echo "")
+if [ -n "$BASE" ]; then
+  git diff "$BASE"..HEAD --stat
+else
+  echo "[scope verification skipped — no base ref available; first commit]"
+fi
 ```
 
 Review the full sprint branch diff against the sprint contract.
+If the fallback triggers (first commit), skip scope verification and note it
+in the eval result as "Scope verification: N/A — initial commit".
 
 - If changed files and functions are contained within what the sprint contract
   describes, continue to browser evaluation.
@@ -137,9 +160,27 @@ For each success criterion:
 - Do routes, actions, and state changes work as promised?
 - This is a hard gate: score below 8 always fails the sprint
 
+Scoring anchors to reduce subjectivity:
+
+| Score | Meaning |
+|-------|---------|
+| 10/10 | All criteria pass cleanly, no edge-case failures observed |
+| 9/10 | All criteria pass; minor cosmetic or non-blocking edge case |
+| 8/10 | All criteria pass; one observable but non-blocking defect |
+| 7/10 | One criterion partially fails (feature present but broken flow) — **SPRINT FAIL** |
+| 5–6/10 | Multiple criteria fail or a core user flow is broken — **SPRINT FAIL** |
+| 1–4/10 | Feature not implemented or completely non-functional — **SPRINT FAIL** |
+
+A criterion "passes" only if every step in its test sequence succeeds without
+manual workarounds. A criterion "partially fails" if the feature is present
+but requires workarounds or produces errors.
+
 ### Output file
 
-Write `eval-result-{N}.md` in this structure:
+Write `eval-result-{N}.md` in this structure. **Always overwrite the same file
+for both initial checks and retries** — there is no `eval-result-{N}-retry.md`.
+The eval-trigger.txt suffix (`sprint=N-retry`) signals a retry to the
+Orchestrator, but the Evaluator's output file name never changes.
 
 ```markdown
 # Eval Result — Sprint {N}

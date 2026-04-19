@@ -30,6 +30,34 @@ cat eval-trigger.txt    2>/dev/null || echo "[no eval-trigger]"
 cat sprint-contract.md  2>/dev/null | head -5 || echo "[no sprint-contract]"
 ```
 
+**Branch reconciliation** — if `run-state.json` contains an `active_branch`,
+verify it matches the actual Git state before routing:
+
+```bash
+ACTUAL=$(git branch --show-current 2>/dev/null || echo "")
+RECORDED=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path('run-state.json').read_text()); print(d.get('active_branch',''))" 2>/dev/null || echo "")
+if [ -n "$RECORDED" ] && [ "$ACTUAL" != "$RECORDED" ]; then
+  echo "BRANCH MISMATCH: run-state says '$RECORDED' but current branch is '$ACTUAL'"
+  echo "Resolve before routing: either switch to '$RECORDED' or update run-state.json."
+  exit 1
+fi
+```
+
+If a mismatch is found, stop and surface it to the user. Do not route until the
+discrepancy is explicitly resolved — either by switching to the recorded branch
+or by updating `run-state.json` to reflect the deliberate branch change.
+
+**needs_human guard** — after reading `run-state.json`, check this before any routing:
+
+```bash
+NEEDS_HUMAN=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path('run-state.json').read_text()); print(d.get('needs_human', False))" 2>/dev/null || echo "false")
+if [ "$NEEDS_HUMAN" = "True" ] || [ "$NEEDS_HUMAN" = "true" ]; then
+  echo "run-state.json has needs_human=true — human action required before resuming."
+  cat human-escalation.md 2>/dev/null || echo "[no escalation file found]"
+  exit 1
+fi
+```
+
 Treat these artifact reads as the authoritative context snapshot for the session.
 Do not route based on remembered conversation state alone.
 
@@ -56,6 +84,20 @@ When running unattended:
 - increment retry counts when a sprint re-enters fix mode
 - pause instead of retrying forever
 - always leave behind an explicit `mode` and `needs_human` value
+
+### `needs_human` lifecycle
+
+| Condition | Who sets it | Value |
+|-----------|-------------|-------|
+| Any pause condition met | Orchestrator | `true` |
+| Human has reviewed and chosen an action (RETRY/REPLAN/SKIP/ABANDON) | Human (manually in run-state.json) | `false` |
+| All sprints complete | Orchestrator (Rule 5) | `false` |
+| Sprint PASS, proceeding to next sprint | Orchestrator | remains `false` |
+
+**Orchestrator must never automatically reset `needs_human` from `true` to `false`.**
+Only a human edit to `run-state.json` or a clean project completion may clear it.
+On every startup, if `needs_human` is `true`, stop and surface the escalation
+instead of routing further.
 
 Pause conditions:
 
@@ -94,8 +136,12 @@ IF planner-spec.json does not exist
 ### Rule 2 — eval-trigger.txt exists (sprint committed, needs CHECK)
 ```
 IF eval-trigger.txt exists
-  → N = content of eval-trigger.txt (e.g. "sprint=3" → N=3)
-    Read eval-result-{N}.md (or eval-result-{N}-retry.md)
+  → Parse N from eval-trigger.txt:
+      "sprint=3"       → N=3  (initial attempt)
+      "sprint=3-retry" → N=3  (retry; same result file — see naming rule below)
+    Read eval-result-{N}.md
+    # Naming rule: Evaluator ALWAYS writes/overwrites eval-result-{N}.md.
+    # There is no eval-result-{N}-retry.md. Retries overwrite the same file.
 
     IF file contains "SPRINT PASS"
       → rm eval-trigger.txt
@@ -103,8 +149,24 @@ IF eval-trigger.txt exists
         → proceed to Rule 4 (pick next sprint)
 
     IF file contains "SPRINT FAIL"
-      → IF unattended retry count for sprint N > 2
+      → # Check for environment-class failures first — these do NOT consume retry budget.
+        IF file contains "Playwright MCP unavailable"
+          set run-state.json: mode="paused", needs_human=true,
+            last_failure_reason="Playwright MCP unavailable"
+          # Do NOT increment retry_count — this is an env failure, not a code failure.
+          append to claude-progress.txt: "PAUSED: Playwright MCP unavailable — fix env, then resume"
+          stop routing
+
+        ELSE IF file contains "ARCHITECTURE DRIFT DETECTED"
+          set run-state.json: mode="paused", needs_human=true,
+            last_failure_reason="architecture drift — see eval-result-N.md"
+          # Do NOT increment retry_count for drift; a human decision is needed first.
+          append to claude-progress.txt: "PAUSED: architecture drift detected in Sprint N"
+          stop routing
+
+        ELSE IF unattended retry count for sprint N > 2
           set run-state to paused and stop
+
         ELSE
           # Orchestrator owns retry_count: increment in run-state.json and update
           # last_run_at BEFORE invoking Codex. Codex only fixes code and re-commits.
@@ -118,10 +180,25 @@ IF eval-trigger.txt exists
               prompt="Run CHECK for Sprint N. Read sprint-contract.md and eval-trigger.txt.")
 ```
 
+### Rule 2.5 — Contract tampered mid-sprint (Generator aborted)
+```
+IF sprint-contract.md exists AND eval-trigger.txt absent
+   AND sprint-contract.md contains "CONTRACT APPROVED"
+   AND a file named "contract-tampered.flag" exists
+  → Read contract-tampered.flag for the reason.
+    Set run-state.json: mode="paused", needs_human=true,
+      last_failure_reason="sprint-contract.md modified after approval"
+    Append to claude-progress.txt: "PAUSED: contract tampered mid-sprint — human review required"
+    Delete contract-tampered.flag
+    Stop routing.
+    # Human must decide: REPLAN (revise contract + reset) or RETRY (restore original contract).
+```
+
 ### Rule 3 — sprint-contract.md exists, no eval-trigger (contract phase)
 ```
 IF sprint-contract.md exists AND eval-trigger.txt absent
-  → IF sprint-contract.md contains "CONTRACT APPROVED"
+  → # Detect approval via the separator-prefixed block (prevents false positives).
+    IF sprint-contract.md tail contains the pattern "^---\nCONTRACT APPROVED"
       → Bash: codex -a never exec --skip-git-repo-check \
           "sprint-contract.md is approved. Implement Sprint N.
            Commit and write eval-trigger.txt. Follow AGENTS.md Generator rules."
@@ -130,13 +207,42 @@ IF sprint-contract.md exists AND eval-trigger.txt absent
               prompt="Review sprint-contract.md. Approve or return required changes.")
 ```
 
-### Rule 4 — Ready for next sprint
+### Rule 4 — bug-report.md exists (dedicated bugfix flow)
+```
+IF bug-report.md exists AND no sprint-contract.md AND no eval-trigger.txt
+  → Bash: codex -a never exec --skip-git-repo-check \
+      "Read planner-spec.json and bug-report.md. Propose sprint-contract.md for a bugfix sprint.
+       Limit scope to the reported regression and stop after writing the file."
+```
+
+### Rule 5 — change-request.md exists (iteration flow)
+```
+IF change-request.md exists AND no sprint-contract.md AND no eval-trigger.txt
+  → Read `Type:`
+
+    IF Type is bugfix
+      → Bash: codex -a never exec --skip-git-repo-check \
+          "Read planner-spec.json and change-request.md. Propose sprint-contract.md for a bugfix sprint."
+
+    IF Type is minor_feature
+      → Bash: codex -a never exec --skip-git-repo-check \
+          "Read planner-spec.json and change-request.md. Propose sprint-contract.md for a bounded iteration sprint."
+
+    IF Type is major_feature or replan
+      → Agent(subagent_type="planner",
+              prompt="Read planner-spec.json and change-request.md. Revise the product plan before coding.")
+
+    ELSE
+      → pause for human because the change request is malformed
+```
+
+### Rule 6 — Ready for next sprint
 ```
 IF planner-spec.json exists AND no sprint-contract.md AND no eval-trigger.txt
   → Find N: lowest sprint ID in planner-spec.json
     with no eval-result-{N}.md containing "SPRINT PASS"
 
-    IF all sprints have SPRINT PASS → go to Rule 5
+    IF all sprints have SPRINT PASS → go to Rule 7
 
     ELSE
       → Bash: codex -a never exec --skip-git-repo-check \
@@ -144,7 +250,7 @@ IF planner-spec.json exists AND no sprint-contract.md AND no eval-trigger.txt
            Follow AGENTS.md Generator rules. Stop after writing the file."
 ```
 
-### Rule 5 — All sprints complete
+### Rule 7 — All sprints complete
 ```
 IF all sprints in planner-spec.json have SPRINT PASS
   → Mark run-state mode=complete and needs_human=false

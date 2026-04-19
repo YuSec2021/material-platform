@@ -24,8 +24,24 @@ git log --oneline -10 2>/dev/null || echo "[no git history]"
 bash init.sh
 ```
 
-After `init.sh`, run one smoke test before touching any code. If the smoke test
-fails, diagnose and fix that first.
+After `init.sh`, run the smoke test before touching any code. If it fails,
+diagnose and fix the environment first — do not begin implementation.
+
+**Smoke test definition** (in order; stop at first failure):
+
+```bash
+# 1. Unit tests pass (fast check that prior sprints haven't regressed)
+pytest -q --tb=short
+
+# 2. Dev server is reachable (confirms init.sh actually started the stack)
+curl -sf http://localhost:3000 > /dev/null \
+  || curl -sf http://localhost:8000 > /dev/null \
+  || { echo "Dev server not reachable — check init.sh"; exit 1; }
+```
+
+If the project has no frontend server, replace step 2 with an appropriate
+health-check for the actual stack (e.g. `curl -sf http://localhost:8000/health`)
+and document the URL in `planner-spec.json` under `dev_server_url`.
 
 Before implementation, re-read only the current sprint artifacts you need:
 
@@ -44,9 +60,28 @@ Do not rely on prior chat context as your source of truth.
 Read `planner-spec.json`. The current sprint is the lowest-numbered sprint with
 no corresponding `eval-result-{N}.md` containing `SPRINT PASS`.
 
-### Step 2 — Propose sprint contract
+### Step 2 — Propose sprint contract or detect state
 
-If `sprint-contract.md` does not exist, write it following the schema below.
+```bash
+# Explicit state detection — do not proceed until one branch matches.
+if [ ! -f sprint-contract.md ]; then
+  echo "No contract found → write sprint-contract.md, then stop."
+  ACTION="propose"
+elif grep -q "CONTRACT APPROVED" sprint-contract.md 2>/dev/null; then
+  echo "CONTRACT APPROVED found → proceed to Step 3 (implement)."
+  ACTION="implement"
+else
+  echo "Contract exists but not yet approved → stop and wait for Evaluator."
+  ACTION="wait"
+fi
+```
+
+If `ACTION=propose`: write `sprint-contract.md` following the schema below,
+then stop. Do not implement before "CONTRACT APPROVED" is present.
+
+If `ACTION=wait`: exit immediately. Orchestrator will route to Evaluator.
+
+If `ACTION=implement`: skip to Step 3.
 
 ```markdown
 ## Sprint <N>: <title from planner-spec.json>
@@ -91,8 +126,17 @@ sha256sum --check sprint-contract.md.sha256 || {
 }
 ```
 
-If the contract checksum fails mid-implementation, stop, do not commit, and
-surface the change to the Orchestrator for re-routing.
+If the contract checksum fails mid-implementation, stop immediately — do **not**
+commit. Signal the Orchestrator by writing a flag file:
+
+```bash
+echo "sprint-contract.md modified after approval at $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  > contract-tampered.flag
+```
+
+Then exit. The Orchestrator will detect this flag on its next routing pass
+(Rule 2.5) and pause for human review. Never attempt to work around a tampered
+contract by re-reading the new version.
 
 Implementation rules:
 
@@ -124,7 +168,11 @@ Also do a cleanup pass:
 
 ### Step 5 — Commit
 
+Remove the contract checksum file before committing — it is a session artifact,
+not part of the project source:
+
 ```bash
+rm -f sprint-contract.md.sha256
 git add -A
 git commit -m "feat(sprint-<N>): <imperative description>"
 ```
