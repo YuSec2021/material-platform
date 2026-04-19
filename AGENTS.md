@@ -52,6 +52,8 @@ State lives in files, never in conversation memory.
 | File | Owner | Purpose |
 |------|-------|---------|
 | `planner-spec.json` | Planner | Source of truth — product spec and sprint list |
+| `change-request.md` | User + Orchestrator | Classifies post-launch work as `bugfix`, `minor_feature`, `major_feature`, or `replan` |
+| `bug-report.md` | User + Orchestrator | Dedicated regression/defect intake used to create tightly scoped bugfix sprints |
 | `claude-progress.txt` | Generator | Cross-session handoff log |
 | `sprint-contract.md` | Generator + Evaluator | Current sprint definition of done |
 | `eval-result-{N}.md` | Evaluator | Per-sprint scores and critique |
@@ -59,6 +61,17 @@ State lives in files, never in conversation memory.
 | `run-state.json` | Orchestrator | Unattended mode state, retry counters, pause/escalation flags |
 | `init.sh` | Planner | Reproducible dev server startup |
 | `git history` | Generator | State recovery and audit trail |
+
+After the initial plan exists, all new work must be classified before Generator sees it:
+
+- use `bug-report.md` for a defect or regression
+- use `change-request.md` for a product iteration request
+- classify `change-request.md` as one of:
+  - `bugfix`
+  - `minor_feature`
+  - `major_feature`
+  - `replan`
+- never send a bugfix or iteration request straight to Generator without first creating one of these artifacts
 
 ---
 
@@ -614,7 +627,7 @@ These may be required by Generator or Evaluator, but must not be enforced by
 | Requirement | Minimum version | Purpose |
 |-------------|----------------|---------|
 | Codex CLI (`@openai/codex`) | latest stable | Generator runtime |
-| OpenAI API key (`OPENAI_API_KEY`) | — | Codex authentication |
+| Codex authenticated session or OpenAI API key | — | Generator authentication; in desktop or already-authenticated Codex environments, `OPENAI_API_KEY` is not required |
 | Playwright MCP (`@playwright/mcp`) | pinned (see CLAUDE.md) | Evaluator live CHECK |
 
 ## Tech Stack

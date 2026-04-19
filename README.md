@@ -29,6 +29,10 @@
 
 - `planner-spec.json`
   Planner 产出的产品规格、视觉语言、技术栈和 sprint 列表
+- `change-request.md`
+  已有产品上的版本迭代请求，先分类再决定是进入小迭代 sprint 还是先 replan
+- `bug-report.md`
+  专门用于回归和 defect 的输入文件，进入独立 bugfix sprint
 - `sprint-contract.md`
   当前 sprint 的可验收合同，必须先经 Evaluator 批准
 - `eval-result-{N}.md`
@@ -47,6 +51,32 @@
   跨会话进度日志与交接记录
 - `init.sh`
   启动完整开发环境的统一入口
+
+## 强制入口
+
+如果希望这套流程被真正执行，而不是只靠提示词约定，请把下面这个入口当成唯一入口：
+
+```bash
+./orchestrate.sh --project-dir /absolute/path/to/project --user-prompt "一句产品需求"
+```
+
+或直接运行：
+
+```bash
+python3 scripts/orchestrate.py --project-dir /absolute/path/to/project --user-prompt "一句产品需求"
+```
+
+它会先读取磁盘状态，再决定下一步：
+
+- 没有 `planner-spec.json` -> 只能进入 Planner
+- 有 `bug-report.md` -> 先进入 bugfix sprint contract
+- 有 `change-request.md` 且 `Type: minor_feature` -> 先进入 iteration sprint contract
+- 有 `change-request.md` 且 `Type: major_feature` / `replan` -> 先让 Planner revise spec
+- 有 `sprint-contract.md` 但没有 `CONTRACT APPROVED` -> 只能进入 Evaluator 做 contract review
+- 有 `eval-trigger.txt` -> 只能进入 Evaluator 做 live CHECK
+- 只有 contract 已批准时，才会给出或执行 Generator 的实现命令
+
+这一步的目的就是防止“主 Agent 直接开始实现代码”。
 
 ### 上下文清洁设计
 
@@ -90,6 +120,7 @@
 
 - 这是一个“流程/协议仓库”，目前只有文档，没有业务代码目录。
 - 当前唯一工作流是以 `planner-spec.json` 为中心的 sprint 循环。
+- 现在支持三类入口：新产品规划、bugfix sprint、版本迭代 sprint。
 - `AGENTS.md`、`CLAUDE.md` 和 `agents/*.md` 已经统一到同一套状态模型。
 - 当前推荐把 `AGENTS.md` 作为规范源头，把 `CLAUDE.md` 作为 Claude 运行手册，把 `agents/*.md` 作为角色细则。
 
@@ -117,6 +148,8 @@
 关键状态规则：
 
 - 没有 `planner-spec.json`，先规划
+- 有 `bug-report.md`，先走 bugfix contract
+- 有 `change-request.md`，先按 `Type` 做 bugfix / iteration / replan 分流
 - 有 `sprint-contract.md` 但未批准，先做 contract review
 - 有 `eval-trigger.txt`，先做 live CHECK
 - 只有 `eval-result-{N}.md` 出现 `SPRINT PASS`，该 sprint 才完成
@@ -285,9 +318,11 @@ Generator 在进入实现前，应该只重读：
 
 ```bash
 npm install -g @openai/codex
-export OPENAI_API_KEY=sk-...
 codex --version
 ```
+
+如果 Codex 在本地环境里已经完成认证，则不需要额外设置 `OPENAI_API_KEY`。
+只有在纯 CLI 且尚未登录的环境里，才需要再提供 `OPENAI_API_KEY`。
 
 如果需要 Playwright MCP，可按 `CLAUDE.md` 中的配置接入：
 
@@ -324,12 +359,31 @@ codex --version
 Orchestrator 是入口。它每次都先读文件状态，再决定走哪条路径：
 
 - 没有 `planner-spec.json` -> 调 Planner
+- 发现 `bug-report.md` -> 调 Codex 先生成 bugfix sprint contract
+- 发现 `change-request.md` -> 先按 `Type` 路由到 bugfix / minor iteration / replan
 - 发现待审核的 `sprint-contract.md` -> 调 Evaluator 做 contract review
 - 发现 `eval-trigger.txt` -> 调 Evaluator 做 live CHECK
 - 其他情况 -> 调 Codex 进入下一轮 sprint
 
 如果 `claude-progress.txt` 已经变成长日志，Orchestrator 应该先把它压缩回摘要形式，再继续路由。
 如果启用了无人值守模式，Orchestrator 还需要同步读写 `run-state.json`，并在超出重试阈值时主动暂停。
+
+仓库里现在附带了一个最小可执行版本：
+
+- [scripts/orchestrate.py](./scripts/orchestrate.py)
+- [orchestrate.sh](./orchestrate.sh)
+- [change-request.example.md](./change-request.example.md)
+- [bug-report.example.md](./bug-report.example.md)
+- [tests/test_orchestrate.py](./tests/test_orchestrate.py)
+
+它会：
+
+- 读取 `planner-spec.json` / `change-request.md` / `bug-report.md` / `sprint-contract.md` / `eval-trigger.txt`
+- 计算当前 sprint
+- 更新 `run-state.json`
+- 追加 `orchestrator-log.ndjson` 与 `run-events.ndjson`
+- 在缺少 contract approval 时阻止直接进入实现阶段
+- 在 bugfix 和 iteration 请求进入时，先生成对应 contract，而不是直接编码
 
 ### 4. Planner 阶段
 
