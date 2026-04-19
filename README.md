@@ -1,4 +1,4 @@
-# Claude Code + Codex Harness Engineering
+# autonomous-sprint-harness
 
 一个面向产品迭代的多代理协作框架：Claude 负责规划、路由和验收，Codex 负责真实代码实现。仓库当前主要包含流程规范、角色定义和运行约束，本身不是业务应用代码仓库。
 
@@ -314,7 +314,7 @@ Generator 在进入实现前，应该只重读：
 - Playwright MCP
 - 一个真实可启动的项目目录
 
-`CLAUDE.md` 中给出的 Codex 安装方式：
+`CLAUDE.md` 中给出的 Codex 最低准备方式：
 
 ```bash
 npm install -g @openai/codex
@@ -331,11 +331,13 @@ codex --version
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest"]
+      "args": ["@playwright/mcp@0.0.29"]
     }
   }
 }
 ```
+
+推荐固定 Playwright MCP 版本，而不是使用 `@latest`，避免长周期项目在中途被上游更新打断。
 
 ### 2. 初始化一个真实项目
 
