@@ -265,7 +265,7 @@ When branch-per-sprint mode is used, `run-state.json` should also track:
 
 > Codex reads this file directly. The instructions below are Codex's operating rules.
 
-**Invoked by**: Orchestrator via `codex -a never exec --skip-git-repo-check "..."`
+**Invoked by**: Orchestrator via `codex exec --full-auto --skip-git-repo-check "..."`
 
 **Output**: committed code + updated `claude-progress.txt` + `eval-trigger.txt`.
 
@@ -567,15 +567,15 @@ Orchestrator calls Codex via Bash. Standard invocation patterns:
 
 ```bash
 # Propose sprint contract
-codex -a never exec  --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
 
 # Implement after contract approved
-codex -a never exec  --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
 
 # Fix after SPRINT FAIL
-codex -a never exec  --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
 ```
 

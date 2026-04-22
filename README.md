@@ -401,17 +401,21 @@ Outputs:
 
 The Orchestrator invokes the Generator through Codex CLI. The Generator is not a Claude subagent; it is an external Codex process.
 
+`scripts/orchestrate.py` now performs Codex version-aware command selection:
+- `>= 0.120.0` uses `codex exec --full-auto --skip-git-repo-check`
+- older versions fall back to `codex -a never exec --skip-git-repo-check`
+
 Typical invocation:
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
 ```
 
 After contract approval, implementation begins:
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
 ```
 
@@ -449,7 +453,7 @@ Only `SPRINT PASS` completes the sprint.
 If the Evaluator fails a sprint, the Generator may only address the issues explicitly named in `eval-result-{N}.md`:
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+codex exec --full-auto --skip-git-repo-check \
   "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
 ```
 

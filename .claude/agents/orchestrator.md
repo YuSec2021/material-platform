@@ -171,7 +171,7 @@ IF eval-trigger.txt exists
           # Orchestrator owns retry_count: increment in run-state.json and update
           # last_run_at BEFORE invoking Codex. Codex only fixes code and re-commits.
           increment run-state.json: retry_count += 1, last_run_at = now()
-          → Bash: codex -a never exec --skip-git-repo-check \
+          → Bash: codex exec --full-auto --skip-git-repo-check \
               "Sprint N failed. Read eval-result-N.md. Fix only the cited issues.
                Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
 
@@ -199,7 +199,7 @@ IF sprint-contract.md exists AND eval-trigger.txt absent
 IF sprint-contract.md exists AND eval-trigger.txt absent
   → # Detect approval via the separator-prefixed block (prevents false positives).
     IF sprint-contract.md tail contains the pattern "^---\nCONTRACT APPROVED"
-      → Bash: codex -a never exec --skip-git-repo-check \
+      → Bash: codex exec --full-auto --skip-git-repo-check \
           "sprint-contract.md is approved. Implement Sprint N.
            Commit and write eval-trigger.txt. Follow AGENTS.md Generator rules."
     ELSE
@@ -210,7 +210,7 @@ IF sprint-contract.md exists AND eval-trigger.txt absent
 ### Rule 4 — bug-report.md exists (dedicated bugfix flow)
 ```
 IF bug-report.md exists AND no sprint-contract.md AND no eval-trigger.txt
-  → Bash: codex -a never exec --skip-git-repo-check \
+  → Bash: codex exec --full-auto --skip-git-repo-check \
       "Read planner-spec.json and bug-report.md. Propose sprint-contract.md for a bugfix sprint.
        Limit scope to the reported regression and stop after writing the file."
 ```
@@ -221,11 +221,11 @@ IF change-request.md exists AND no sprint-contract.md AND no eval-trigger.txt
   → Read `Type:`
 
     IF Type is bugfix
-      → Bash: codex -a never exec --skip-git-repo-check \
+      → Bash: codex exec --full-auto --skip-git-repo-check \
           "Read planner-spec.json and change-request.md. Propose sprint-contract.md for a bugfix sprint."
 
     IF Type is minor_feature
-      → Bash: codex -a never exec --skip-git-repo-check \
+      → Bash: codex exec --full-auto --skip-git-repo-check \
           "Read planner-spec.json and change-request.md. Propose sprint-contract.md for a bounded iteration sprint."
 
     IF Type is major_feature or replan
@@ -245,7 +245,7 @@ IF planner-spec.json exists AND no sprint-contract.md AND no eval-trigger.txt
     IF all sprints have SPRINT PASS → go to Rule 7
 
     ELSE
-      → Bash: codex -a never exec --skip-git-repo-check \
+      → Bash: codex exec --full-auto --skip-git-repo-check \
           "Read planner-spec.json. Propose sprint-contract.md for Sprint N.
            Follow AGENTS.md Generator rules. Stop after writing the file."
 ```

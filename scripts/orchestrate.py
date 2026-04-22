@@ -19,6 +19,7 @@ RETRY_LIMIT = 2
 SPRINT_PASS = "SPRINT PASS"
 SPRINT_FAIL = "SPRINT FAIL"
 CONTRACT_APPROVED = "CONTRACT APPROVED"
+CODEX_EXEC_MODERN_MIN_VERSION = (0, 120, 0)
 
 
 def iso_now() -> str:
@@ -75,8 +76,34 @@ def eval_sprint_id(path: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def parse_semver(version: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version)
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def codex_version_tuple() -> tuple[int, int, int] | None:
+    try:
+        result = subprocess.run(
+            ["codex", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_semver(f"{result.stdout}\n{result.stderr}")
+
+
 def codex_command(prompt: str) -> str:
-    return f"codex -a never exec --skip-git-repo-check {shlex.quote(prompt)}"
+    quoted_prompt = shlex.quote(prompt)
+    version = codex_version_tuple()
+    if version is not None and version >= CODEX_EXEC_MODERN_MIN_VERSION:
+        return f"codex exec --full-auto --skip-git-repo-check {quoted_prompt}"
+    return f"codex -a never exec --skip-git-repo-check {quoted_prompt}"
 
 
 def parse_key(text: str, key: str) -> str | None:

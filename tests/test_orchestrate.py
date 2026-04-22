@@ -94,3 +94,36 @@ def test_pauses_when_change_request_type_is_invalid(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert payload["rule"] == "change_request_invalid"
     assert payload["action"] == "pause_for_human"
+
+
+def test_codex_command_uses_modern_exec_when_version_is_new(monkeypatch) -> None:
+    from scripts import orchestrate
+
+    monkeypatch.setattr(orchestrate, "codex_version_tuple", lambda: (0, 120, 0))
+    command = orchestrate.codex_command("Implement sprint")
+    assert command.startswith("codex exec --full-auto --skip-git-repo-check ")
+
+
+def test_codex_command_uses_legacy_exec_when_version_is_old(monkeypatch) -> None:
+    from scripts import orchestrate
+
+    monkeypatch.setattr(orchestrate, "codex_version_tuple", lambda: (0, 119, 9))
+    command = orchestrate.codex_command("Implement sprint")
+    assert command.startswith("codex -a never exec --skip-git-repo-check ")
+
+
+def test_codex_command_uses_legacy_exec_when_version_is_unknown(monkeypatch) -> None:
+    from scripts import orchestrate
+
+    monkeypatch.setattr(orchestrate, "codex_version_tuple", lambda: None)
+    command = orchestrate.codex_command("Implement sprint")
+    assert command.startswith("codex -a never exec --skip-git-repo-check ")
+
+
+def test_codex_command_quotes_prompt(monkeypatch) -> None:
+    from scripts import orchestrate
+
+    monkeypatch.setattr(orchestrate, "codex_version_tuple", lambda: (0, 120, 0))
+    command = orchestrate.codex_command("Implement 'sprint' && rm -rf /")
+    assert "Implement 'sprint' && rm -rf /" not in command
+    assert "codex exec --full-auto --skip-git-repo-check " in command

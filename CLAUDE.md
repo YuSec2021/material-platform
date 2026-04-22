@@ -11,7 +11,7 @@
 | Agent | Runtime | Invocation |
 | --- | --- | --- |
 | Planner | Claude Code subagent | `Agent(subagent_type="planner", ...)` |
-| Generator | Codex CLI | `Bash("codex -a never exec --skip-git-repo-check '...'")` |
+| Generator | Codex CLI | `Bash("codex exec --full-auto --skip-git-repo-check '...'")` |
 | Evaluator | Claude Code subagent | `Agent(subagent_type="evaluator", ...)` |
 | Orchestrator | Claude Code main agent or subagent | entry point |
 
@@ -192,17 +192,20 @@ Generator is not a Claude subagent. Claude only invokes Codex with explicit Bash
 Typical Codex invocations:
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+# Codex >= 0.120.0
+codex exec --full-auto --skip-git-repo-check \
   "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
 ```
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+# Codex >= 0.120.0
+codex exec --full-auto --skip-git-repo-check \
   "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
 ```
 
 ```bash
-codex -a never exec --skip-git-repo-check \
+# Codex >= 0.120.0
+codex exec --full-auto --skip-git-repo-check \
   "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
 ```
 
