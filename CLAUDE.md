@@ -193,19 +193,28 @@ Typical Codex invocations:
 
 ```bash
 # Codex >= 0.120.0
-codex exec --full-auto --skip-git-repo-check \
+# disk-full-read-access: lets git read ~/.gitconfig and ~/.ssh for commit/push
+# shell_environment_policy.inherit=all: passes GIT_* env vars through the sandbox
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
 ```
 
 ```bash
-# Codex >= 0.120.0
-codex exec --full-auto --skip-git-repo-check \
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
 ```
 
 ```bash
-# Codex >= 0.120.0
-codex exec --full-auto --skip-git-repo-check \
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
 ```
 

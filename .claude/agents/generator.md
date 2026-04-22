@@ -190,6 +190,19 @@ echo "sprint=<N>" > eval-trigger.txt
 # 2. Update progress log after trigger is on disk.
 echo "## Sprint <N> — $(date '+%Y-%m-%d %H:%M')" >> claude-progress.txt
 echo "Status: committed, pending Evaluator CHECK" >> claude-progress.txt
+
+# 3. Post-append compression check — mandatory per AGENTS.md policy.
+LINE_COUNT=$(wc -l < claude-progress.txt)
+SPRINT_COUNT=$(grep -c "^## Sprint " claude-progress.txt 2>/dev/null || echo 0)
+if [ "$LINE_COUNT" -gt 60 ] || [ "$SPRINT_COUNT" -gt 3 ]; then
+  python3 -c "
+import sys; sys.path.insert(0, '$(pwd)/scripts')
+from orchestrate import compress_progress
+from pathlib import Path
+compress_progress(Path('claude-progress.txt'))
+print('claude-progress.txt compressed.')
+"
+fi
 ```
 
 Keep `claude-progress.txt` compact by rewriting older entries into a short summary when needed.

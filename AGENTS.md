@@ -567,15 +567,24 @@ Orchestrator calls Codex via Bash. Standard invocation patterns:
 
 ```bash
 # Propose sprint contract
-codex exec --full-auto --skip-git-repo-check \
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
 
 # Implement after contract approved
-codex exec --full-auto --skip-git-repo-check \
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
 
 # Fix after SPRINT FAIL
-codex exec --full-auto --skip-git-repo-check \
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
   "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
 ```
 

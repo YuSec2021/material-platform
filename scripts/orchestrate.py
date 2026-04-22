@@ -39,6 +39,29 @@ def append_ndjson(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _has_multi_paragraph_narrative(lines: list[str]) -> bool:
+    """Detect multi-paragraph narrative: 3+ consecutive non-empty lines separated by blank lines."""
+    paragraphs = 0
+    in_paragraph = False
+    for line in lines:
+        if line.strip():
+            if not in_paragraph:
+                paragraphs += 1
+                in_paragraph = True
+        else:
+            in_paragraph = False
+    return paragraphs > 6
+
+
+def _extract_project_summary(lines: list[str], sprint_headers: list[int]) -> list[str]:
+    """Return lines before the first sprint header as the project summary (max 5 non-empty)."""
+    boundary = sprint_headers[0] if sprint_headers else len(lines)
+    preamble = [line for line in lines[:boundary] if line.strip()]
+    if preamble:
+        return preamble[:5]
+    return ["Project summary compressed by orchestrator."]
+
+
 def compress_progress(path: Path) -> None:
     if not path.exists():
         return
@@ -48,13 +71,12 @@ def compress_progress(path: Path) -> None:
         len(lines) > 60
         or len(sprint_headers) > 3
         or any("Traceback" in line or "FAILED" in line for line in lines)
+        or _has_multi_paragraph_narrative(lines)
     )
     if not should_compress:
         return
 
-    summary = [line for line in lines if line.strip()][:5]
-    if not summary:
-        summary = ["Project summary compressed by orchestrator."]
+    summary = _extract_project_summary(lines, sprint_headers)
 
     entries: list[str] = []
     for header_index in sprint_headers[-3:]:
@@ -102,7 +124,15 @@ def codex_command(prompt: str) -> str:
     quoted_prompt = shlex.quote(prompt)
     version = codex_version_tuple()
     if version is not None and version >= CODEX_EXEC_MODERN_MIN_VERSION:
-        return f"codex exec --full-auto --skip-git-repo-check {quoted_prompt}"
+        # --full-auto = --sandbox workspace-write (writes restricted to workspace).
+        # disk-full-read-access lets git read ~/.gitconfig and ~/.ssh so commits work.
+        # shell_environment_policy.inherit=all passes GIT_* env vars through the sandbox.
+        return (
+            "codex exec --full-auto"
+            " -c 'sandbox_permissions=[\"disk-full-read-access\"]'"
+            " -c 'shell_environment_policy.inherit=all'"
+            f" --skip-git-repo-check {quoted_prompt}"
+        )
     return f"codex -a never exec --skip-git-repo-check {quoted_prompt}"
 
 
