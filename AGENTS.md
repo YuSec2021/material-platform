@@ -55,9 +55,10 @@ State lives in files, never in conversation memory.
 | `change-request.md` | User + Orchestrator | Classifies post-launch work as `bugfix`, `minor_feature`, `major_feature`, or `replan` |
 | `bug-report.md` | User + Orchestrator | Dedicated regression/defect intake used to create tightly scoped bugfix sprints |
 | `claude-progress.txt` | Generator | Cross-session handoff log |
-| `sprint-contract.md` | Generator + Evaluator | Current sprint definition of done |
+| `sprint-contract.md` | Generator + Evaluator | Current sprint definition of done — **deleted by Orchestrator after SPRINT PASS** |
 | `eval-result-{N}.md` | Evaluator | Per-sprint scores and critique |
-| `eval-trigger.txt` | Generator | Signal file: `sprint=N` written after commit |
+| `eval-trigger.txt` | Generator | Signal file: `sprint=N` written after commit — **must match the fenced sprint** |
+| `sprint-fence.json` | Orchestrator | Written before Codex starts implementing; records expected sprint + base git commit. Any eval-trigger.txt that names a different sprint triggers an immediate boundary-violation pause. |
 | `run-state.json` | Orchestrator | Unattended mode state, retry counters, pause/escalation flags |
 | `init.sh` | Planner | Reproducible dev server startup |
 | `git history` | Generator | State recovery and audit trail |
@@ -429,6 +430,9 @@ When invoked after a SPRINT FAIL:
 - Never start a new sprint on the previous sprint's branch.
 - Never merge an unapproved sprint branch into `main`.
 - Never write to `run-state.json` — that file is owned by the Orchestrator.
+- **Stop immediately after writing `eval-trigger.txt`.** Do not read `planner-spec.json` to find the next sprint. Do not create a new branch. Do not implement any subsequent sprint. The Orchestrator is the only entity permitted to advance the sprint counter.
+- **Write `eval-trigger.txt` with the exact content `sprint=N`** where N is the sprint you just implemented. Never write a different sprint number.
+- **Respect `sprint-fence.json`.** If this file exists, its `sprint` field is the only sprint you are authorised to implement in this session. Stop without writing code if you are being asked to implement a different sprint.
 
 ---
 
@@ -540,6 +544,45 @@ Recommended action: <re-plan sprint / revise contract / escalate to human>
 - Never approve where any Functionality criterion failed.
 - When failing a sprint, cite generic scaffolding, duplicate logic, fake interactivity, or patch-on-patch code smell if they materially hurt craft or functionality.
 - In unattended mode, prefer a clear `SPRINT FAIL` plus escalation signal over vague partial approval.
+
+---
+
+## Sprint Gate Architecture
+
+Every sprint must pass through all four phases in order.  No phase may be skipped.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Sprint N Gate                                          │
+│                                                         │
+│  1. CONTRACT    Generator proposes sprint-contract.md   │
+│       │         Orchestrator routes to Evaluator        │
+│       ▼                                                 │
+│  2. APPROVAL    Evaluator writes CONTRACT APPROVED      │
+│       │         Orchestrator writes sprint-fence.json   │
+│       ▼                                                 │
+│  3. IMPLEMENT   Codex implements Sprint N ONLY          │
+│       │         Writes eval-trigger.txt  → STOPS        │
+│       ▼                                                 │
+│  4. EVALUATE    Evaluator runs live Playwright CHECK    │
+│       │         Writes eval-result-N.md                 │
+│       ▼                                                 │
+│  SPRINT PASS?  ──Yes──▶  Orchestrator deletes           │
+│                          sprint-contract.md             │
+│                          sprint-fence.json              │
+│                          eval-trigger.txt               │
+│                          ──▶ Sprint N+1 Gate starts     │
+│               ──No───▶  Retry (max 2) or pause         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**The invariant**: `sprint-contract.md` is absent at the start of every sprint.
+Its presence always means "this sprint is in progress."  Its absence means
+"the previous sprint is complete and the next sprint has not yet been contracted."
+
+This prevents the most common form of AI drift — implementing multiple sprints
+in a single Codex session — by making it mechanically impossible to start
+coding without a freshly approved contract.
 
 ---
 

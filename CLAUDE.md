@@ -56,20 +56,24 @@ Claude handles planning and evaluation. Codex handles implementation.
 ```text
 User prompt
   -> Planner writes planner-spec.json / init.sh / claude-progress.txt
+  [Per-sprint loop — every sprint must complete all four steps]
   -> Generator proposes sprint-contract.md
-  -> Evaluator reviews contract
-  -> Generator implements and commits
-  -> Generator writes eval-trigger.txt
+  -> Evaluator reviews contract  →  CONTRACT APPROVED
+  -> Orchestrator writes sprint-fence.json  (records expected sprint + git HEAD)
+  -> Generator implements Sprint N ONLY, commits, writes eval-trigger.txt  →  STOPS
   -> Evaluator runs live browser CHECK with Playwright MCP
   -> Evaluator writes eval-result-{N}.md
-  -> PASS moves to next sprint; FAIL returns to Generator
+  -> SPRINT PASS:  Orchestrator deletes sprint-contract.md, sprint-fence.json,
+                   eval-trigger.txt  →  next sprint starts from scratch
+  -> SPRINT FAIL:  Generator retries (max 2) or Orchestrator pauses
 ```
 
 Primary state lives in files, not conversation memory:
 
 - `planner-spec.json`
 - `claude-progress.txt`
-- `sprint-contract.md`
+- `sprint-contract.md` — **absent between sprints**; presence signals "sprint in progress"
+- `sprint-fence.json` — written by Orchestrator before Codex runs; names the one permitted sprint
 - `eval-result-{N}.md`
 - `eval-trigger.txt`
 - `run-state.json`
@@ -199,23 +203,26 @@ codex exec --full-auto \
   -c 'sandbox_permissions=["disk-full-read-access"]' \
   -c 'shell_environment_policy.inherit=all' \
   --skip-git-repo-check \
-  "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules."
+  "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules. Stop after writing the file."
 ```
 
 ```bash
+# Implementation — sprint boundary is enforced by sprint-fence.json written
+# by the Orchestrator before this command is run.
 codex exec --full-auto \
   -c 'sandbox_permissions=["disk-full-read-access"]' \
   -c 'shell_environment_policy.inherit=all' \
   --skip-git-repo-check \
-  "sprint-contract.md is approved. Implement Sprint N. Commit and write eval-trigger.txt. Follow AGENTS.md."
+  "sprint-contract.md is approved. Implement Sprint N ONLY. After committing, write eval-trigger.txt containing exactly: sprint=N. STOP IMMEDIATELY after writing eval-trigger.txt. Do NOT implement Sprint N+1 or any later sprint. Follow AGENTS.md Generator rules."
 ```
 
 ```bash
+# Retry — scope is still bounded to Sprint N; sprint-fence.json is unchanged.
 codex exec --full-auto \
   -c 'sandbox_permissions=["disk-full-read-access"]' \
   -c 'shell_environment_policy.inherit=all' \
   --skip-git-repo-check \
-  "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
+  "Sprint N failed. Read eval-result-N.md. Fix ONLY the cited issues. Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. Follow AGENTS.md Generator rules."
 ```
 
 ---

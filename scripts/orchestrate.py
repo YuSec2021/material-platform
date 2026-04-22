@@ -153,6 +153,9 @@ class RouteDecision:
     needs_human: bool = False
     last_failure_reason: str = ""
     cleanup_eval_trigger: bool = False
+    # When True, sprint-contract.md and sprint-fence.json are deleted so the
+    # next sprint must go through full contract negotiation before coding starts.
+    cleanup_contract: bool = False
 
 
 class HarnessProject:
@@ -167,6 +170,45 @@ class HarnessProject:
         self.events_path = self.root / "run-events.ndjson"
         self.change_request_path = self.root / "change-request.md"
         self.bug_report_path = self.root / "bug-report.md"
+        # Sprint fence: records expected sprint + git HEAD at implementation start.
+        # Acts like a page-protection entry — any commit outside the fenced sprint
+        # triggers a boundary-violation pause instead of silently continuing.
+        self.sprint_fence_path = self.root / "sprint-fence.json"
+
+    def _git_head(self) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=str(self.root),
+                check=False,
+            )
+            return result.stdout.strip() if result.returncode == 0 else ""
+        except OSError:
+            return ""
+
+    def write_sprint_fence(self, sprint: int) -> None:
+        """Write a fence file before Codex starts implementing a sprint.
+
+        Analogous to marking a memory page read-only before a CoW fork:
+        any eval-trigger.txt that reports a *different* sprint number is
+        treated as an out-of-bounds write and causes an immediate pause.
+        """
+        payload = {
+            "sprint": sprint,
+            "base_commit": self._git_head(),
+            "started_at": iso_now(),
+        }
+        write_text(self.sprint_fence_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+    def read_sprint_fence(self) -> dict[str, Any] | None:
+        if not self.sprint_fence_path.exists():
+            return None
+        try:
+            return json.loads(read_text(self.sprint_fence_path))
+        except (json.JSONDecodeError, KeyError):
+            return None
 
     def load_run_state(self) -> dict[str, Any]:
         if not self.run_state_path.exists():
@@ -270,6 +312,29 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
 
     if observed["has_eval_trigger"]:
         trigger_sprint = observed["trigger_sprint"] or current_sprint
+
+        # Sprint boundary check — analogous to a page-fault handler.
+        # If the fenced sprint and the triggered sprint disagree, Codex has
+        # written past its allocation boundary.  Pause instead of silently
+        # advancing to avoid compounding multi-sprint drift.
+        fence = project.read_sprint_fence()
+        if fence is not None and trigger_sprint != fence.get("sprint"):
+            return RouteDecision(
+                rule="sprint_boundary_violation",
+                action="pause_for_human",
+                rationale=(
+                    f"eval-trigger.txt reports sprint {trigger_sprint} but "
+                    f"sprint-fence.json expected sprint {fence['sprint']} — "
+                    "possible multi-sprint drift detected"
+                ),
+                mode="paused",
+                current_sprint=trigger_sprint,
+                needs_human=True,
+                last_failure_reason=(
+                    f"Sprint boundary violation: trigger={trigger_sprint}, fence={fence['sprint']}"
+                ),
+            )
+
         has_pass = any(
             eval_sprint_id(path) == trigger_sprint and SPRINT_PASS in read_text(path)
             for path in project.eval_results()
@@ -283,6 +348,10 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                 mode="contract",
                 current_sprint=current_sprint,
                 cleanup_eval_trigger=True,
+                # Delete sprint-contract.md and sprint-fence.json so the next
+                # sprint cannot skip contract negotiation — same principle as
+                # clearing page-table write bits after a CoW copy completes.
+                cleanup_contract=True,
             )
         if failed_eval is not None:
             if retry_count > RETRY_LIMIT:
@@ -302,8 +371,10 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                 mode="implementing",
                 current_sprint=trigger_sprint,
                 command=codex_command(
-                    f"Sprint {trigger_sprint} failed. Read {failed_eval.name}. Fix only the cited issues. "
-                    "Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
+                    f"Sprint {trigger_sprint} failed. Read {failed_eval.name}. Fix ONLY the cited issues. "
+                    f"Re-commit and write eval-trigger.txt containing exactly: sprint={trigger_sprint}. "
+                    "STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. "
+                    "Follow AGENTS.md Generator rules."
                 ),
             )
         return RouteDecision(
@@ -324,8 +395,12 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                 mode="implementing",
                 current_sprint=current_sprint,
                 command=codex_command(
-                    f"sprint-contract.md is approved. Implement Sprint {current_sprint}. "
-                    "Commit and write eval-trigger.txt. Follow AGENTS.md Generator rules."
+                    f"sprint-contract.md is approved. Implement Sprint {current_sprint} ONLY. "
+                    f"After committing, write eval-trigger.txt containing exactly: sprint={current_sprint}. "
+                    "STOP IMMEDIATELY after writing eval-trigger.txt. "
+                    f"Do NOT read planner-spec.json to find Sprint {current_sprint + 1} or any later sprint. "
+                    "Do NOT create a new branch or implement any other sprint. "
+                    "Follow AGENTS.md Generator rules."
                 ),
             )
         return RouteDecision(
@@ -471,6 +546,9 @@ def log_decision(project: HarnessProject, decision: RouteDecision) -> None:
         "pause_for_human": "orchestrator_paused",
         "complete": "orchestrator_completed",
         "clear_eval_trigger_and_continue": "eval_trigger_cleaned",
+        # Emitted when eval-trigger.txt names a sprint that does not match the
+        # fenced sprint — indicates Codex drifted past its implementation boundary.
+        "sprint_boundary_violation": "sprint_boundary_violated",
     }
     append_ndjson(
         project.events_path,
@@ -483,9 +561,16 @@ def log_decision(project: HarnessProject, decision: RouteDecision) -> None:
     )
 
 
-def maybe_cleanup_eval_trigger(project: HarnessProject, decision: RouteDecision) -> None:
+def maybe_cleanup_sprint_artifacts(project: HarnessProject, decision: RouteDecision) -> None:
     if decision.cleanup_eval_trigger and project.eval_trigger_path.exists():
         project.eval_trigger_path.unlink()
+    if decision.cleanup_contract:
+        # Remove both contract and fence so the next sprint must start from
+        # scratch: propose contract → Evaluator approves → write new fence →
+        # implement.  Mirrors clearing page-protection bits between epochs.
+        for path in (project.contract_path, project.sprint_fence_path):
+            if path.exists():
+                path.unlink()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -502,7 +587,11 @@ def main(argv: list[str]) -> int:
     project = HarnessProject(Path(args.project_dir))
     compress_progress(project.progress_path)
     decision = decide_route(project, args.user_prompt)
-    maybe_cleanup_eval_trigger(project, decision)
+    maybe_cleanup_sprint_artifacts(project, decision)
+    # Write sprint fence before handing off to Codex so the boundary-violation
+    # check in the next orchestrator call has a reference point.
+    if decision.action == "invoke_codex_for_implementation":
+        project.write_sprint_fence(decision.current_sprint)
     update_run_state(project, decision)
     log_decision(project, decision)
 
