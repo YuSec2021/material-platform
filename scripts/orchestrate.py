@@ -168,6 +168,157 @@ class RouteDecision:
     cleanup_eval_result: bool = False
 
 
+@dataclass(frozen=True)
+class SprintAuditFinding:
+    """One inconsistency between declared state (run-state.json, progress log,
+    git history) and the authoritative source (eval-result-{N}.md)."""
+
+    kind: str
+    sprint: int
+    detail: str
+
+    def format(self) -> str:
+        return f"[{self.kind}] Sprint {self.sprint}: {self.detail}"
+
+
+def audit_sprint_history(project: "HarnessProject") -> list[SprintAuditFinding]:
+    """Enforce the monotonic-PASS invariant.
+
+    The only authoritative signal that Sprint N is complete is:
+        eval-result-{N}.md exists AND contains "SPRINT PASS"
+
+    Everything else (run-state.json.last_successful_sprint, claude-progress.txt,
+    branch state) is derived state. This audit detects the historical failure
+    modes seen in this repo:
+
+      A. Sprint bootstrap bypass — Codex committed sprint code without ever
+         going through contract/eval-trigger, so eval-result-{N}.md was never
+         written even though later sprints proceeded.
+      B. Manual FAIL override — a human chore commit updated run-state.json
+         to advance past a sprint whose eval-result still says SPRINT FAIL.
+
+    Findings are *blocking*: the orchestrator must pause until a human either
+    fixes the state (delete the stray later work / re-run Evaluator) or
+    explicitly acknowledges by editing run-state.json.needs_human back to false.
+    """
+    if not project.spec_path.exists():
+        return []
+
+    spec = project.planner_spec()
+    run_state = project.load_run_state()
+    declared_last = int(run_state.get("last_successful_sprint", 0) or 0)
+
+    findings: list[SprintAuditFinding] = []
+
+    planned_ids = [
+        int(sprint["id"])
+        for sprint in spec.get("sprints", [])
+        if not sprint.get("skipped")
+    ]
+    planned_ids.sort()
+    if not planned_ids:
+        return []
+
+    passed_ids: set[int] = set()
+    failed_ids: set[int] = set()
+    for path in project.eval_results():
+        sid = eval_sprint_id(path)
+        if sid is None:
+            continue
+        text = read_text(path)
+        if SPRINT_PASS in text:
+            passed_ids.add(sid)
+        elif SPRINT_FAIL in text:
+            failed_ids.add(sid)
+
+    # A. run-state.json claims higher success than eval-result files support.
+    if declared_last > 0 and declared_last not in passed_ids:
+        findings.append(
+            SprintAuditFinding(
+                kind="run_state_unsupported",
+                sprint=declared_last,
+                detail=(
+                    f"run-state.json says last_successful_sprint={declared_last} "
+                    f"but eval-result-{declared_last}.md is missing or does not "
+                    f"contain SPRINT PASS"
+                ),
+            )
+        )
+
+    # B. Monotonic invariant: every planned sprint strictly below declared_last
+    #    must carry a SPRINT PASS. Also flag sprints below declared_last whose
+    #    eval-result is explicitly SPRINT FAIL (bypass).
+    for sid in planned_ids:
+        if sid > declared_last:
+            continue
+        if sid not in passed_ids:
+            if sid in failed_ids:
+                findings.append(
+                    SprintAuditFinding(
+                        kind="fail_bypassed",
+                        sprint=sid,
+                        detail=(
+                            f"eval-result-{sid}.md contains SPRINT FAIL but "
+                            f"run-state.json claims Sprint {declared_last} "
+                            f"already succeeded; FAIL was never resolved by Evaluator"
+                        ),
+                    )
+                )
+            else:
+                findings.append(
+                    SprintAuditFinding(
+                        kind="evaluator_skipped",
+                        sprint=sid,
+                        detail=(
+                            f"eval-result-{sid}.md is missing but run-state.json "
+                            f"claims Sprint {declared_last} already succeeded; "
+                            f"Evaluator never ran for Sprint {sid}"
+                        ),
+                    )
+                )
+
+    # C. Evaluator has scored later sprints as PASS while earlier sprints never
+    #    passed — the "gap" case. Detects the scenario where PASS exists for
+    #    Sprint K but some Sprint M < K has no eval-result-{M}.md with PASS.
+    if passed_ids:
+        max_passed = max(passed_ids)
+        for sid in planned_ids:
+            if sid >= max_passed:
+                break
+            if sid in passed_ids:
+                continue
+            already_flagged = any(
+                f.sprint == sid and f.kind in {"evaluator_skipped", "fail_bypassed"}
+                for f in findings
+            )
+            if already_flagged:
+                continue
+            if sid in failed_ids:
+                findings.append(
+                    SprintAuditFinding(
+                        kind="fail_bypassed",
+                        sprint=sid,
+                        detail=(
+                            f"Sprint {max_passed} has SPRINT PASS but "
+                            f"eval-result-{sid}.md still contains SPRINT FAIL"
+                        ),
+                    )
+                )
+            else:
+                findings.append(
+                    SprintAuditFinding(
+                        kind="evaluator_skipped",
+                        sprint=sid,
+                        detail=(
+                            f"Sprint {max_passed} has SPRINT PASS but "
+                            f"eval-result-{sid}.md is missing"
+                        ),
+                    )
+                )
+
+    return findings
+
+
 class HarnessProject:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
@@ -178,12 +329,40 @@ class HarnessProject:
         self.run_state_path = self.root / "run-state.json"
         self.log_path = self.root / "orchestrator-log.ndjson"
         self.events_path = self.root / "run-events.ndjson"
+        # Single append-only forensic audit log — the authoritative timeline of
+        # every harness operation. Unlike orchestrator-log/run-events (which
+        # only capture orchestrator-internal decisions), this file also records
+        # state transitions, git commits, hook allow/block outcomes, and manual
+        # human annotations. Never rewritten, never truncated.
+        self.audit_path = self.root / "harness-audit.ndjson"
         self.change_request_path = self.root / "change-request.md"
         self.bug_report_path = self.root / "bug-report.md"
         # Sprint fence: records expected sprint + git HEAD at implementation start.
         # Acts like a page-protection entry — any commit outside the fenced sprint
         # triggers a boundary-violation pause instead of silently continuing.
         self.sprint_fence_path = self.root / "sprint-fence.json"
+
+    def append_audit(self, event: str, actor: str, payload: dict[str, Any] | None = None,
+                     sprint: int | None = None) -> None:
+        """Append a single line to harness-audit.ndjson.
+
+        Best-effort: audit logging must never break the orchestrator itself.
+        Permission errors or disk-full conditions are swallowed silently so
+        the control-path keeps running; the caller should still surface the
+        underlying state change through its normal return channel.
+        """
+        record: dict[str, Any] = {
+            "ts": iso_now(),
+            "event": event,
+            "actor": actor,
+        }
+        if sprint is not None:
+            record["sprint"] = sprint
+        record["payload"] = payload or {}
+        try:
+            append_ndjson(self.audit_path, record)
+        except OSError:
+            pass
 
     def _git_head(self) -> str:
         try:
@@ -308,6 +487,37 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
     run_state = project.load_run_state()
     retry_count = int(run_state.get("retry_count", 0) or 0)
 
+    # Sprint-history audit runs BEFORE any other rule. It is the system-wide
+    # invariant enforcement point: if declared state disagrees with the
+    # authoritative eval-result-{N}.md files, pause unconditionally. A single
+    # needs_human=true here blocks every other rule below.
+    if observed["has_spec"]:
+        audit_findings = audit_sprint_history(project)
+        for finding in audit_findings:
+            project.append_audit(
+                event="audit_finding",
+                actor="orchestrator",
+                sprint=finding.sprint,
+                payload={"kind": finding.kind, "detail": finding.detail},
+            )
+        if audit_findings:
+            worst = audit_findings[0]
+            reason_summary = "; ".join(f.format() for f in audit_findings[:3])
+            if len(audit_findings) > 3:
+                reason_summary += f" (+{len(audit_findings) - 3} more)"
+            return RouteDecision(
+                rule="sprint_history_inconsistent",
+                action="pause_for_human",
+                rationale=(
+                    "sprint-history audit found state that contradicts eval-result files: "
+                    + reason_summary
+                ),
+                mode="paused",
+                current_sprint=worst.sprint,
+                needs_human=True,
+                last_failure_reason=reason_summary,
+            )
+
     if not observed["has_spec"]:
         return RouteDecision(
             rule="no_spec_yet",
@@ -374,6 +584,10 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                     needs_human=True,
                     last_failure_reason=f"Sprint {trigger_sprint} exceeded retry limit",
                 )
+            # Inline the failure body into the prompt so Codex still has the
+            # cited issues after cleanup_eval_result deletes the source file.
+            # The deletion is what forces the next round to re-invoke the
+            # Evaluator instead of routing to another retry on stale state.
             failed_body = read_text(failed_eval).strip()
             return RouteDecision(
                 rule="eval_trigger_with_fail",
@@ -499,6 +713,35 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
             current_sprint=0,
         )
 
+    # Defence-in-depth: even if the pre-route audit was bypassed, refuse to
+    # start Sprint N when any earlier sprint in planner-spec.json has not
+    # produced a SPRINT PASS eval-result. Prevents silent "skip" of sprints
+    # whose Evaluator was never run.
+    passed = project.passing_sprints()
+    prior_gaps = [
+        int(sprint["id"])
+        for sprint in project.planner_spec().get("sprints", [])
+        if not sprint.get("skipped")
+        and int(sprint["id"]) < current_sprint
+        and int(sprint["id"]) not in passed
+    ]
+    if prior_gaps:
+        return RouteDecision(
+            rule="prior_sprint_not_passed",
+            action="pause_for_human",
+            rationale=(
+                f"cannot start Sprint {current_sprint}: prior sprints {prior_gaps} "
+                "have no eval-result-{N}.md with SPRINT PASS"
+            ),
+            mode="paused",
+            current_sprint=current_sprint,
+            needs_human=True,
+            last_failure_reason=(
+                f"Cannot advance to Sprint {current_sprint}; "
+                f"Sprint(s) {prior_gaps} never received Evaluator PASS"
+            ),
+        )
+
     return RouteDecision(
         rule="ready_for_next_sprint",
         action="invoke_codex_for_contract",
@@ -513,7 +756,8 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
 
 
 def update_run_state(project: HarnessProject, decision: RouteDecision) -> None:
-    state = project.load_run_state()
+    previous = project.load_run_state()
+    state = dict(previous)
     state["mode"] = decision.mode
     state["current_sprint"] = decision.current_sprint
     state["needs_human"] = decision.needs_human
@@ -539,6 +783,34 @@ def update_run_state(project: HarnessProject, decision: RouteDecision) -> None:
         state["request_kind"] = ""
 
     project.save_run_state(state)
+
+    # Emit a state_transition event for every field whose value changed.
+    # last_run_at is excluded because it changes on every invocation and would
+    # flood the audit log with noise.
+    tracked_keys = (
+        "mode",
+        "current_sprint",
+        "retry_count",
+        "last_successful_sprint",
+        "last_failure_reason",
+        "needs_human",
+        "active_branch",
+        "base_branch",
+        "request_kind",
+    )
+    changes: dict[str, list[Any]] = {}
+    for key in tracked_keys:
+        old = previous.get(key)
+        new = state.get(key)
+        if old != new:
+            changes[key] = [old, new]
+    if changes:
+        project.append_audit(
+            event="state_transition",
+            actor="orchestrator",
+            sprint=decision.current_sprint or None,
+            payload={"changes": changes, "triggered_by": decision.rule},
+        )
 
 
 def log_decision(project: HarnessProject, decision: RouteDecision) -> None:
@@ -580,6 +852,43 @@ def log_decision(project: HarnessProject, decision: RouteDecision) -> None:
             "current_sprint": decision.current_sprint,
         },
     )
+
+    # Unified audit trail — one line per orchestrator run, plus an observation
+    # snapshot of every eval-result verdict so offline auditors can reconstruct
+    # the project state at any point in time from this file alone.
+    project.append_audit(
+        event="orchestrator_run",
+        actor="orchestrator",
+        sprint=decision.current_sprint or None,
+        payload={
+            "rule": decision.rule,
+            "action": decision.action,
+            "mode": decision.mode,
+            "needs_human": decision.needs_human,
+            "rationale": decision.rationale,
+            "retry_count": observed.get("retry_count", 0),
+            "trigger_sprint": observed.get("trigger_sprint"),
+            "has_contract": observed.get("has_contract", False),
+            "contract_approved": observed.get("contract_approved", False),
+            "has_eval_trigger": observed.get("has_eval_trigger", False),
+        },
+    )
+    for path in sorted(project.eval_results()):
+        sid = eval_sprint_id(path)
+        if sid is None:
+            continue
+        text = read_text(path)
+        verdict = (
+            SPRINT_PASS if SPRINT_PASS in text else
+            SPRINT_FAIL if SPRINT_FAIL in text else
+            "UNKNOWN"
+        )
+        project.append_audit(
+            event="eval_result_observed",
+            actor="orchestrator",
+            sprint=sid,
+            payload={"verdict": verdict, "file": path.name},
+        )
 
 
 def maybe_cleanup_sprint_artifacts(project: HarnessProject, decision: RouteDecision) -> None:

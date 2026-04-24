@@ -53,6 +53,8 @@
   自动暂停后留给人工接管的当前摘要
 - `claude-progress.txt`
   跨会话进度日志与交接记录
+- `harness-audit.ndjson`
+  仅追加的取证时间线。记录每一次 Orchestrator 运行、审计发现、状态迁移、commit、hook 拦截/绕过，永不重写。
 - `init.sh`
   启动完整开发环境的统一入口
 
@@ -105,6 +107,33 @@ python3 scripts/orchestrate.py --project-dir /absolute/path/to/project --user-pr
 - Evaluator 失败后更容易回溯和修复
 - `main` 只承载已经通过验收的进度
 - 无人值守模式可以明确记录当前活跃分支并从该分支恢复
+
+### 单调通过不变量与审计日志
+
+Sprint N 是否完成的**唯一权威信号**是：`eval-result-{N}.md` 存在且包含字面量字符串 `SPRINT PASS`。其他所有文件（`run-state.json`、`claude-progress.txt`、sprint 分支、commit 日志）都只是派生状态，不能作为完成判断的依据。
+
+这一不变量由两层机制共同保证：
+
+1. **检测层 — Orchestrator 审计。** `scripts/orchestrate.py` 在每条路由规则触发**之前**都会运行 `audit_sprint_history`。一旦声明状态与 `eval-result-{N}.md` 文件冲突（例如 Sprint N 被标记为已推进、但在它之前还有 sprint 缺少 `SPRINT PASS`），Orchestrator 立即把 `needs_human` 置为 `true` 并暂停，阻止任何其他规则继续执行。
+2. **预防层 — Git hooks。** `.githooks/pre-commit` 会拒绝那些"在还有早期 sprint 未通过的情况下，推进 sprint 计数"的 commit。`.githooks/post-commit` 会把每一次 commit（sha、作者、subject、受影响的敏感路径）写入 `harness-audit.ndjson`。在每个克隆里执行一次以下命令即可启用：
+
+   ```bash
+   bash scripts/install-hooks.sh
+   ```
+
+   只有 `HARNESS_BYPASS=1 git commit ...` 可以绕过 pre-commit 检查，而且每一次绕过本身都会被记录为一条 `commit_bypassed` 事件，确保任何紧急覆盖都不会静默发生。
+
+`harness-audit.ndjson` 是一个单一的仅追加 NDJSON 文件，由 Orchestrator、git hooks 和人工（通过 `scripts/harness-log.py note`）共同写入。事件类型包括 `orchestrator_run`、`audit_finding`、`state_transition`、`eval_result_observed`、`commit_recorded`、`commit_blocked`、`commit_bypassed`、`note`。**永远不要重写这个文件** — 需要轮转时，把它拷走一份，让下一次追加时自动创建新文件即可。
+
+常用审计命令：
+
+```bash
+python3 scripts/harness-log.py tail -n 30
+python3 scripts/harness-log.py filter --event audit_finding
+python3 scripts/harness-log.py filter --sprint 3 --json
+python3 scripts/harness-log.py verify                # 用 eval-result 重新校对声明状态
+python3 scripts/harness-log.py note --text "reason"  # 给人工操作留下批注
+```
 
 ### 主文档分层
 
@@ -280,7 +309,12 @@ Generator 在进入实现前，应该只重读：
 ├── README.zh-CN.md
 ├── orchestrate.sh
 ├── scripts/
-│   └── orchestrate.py
+│   ├── orchestrate.py
+│   ├── harness-log.py
+│   └── install-hooks.sh
+├── .githooks/
+│   ├── pre-commit
+│   └── post-commit
 ├── tests/
 │   └── test_orchestrate.py
 ├── .claude/
@@ -295,6 +329,7 @@ Generator 在进入实现前，应该只重读：
 │       └── harness-observability/
 │           ├── SKILL.md
 │           └── references/
+├── harness-audit.ndjson
 ├── run-state.example.json
 ├── run-events.example.ndjson
 ├── orchestrator-log.example.ndjson
@@ -497,6 +532,15 @@ npx playwright test
 cat claude-progress.txt
 cat sprint-contract.md
 cat eval-trigger.txt
+
+# 每个克隆只需执行一次，安装 git 审计钩子
+bash scripts/install-hooks.sh
+
+# 审计日志查看
+python3 scripts/harness-log.py tail -n 30
+python3 scripts/harness-log.py verify
+python3 scripts/harness-log.py filter --event audit_finding
+python3 scripts/harness-log.py note --text "人工介入原因"
 ```
 
 ## 推荐落地约定
@@ -517,8 +561,9 @@ cat eval-trigger.txt
 
 ## 已知注意点
 
-- 当前仓库仍然是“规范仓库”，还没有配套的最小可运行示例项目，因此 `init.sh` 并不在这里提供，完整的 CHECK 链路也无法只靠本仓库端到端演示。
-- 无人值守模式的状态模型和规则已经定义，`scripts/orchestrate.py` 也是一个可运行的最小实现，但尚未配套真正的守护脚本或定时任务。
+- 当前仓库是“协议仓库”**加上**一套最小可运行的执行层：`scripts/orchestrate.py`（Orchestrator）、`scripts/harness-log.py`（审计 CLI）、`.githooks/`（pre-/post-commit 钩子）、`harness-audit.ndjson`（仅追加取证日志）。尚未包含最小可运行示例项目，因此 `init.sh` 并不在这里提供，完整的 CHECK 链路也无法只靠本仓库端到端演示。
+- 无人值守模式的状态模型、重试语义和 Monotonic-PASS 不变量都由 `scripts/orchestrate.py` 与 git hooks 共同强制执行，但尚未配套真正的守护脚本或定时任务。
+- Git hooks 在新克隆的仓库里默认不生效。每个克隆需要执行一次 `bash scripts/install-hooks.sh`，让 `core.hooksPath` 指向 `.githooks/`。
 - 角色提示词（`.claude/agents/*.md`）和运行 skill（`.claude/skills/*/SKILL.md`）依靠 Claude Code 对 `.claude/` 目录的约定自动加载；若要在 Claude Code 之外运行本 harness，需要自行改造这些入口。
 - 如果你准备继续演进这个仓库，下一步最值得做的是补一套最小可运行示例项目，并让 `init.sh`、测试、验收链路和守护循环可以直接跑通。
 

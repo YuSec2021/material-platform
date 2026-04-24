@@ -300,6 +300,22 @@ def test_implementation_prompt_includes_stop_instruction(tmp_path: Path) -> None
     assert "ONLY" in command, "Implementation prompt must say 'Sprint N ONLY'"
 
 
+# --- retry → evaluator handoff ------------------------------------------------
+#
+# Historical bug: the orchestrator routed to Codex retry whenever
+# eval-result-{N}.md contained SPRINT FAIL, regardless of whether the Evaluator
+# had *already* re-checked the latest retry. Because Codex rewriting
+# eval-trigger.txt with the same sprint number left the file system
+# indistinguishable from the pre-retry state, every subsequent orchestrator
+# round saw the same stale FAIL and launched another Codex retry — burning
+# retry budget without the Evaluator ever verifying the fix.
+#
+# Fix (Option A): after routing to invoke_codex_for_retry, delete the stale
+# eval-result-{N}.md. The retry prompt inlines the FAIL details so Codex still
+# has full context even though the file is gone. On the next orchestrator
+# round the missing eval-result forces the Evaluator to re-CHECK the fix.
+
+
 def test_retry_deletes_stale_eval_result_so_evaluator_can_recheck(tmp_path: Path) -> None:
     """Routing to invoke_codex_for_retry must remove eval-result-{N}.md so the
     Evaluator is forced to re-verify the next commit."""
@@ -363,12 +379,17 @@ def test_next_round_after_retry_routes_to_evaluator(tmp_path: Path) -> None:
         "## Verdict: SPRINT FAIL\n\nFix: add button\n", encoding="utf-8"
     )
 
+    # Round 1: FAIL → retry (deletes eval-result-1.md as part of cleanup)
     first = run_orchestrator(tmp_path, "--json")
     first_payload = json.loads(first.stdout)
     assert first_payload["action"] == "invoke_codex_for_retry"
 
+    # Simulate Codex having finished the retry: commit happened, trigger
+    # rewritten with the same sprint=1 content. eval-result-1.md is still
+    # absent because the orchestrator deleted it before the Codex invocation.
     (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
 
+    # Round 2: must now route to Evaluator, NOT another Codex retry
     second = run_orchestrator(tmp_path, "--json")
     second_payload = json.loads(second.stdout)
     assert second_payload["rule"] == "eval_trigger_exists"
@@ -403,11 +424,14 @@ def test_retry_budget_exhausts_across_full_evaluator_retry_cycles(tmp_path: Path
         )
 
     def simulate_codex_retry() -> None:
+        # Codex re-commits and rewrites eval-trigger.txt, same sprint number.
         (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
 
     observed_retry_counts: list[int] = []
     observed_actions: list[str] = []
 
+    # Drive the state machine for enough rounds that, with a correctly
+    # enforced retry_count, the orchestrator eventually pauses.
     for round_idx in range(10):
         result = run_orchestrator(tmp_path, "--json")
         payload = json.loads(result.stdout)
@@ -437,6 +461,9 @@ def test_retry_budget_exhausts_across_full_evaluator_retry_cycles(tmp_path: Path
         f"expected retry_limit_exceeded, got rule={payload['rule']}, "
         f"actions={observed_actions}, retry_counts={observed_retry_counts}"
     )
+    # With RETRY_LIMIT=2 we expect exactly 3 Codex retry invocations before the
+    # pause: retry_count 1 → 2 → 3, then the next round with retry_count=3
+    # trips the `> RETRY_LIMIT` guard.
     retry_actions = [a for a in observed_actions if a == "invoke_codex_for_retry"]
     assert len(retry_actions) == 3, (
         f"expected exactly 3 retries, got {len(retry_actions)}: {observed_actions}"
@@ -457,3 +484,325 @@ def test_compress_triggered_by_multi_paragraph_narrative(tmp_path: Path) -> None
     # File should have been compressed (rewritten)
     result = progress.read_text(encoding="utf-8")
     assert len(result.splitlines()) < len(lines)
+
+
+# --- monotonic-PASS invariant tests -----------------------------------------
+#
+# Reproduces the two historical failure modes fixed by audit_sprint_history:
+#   A. Sprint 1/2 bootstrap bypass — later sprints PASS while earlier sprints
+#      have no eval-result file at all.
+#   B. Sprint 3 manual FAIL override — run-state.json advances past a sprint
+#      whose eval-result-{N}.md still contains SPRINT FAIL.
+
+def _write_multi_sprint_spec(path: Path, n: int) -> None:
+    write_json(
+        path,
+        {
+            "product": "test",
+            "design_language": {},
+            "tech_stack": {},
+            "features": [],
+            "sprints": [
+                {"id": i, "title": f"Sprint {i}", "features": [f"F{i}"]}
+                for i in range(1, n + 1)
+            ],
+        },
+    )
+
+
+def test_audit_detects_bootstrap_bypass(tmp_path: Path) -> None:
+    """Sprint 1/2 history replay: later sprints have PASS but Sprints 1+2
+    have no eval-result files. Orchestrator must pause."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 4)
+    (tmp_path / "eval-result-3.md").write_text("## Verdict: SPRINT PASS\n", encoding="utf-8")
+    (tmp_path / "eval-result-4.md").write_text("## Verdict: SPRINT PASS\n", encoding="utf-8")
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "complete",
+            "current_sprint": 4,
+            "retry_count": 0,
+            "last_successful_sprint": 4,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert payload["rule"] == "sprint_history_inconsistent"
+    assert payload["action"] == "pause_for_human"
+    assert payload["needs_human"] is True
+
+
+def test_audit_detects_fail_override(tmp_path: Path) -> None:
+    """Sprint 3 history replay: eval-result-3.md still says SPRINT FAIL
+    but run-state.json claims Sprint 4 has already succeeded."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 4)
+    for n in (1, 2):
+        (tmp_path / f"eval-result-{n}.md").write_text(
+            "## Verdict: SPRINT PASS\n", encoding="utf-8"
+        )
+    (tmp_path / "eval-result-3.md").write_text(
+        "## Verdict: SPRINT FAIL\nFunctionality 7/10\n", encoding="utf-8"
+    )
+    (tmp_path / "eval-result-4.md").write_text(
+        "## Verdict: SPRINT PASS\n", encoding="utf-8"
+    )
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "complete",
+            "current_sprint": 4,
+            "retry_count": 0,
+            "last_successful_sprint": 4,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert payload["rule"] == "sprint_history_inconsistent"
+    assert "fail_bypassed" in payload["rationale"].lower() or "Sprint 3" in payload["rationale"]
+
+
+def test_audit_passes_for_clean_history(tmp_path: Path) -> None:
+    """Happy path: every sprint 1..3 has PASS, run-state matches."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 4)
+    for n in (1, 2, 3):
+        (tmp_path / f"eval-result-{n}.md").write_text(
+            "## Verdict: SPRINT PASS\n", encoding="utf-8"
+        )
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "contract",
+            "current_sprint": 4,
+            "retry_count": 0,
+            "last_successful_sprint": 3,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    # Clean state → should fall through to ready_for_next_sprint / contract proposal.
+    assert payload["rule"] == "ready_for_next_sprint"
+    assert payload["action"] == "invoke_codex_for_contract"
+    assert payload["current_sprint"] == 4
+
+
+# --- harness-audit.ndjson emission tests -------------------------------------
+
+def _load_audit(project_dir: Path) -> list[dict]:
+    path = project_dir / "harness-audit.ndjson"
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_audit_log_emits_orchestrator_run_and_state_transition(tmp_path: Path) -> None:
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+
+    run_orchestrator(tmp_path, "--json")
+
+    records = _load_audit(tmp_path)
+    events = [r["event"] for r in records]
+    assert "orchestrator_run" in events, f"missing orchestrator_run in {events}"
+    assert "state_transition" in events, f"missing state_transition in {events}"
+
+    run_record = next(r for r in records if r["event"] == "orchestrator_run")
+    assert run_record["actor"] == "orchestrator"
+    assert run_record["sprint"] == 1
+    assert run_record["payload"]["action"] == "invoke_codex_for_implementation"
+
+
+def test_audit_log_emits_audit_finding_on_inconsistent_state(tmp_path: Path) -> None:
+    """Every finding from audit_sprint_history must appear as its own event so
+    a human can see each violation individually instead of a blob rationale."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 4)
+    (tmp_path / "eval-result-3.md").write_text(
+        "## Verdict: SPRINT FAIL\n", encoding="utf-8"
+    )
+    (tmp_path / "eval-result-4.md").write_text(
+        "## Verdict: SPRINT PASS\n", encoding="utf-8"
+    )
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "complete",
+            "current_sprint": 4,
+            "retry_count": 0,
+            "last_successful_sprint": 4,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    run_orchestrator(tmp_path, "--json")
+    records = _load_audit(tmp_path)
+
+    findings = [r for r in records if r["event"] == "audit_finding"]
+    # Expect at least: missing sprint 1, missing sprint 2, fail_bypassed sprint 3
+    kinds = {(r["sprint"], r["payload"]["kind"]) for r in findings}
+    assert (1, "evaluator_skipped") in kinds
+    assert (2, "evaluator_skipped") in kinds
+    assert (3, "fail_bypassed") in kinds
+
+
+def test_audit_log_emits_eval_result_observed_snapshot(tmp_path: Path) -> None:
+    """Every orchestrator run should record the current verdict of every
+    eval-result-{N}.md so the timeline is reconstructable from the log alone."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 3)
+    for n in (1, 2, 3):
+        (tmp_path / f"eval-result-{n}.md").write_text(
+            "## Verdict: SPRINT PASS\n", encoding="utf-8"
+        )
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "complete",
+            "current_sprint": 3,
+            "retry_count": 0,
+            "last_successful_sprint": 3,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    run_orchestrator(tmp_path, "--json")
+    records = _load_audit(tmp_path)
+    snapshots = {
+        r["sprint"]: r["payload"]["verdict"]
+        for r in records if r["event"] == "eval_result_observed"
+    }
+    assert snapshots == {1: "SPRINT PASS", 2: "SPRINT PASS", 3: "SPRINT PASS"}
+
+
+def test_harness_log_cli_note_and_tail(tmp_path: Path) -> None:
+    cli = ROOT / "scripts" / "harness-log.py"
+
+    # Append a note.
+    result = subprocess.run(
+        [
+            sys.executable, str(cli),
+            "--project-dir", str(tmp_path),
+            "note", "--text", "manual FAIL-bypass acknowledged", "--sprint", "3",
+            "--actor", "operator",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # Tail should show exactly one human-formatted line.
+    result = subprocess.run(
+        [sys.executable, str(cli), "--project-dir", str(tmp_path), "tail", "-n", "10"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "note" in result.stdout
+    assert "operator" in result.stdout
+    assert "manual FAIL-bypass acknowledged" in result.stdout
+
+    # Filter by event should return the same note as JSON.
+    result = subprocess.run(
+        [
+            sys.executable, str(cli),
+            "--project-dir", str(tmp_path),
+            "filter", "--event", "note", "--sprint", "3", "--json",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    record = json.loads(result.stdout.strip().splitlines()[0])
+    assert record["event"] == "note"
+    assert record["sprint"] == 3
+    assert record["payload"]["text"] == "manual FAIL-bypass acknowledged"
+
+
+def test_harness_log_cli_verify_highlights_gap(tmp_path: Path) -> None:
+    cli = ROOT / "scripts" / "harness-log.py"
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 3)
+    # Sprint 3 FAIL but run-state declares Sprint 3 passed.
+    (tmp_path / "eval-result-3.md").write_text("## Verdict: SPRINT FAIL\n", encoding="utf-8")
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "complete", "current_sprint": 3, "retry_count": 0,
+            "last_successful_sprint": 3, "last_failure_reason": "",
+            "needs_human": False, "active_branch": "main", "base_branch": "main",
+            "last_run_at": "", "request_kind": "",
+        },
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(cli), "--project-dir", str(tmp_path), "verify"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "bypassed FAIL" in result.stdout  # Sprint 3
+    assert "gap" in result.stdout            # Sprints 1 & 2 missing
+
+
+def test_refuses_to_start_sprint_when_prior_not_passed(tmp_path: Path) -> None:
+    """Even if audit somehow didn't fire (e.g. run-state.json matches reality),
+    Rule 6 must still refuse to contract Sprint N when prior sprints lack PASS.
+    Simulated by NOT having run-state declare success past the gap, so the
+    audit does not trip, but current_sprint still computes to 3.
+    Actually current_sprint() returns first-unpassed sprint, which IS the gap.
+    In that case we expect 'ready_for_next_sprint' on the GAP sprint itself,
+    which is correct behaviour. This test is a regression guard: if somebody
+    changes current_sprint() later, this must still pause instead of skipping."""
+    _write_multi_sprint_spec(tmp_path / "planner-spec.json", 4)
+    # Sprint 1 missing eval-result, but Sprint 2 and 3 PASS — pathological case
+    (tmp_path / "eval-result-2.md").write_text("## Verdict: SPRINT PASS\n", encoding="utf-8")
+    (tmp_path / "eval-result-3.md").write_text("## Verdict: SPRINT PASS\n", encoding="utf-8")
+    # run-state declares sprint 3 succeeded — this triggers the audit
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "contract",
+            "current_sprint": 4,
+            "retry_count": 0,
+            "last_successful_sprint": 3,
+            "last_failure_reason": "",
+            "needs_human": False,
+            "active_branch": "main",
+            "base_branch": "main",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    assert result.returncode == 2, "must pause, not proceed past a gap"
+    assert payload["rule"] == "sprint_history_inconsistent"
+    assert "Sprint 1" in payload["rationale"]

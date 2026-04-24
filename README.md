@@ -53,6 +53,8 @@ The harness is designed as a file-driven state machine rather than a conversatio
   Human-facing handoff summary when the loop pauses
 - `claude-progress.txt`
   Compact cross-session progress log
+- `harness-audit.ndjson`
+  Append-only forensic timeline. Records every orchestrator run, audit finding, state transition, commit, and hook block/bypass. Never rewritten.
 - `init.sh`
   Unified entrypoint for starting the full development environment
 
@@ -105,6 +107,33 @@ Benefits:
 - Evaluator failures are easier to inspect and repair
 - `main` only contains accepted progress
 - Unattended mode can record and recover the active branch explicitly
+
+### Monotonic-PASS Invariant & Audit Log
+
+Sprint N is considered complete only when `eval-result-{N}.md` exists and contains the literal string `SPRINT PASS`. Every other file (`run-state.json`, `claude-progress.txt`, the sprint branch, commit log) is derived state and must not be trusted for completion decisions.
+
+Two layers enforce this invariant:
+
+1. **Detective — Orchestrator audit.** `scripts/orchestrate.py` runs `audit_sprint_history` before every routing rule. If declared state disagrees with the `eval-result-{N}.md` files — for example Sprint N is marked advanced while a prior sprint lacks `SPRINT PASS` — the Orchestrator pauses with `needs_human=true` before any other rule can fire.
+2. **Preventive — Git hooks.** `.githooks/pre-commit` refuses commits that advance the sprint counter while any earlier sprint lacks `SPRINT PASS`. `.githooks/post-commit` records every commit (sha, author, subject, touched sensitive paths) into `harness-audit.ndjson`. Install them once per clone:
+
+   ```bash
+   bash scripts/install-hooks.sh
+   ```
+
+   Only `HARNESS_BYPASS=1 git commit ...` can bypass the pre-commit hook, and every bypass is itself recorded as a `commit_bypassed` event so no emergency override is invisible.
+
+`harness-audit.ndjson` is a single append-only NDJSON file written by the Orchestrator, the git hooks, and humans (via `scripts/harness-log.py note`). Event types include `orchestrator_run`, `audit_finding`, `state_transition`, `eval_result_observed`, `commit_recorded`, `commit_blocked`, `commit_bypassed`, and `note`. Never rewrite this file — to rotate, copy it aside and let a new one be created on the next append.
+
+Useful audit commands:
+
+```bash
+python3 scripts/harness-log.py tail -n 30
+python3 scripts/harness-log.py filter --event audit_finding
+python3 scripts/harness-log.py filter --sprint 3 --json
+python3 scripts/harness-log.py verify                # reconcile state vs eval-results
+python3 scripts/harness-log.py note --text "reason"  # annotate a manual action
+```
 
 ### Documentation Layers
 
@@ -278,7 +307,12 @@ At minimum, a pause should:
 ├── README.zh-CN.md
 ├── orchestrate.sh
 ├── scripts/
-│   └── orchestrate.py
+│   ├── orchestrate.py
+│   ├── harness-log.py
+│   └── install-hooks.sh
+├── .githooks/
+│   ├── pre-commit
+│   └── post-commit
 ├── tests/
 │   └── test_orchestrate.py
 ├── .claude/
@@ -293,6 +327,7 @@ At minimum, a pause should:
 │       └── harness-observability/
 │           ├── SKILL.md
 │           └── references/
+├── harness-audit.ndjson
 ├── run-state.example.json
 ├── run-events.example.ndjson
 ├── orchestrator-log.example.ndjson
@@ -496,6 +531,15 @@ npx playwright test
 cat claude-progress.txt
 cat sprint-contract.md
 cat eval-trigger.txt
+
+# One-time hook installation per clone
+bash scripts/install-hooks.sh
+
+# Audit log inspection
+python3 scripts/harness-log.py tail -n 30
+python3 scripts/harness-log.py verify
+python3 scripts/harness-log.py filter --event audit_finding
+python3 scripts/harness-log.py note --text "manual intervention reason"
 ```
 
 ## Recommended Adoption Conventions
@@ -516,8 +560,9 @@ To make the harness stable in a real project, it helps to enforce the following:
 
 ## Known Notes
 
-- The repository is still primarily a protocol repo and does not yet include a minimal runnable example project, so `init.sh` is not provided here and the full CHECK flow cannot be demonstrated end to end from this repo alone.
-- The unattended mode state model and rules are defined, and `scripts/orchestrate.py` is a working minimal implementation, but there is no bundled production watchdog or scheduler yet.
+- The repository is a protocol repo **plus** a minimal working enforcement layer: `scripts/orchestrate.py` (Orchestrator), `scripts/harness-log.py` (audit CLI), `.githooks/` (pre-/post-commit enforcement), and `harness-audit.ndjson` (append-only forensic log). It does not yet include a minimal runnable example project, so `init.sh` is not provided here and the full CHECK flow cannot be demonstrated end to end from this repo alone.
+- The unattended mode state model, retry semantics, and Monotonic-PASS invariant are enforced by `scripts/orchestrate.py` and the git hooks, but there is no bundled production watchdog or scheduler yet.
+- Git hooks are not active by default on a fresh clone. Run `bash scripts/install-hooks.sh` once so `core.hooksPath` points at `.githooks/`.
 - Role prompts (`.claude/agents/*.md`) and operational skills (`.claude/skills/*/SKILL.md`) are loaded by Claude Code via the `.claude/` convention; running the harness outside Claude Code requires adapting those entrypoints manually.
 - If you continue evolving this repository, the highest-value next step is to add a minimal runnable example project so `init.sh`, tests, evaluation, and the unattended loop can run end to end.
 

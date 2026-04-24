@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Harness pre-commit gate.
+#
+# Enforces the monotonic-PASS invariant at Git layer:
+#   A commit that touches code inside a sprint boundary is only allowed if
+#   every strictly-earlier sprint in planner-spec.json has an
+#   eval-result-{N}.md containing "SPRINT PASS".
+#
+# This blocks the two historical failure modes observed in this repo:
+#   1. A "feat(sprint-N): ..." commit landing before Evaluator ran Sprint N-1
+#      (Sprint 1/2 bootstrap bypass).
+#   2. A manual "chore: sprint N complete, advance" commit that rewrites
+#      run-state.json / claude-progress.txt while eval-result-{N}.md still
+#      contains SPRINT FAIL (Sprint 3 override).
+#
+# Escape hatch: HARNESS_BYPASS=1 git commit ...  (use only for deliberate
+# rescue / replan commits that a human reviewed).
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+COMMIT_SUBJECT=""
+if [[ -f ".git/COMMIT_EDITMSG" ]]; then
+    COMMIT_SUBJECT="$(head -n 1 ".git/COMMIT_EDITMSG" || true)"
+fi
+
+audit_log() {
+    # $1 = event, $2 = JSON payload (already encoded)
+    python3 scripts/harness-log.py --project-dir . event \
+        --event "$1" --actor "pre-commit" --payload "$2" \
+        >/dev/null 2>&1 || true
+}
+
+if [[ "${HARNESS_BYPASS:-0}" == "1" ]]; then
+    # Emergency bypass is audited so it can never be invisible.
+    audit_log commit_bypassed \
+      "$(python3 -c 'import json,sys; print(json.dumps({"subject": sys.argv[1]}))' "$COMMIT_SUBJECT")"
+    exit 0
+fi
+
+# No planner spec yet (initial project bootstrap) — nothing to enforce.
+if [[ ! -f planner-spec.json ]]; then
+    exit 0
+fi
+
+# --- Rule 1: reject manual "advance sprint" chore commits that rewrite
+#             run-state.json or claude-progress.txt without a passing
+#             eval-result for the sprint being "advanced past".
+if echo "$COMMIT_SUBJECT" | grep -qiE 'sprint[[:space:]-]*[0-9]+[[:space:]]+complete|advance to sprint|mark(ed)? .* pass'; then
+    echo "harness-pre-commit: detected a sprint-advance chore commit; running audit…"
+    if ! python3 scripts/orchestrate.py --project-dir . --json > /tmp/harness-audit.$$.json 2>&1; then
+        :  # orchestrator prints its own diagnostics; fall through to check
+    fi
+    if python3 -c "
+import json, sys
+d = json.load(open('/tmp/harness-audit.$$.json'))
+sys.exit(0 if d.get('rule') != 'sprint_history_inconsistent' else 1)
+" ; then
+        :
+    else
+        echo ""
+        echo "  ✗ blocked by harness-pre-commit (sprint_history_inconsistent)."
+        echo "    A sprint-advance commit requires every earlier sprint to have"
+        echo "    eval-result-{N}.md containing 'SPRINT PASS'."
+        echo "    See 'python3 scripts/orchestrate.py --json' for details."
+        echo "    Emergency bypass: HARNESS_BYPASS=1 git commit ..."
+        audit_log commit_blocked \
+          "$(python3 -c 'import json,sys; print(json.dumps({"rule": "sprint_history_inconsistent", "subject": sys.argv[1]}))' "$COMMIT_SUBJECT")"
+        rm -f /tmp/harness-audit.$$.json
+        exit 1
+    fi
+    rm -f /tmp/harness-audit.$$.json
+fi
+
+# --- Rule 2: reject feat/fix commits targeting sprint N+k when sprint N has
+#             no passing eval-result. Scans the commit subject for the
+#             sprint-N marker and blocks if any earlier sprint lacks PASS.
+SPRINT_IN_SUBJECT="$(
+  echo "$COMMIT_SUBJECT" | \
+    grep -oiE '\(sprint[[:space:]-]*[0-9]+\)|sprint[[:space:]-]+[0-9]+' | \
+    grep -oE '[0-9]+' | head -n 1 || true
+)"
+
+if [[ -n "$SPRINT_IN_SUBJECT" ]]; then
+    BLOCKED="$(python3 - "$SPRINT_IN_SUBJECT" <<'PY' || true
+import json, pathlib, sys
+
+target = int(sys.argv[1])
+
+spec_path = pathlib.Path("planner-spec.json")
+if not spec_path.exists():
+    sys.exit(0)
+spec = json.loads(spec_path.read_text())
+
+passed = set()
+for p in pathlib.Path(".").glob("eval-result-*.md"):
+    sid_str = p.stem.split("-")[-1]
+    if not sid_str.isdigit():
+        continue
+    if "SPRINT PASS" in p.read_text(encoding="utf-8", errors="ignore"):
+        passed.add(int(sid_str))
+
+missing = []
+for sprint in spec.get("sprints", []):
+    if sprint.get("skipped"):
+        continue
+    sid = int(sprint["id"])
+    if sid < target and sid not in passed:
+        missing.append(sid)
+
+if missing:
+    print(",".join(str(x) for x in missing))
+PY
+)"
+    if [[ -n "$BLOCKED" ]]; then
+        echo ""
+        echo "  ✗ blocked by harness-pre-commit (prior_sprint_not_passed)."
+        echo "    Commit subject targets Sprint $SPRINT_IN_SUBJECT, but the"
+        echo "    following earlier sprints have no SPRINT PASS eval-result: $BLOCKED"
+        echo "    Run the Evaluator for those sprints first."
+        echo "    Emergency bypass: HARNESS_BYPASS=1 git commit ..."
+        audit_log commit_blocked \
+          "$(python3 -c 'import json,sys; print(json.dumps({"rule": "prior_sprint_not_passed", "target_sprint": int(sys.argv[1]), "missing": [int(x) for x in sys.argv[2].split(",") if x], "subject": sys.argv[3]}))' "$SPRINT_IN_SUBJECT" "$BLOCKED" "$COMMIT_SUBJECT")"
+        exit 1
+    fi
+fi
+
+exit 0

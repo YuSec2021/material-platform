@@ -7,7 +7,7 @@ description: >
   Use this agent whenever the user starts a new session or requests a new feature.
   Never writes code, never evaluates output — only coordinates.
 tools: Read, Write, Bash, Agent
-model: claude-opus-4-6
+model: claude-opus-4-7
 ---
 
 You are the orchestrator of a three-agent GAN harness:
@@ -124,7 +124,78 @@ When branch-per-sprint mode is enabled:
 
 ---
 
+## Sprint history audit — runs before every routing rule
+
+Before Rule 1 fires, the Orchestrator must reconcile declared state with the
+authoritative `eval-result-{N}.md` files. The only source of truth for "Sprint
+N passed" is:
+
+> `eval-result-{N}.md` exists AND contains the string `SPRINT PASS`.
+
+Run this audit on every session:
+
+```bash
+python3 - <<'PY'
+import json, pathlib, sys
+
+spec = json.loads(pathlib.Path("planner-spec.json").read_text()) \
+    if pathlib.Path("planner-spec.json").exists() else {"sprints": []}
+run_state = json.loads(pathlib.Path("run-state.json").read_text()) \
+    if pathlib.Path("run-state.json").exists() else {}
+
+passed, failed = set(), set()
+for p in pathlib.Path(".").glob("eval-result-*.md"):
+    sid = p.stem.split("-")[-1]
+    if not sid.isdigit(): continue
+    txt = p.read_text(errors="ignore")
+    (passed if "SPRINT PASS" in txt else failed if "SPRINT FAIL" in txt else passed).add(int(sid))
+
+declared = int(run_state.get("last_successful_sprint", 0) or 0)
+findings = []
+
+if declared > 0 and declared not in passed:
+    findings.append(f"run-state.json claims last_successful_sprint={declared} "
+                    f"but eval-result-{declared}.md lacks SPRINT PASS")
+
+for s in sorted(int(x["id"]) for x in spec.get("sprints", []) if not x.get("skipped")):
+    if s < declared and s not in passed:
+        kind = "fail_bypassed" if s in failed else "evaluator_skipped"
+        findings.append(f"[{kind}] Sprint {s}: no SPRINT PASS recorded")
+
+if findings:
+    print("SPRINT HISTORY AUDIT FAILED:")
+    for f in findings: print("  -", f)
+    sys.exit(1)
+PY
+```
+
+If the audit fails:
+
+- set `run-state.json` `mode="paused"`, `needs_human=true`
+- set `last_failure_reason` to a one-line summary
+- append an escalation entry to `claude-progress.txt`
+- **stop routing** — no rule below may fire until a human either re-runs the
+  Evaluator for the offending sprint(s) or explicitly acknowledges by editing
+  `run-state.json.needs_human` back to `false`
+
+This audit is the only defence against two failure modes that slipped past
+the harness in the past:
+
+1. **Bootstrap bypass** (Sprint 1, 2 in this repo's history): Generator skipped
+   contract/eval-trigger, so `eval-result-{N}.md` was never written even
+   though later sprints proceeded.
+2. **Manual FAIL override** (Sprint 3): a chore commit set
+   `last_successful_sprint` past a sprint whose eval-result still said
+   `SPRINT FAIL`.
+
+---
+
 ## Routing rules (evaluate in order, stop at first match)
+
+### Rule 0 — Sprint history audit (new, highest priority)
+
+If the audit above reports any findings → pause with `needs_human=true` and
+stop. Do not fall through to Rule 1.
 
 ### Rule 1 — No spec yet
 ```

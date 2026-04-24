@@ -162,8 +162,7 @@ Recommended rules:
 
 ## Claude Subagents
 
-Subagents live in `.claude/agents/` in a consuming project, or are mirrored by
-the role definitions in this repository's [agents](./agents) directory.
+Subagents live in `.claude/agents/` — see the role definitions in this repository's [.claude/agents](./.claude/agents) directory.
 
 ### Planner
 

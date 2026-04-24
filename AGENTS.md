@@ -59,7 +59,8 @@ State lives in files, never in conversation memory.
 | `eval-result-{N}.md` | Evaluator | Per-sprint scores and critique |
 | `eval-trigger.txt` | Generator | Signal file: `sprint=N` written after commit — **must match the fenced sprint** |
 | `sprint-fence.json` | Orchestrator | Written before Codex starts implementing; records expected sprint + base git commit. Any eval-trigger.txt that names a different sprint triggers an immediate boundary-violation pause. |
-| `run-state.json` | Orchestrator | Unattended mode state, retry counters, pause/escalation flags |
+| `run-state.json` | Orchestrator | Unattended mode state, retry counters, pause/escalation flags — **cache, not truth** |
+| `harness-audit.ndjson` | Orchestrator + git hooks + humans | **Append-only forensic timeline**: every orchestrator run, audit finding, state transition, commit, hook block/bypass, and human note. Never rewritten. See "Append-only audit trail" below. |
 | `init.sh` | Planner | Reproducible dev server startup |
 | `git history` | Generator | State recovery and audit trail |
 
@@ -95,10 +96,6 @@ The goal is hands-off progress with explicit stop conditions, not infinite auton
 - The Orchestrator increments `retry_count` **before** invoking Codex for a retry.
   If Codex then fails to commit, the count may be one ahead — this is intentional and
   conservative (better to pause one iteration early than to loop forever).
-- The Orchestrator updates `last_run_at` on every routing decision.
-- The Orchestrator sets `mode`, `needs_human`, `active_branch`, and `last_failure_reason`.
-- Generator (Codex) must never write to `run-state.json`.
-- Evaluator must never write to `run-state.json`.
 - `retry_count` is **preserved**, not reset, when the Orchestrator routes to the
   Evaluator mid-cycle (i.e. right after a Codex retry has re-committed). Only
   genuine forward progress — SPRINT PASS, contract/planner phases, or starting
@@ -110,6 +107,10 @@ The goal is hands-off progress with explicit stop conditions, not infinite auton
   the retry commit instead of looping on a stale FAIL verdict. Codex must never
   depend on the file still being on disk during the retry — the verdict lives
   in the prompt.
+- The Orchestrator updates `last_run_at` on every routing decision.
+- The Orchestrator sets `mode`, `needs_human`, `active_branch`, and `last_failure_reason`.
+- Generator (Codex) must never write to `run-state.json`.
+- Evaluator must never write to `run-state.json`.
 
 ### Required unattended artifacts
 
@@ -594,6 +595,84 @@ Its presence always means "this sprint is in progress."  Its absence means
 This prevents the most common form of AI drift — implementing multiple sprints
 in a single Codex session — by making it mechanically impossible to start
 coding without a freshly approved contract.
+
+---
+
+## Monotonic-PASS Invariant (authoritative completion signal)
+
+The **only** signal that Sprint N is complete is:
+
+> `eval-result-{N}.md` exists AND contains the literal string `SPRINT PASS`.
+
+Everything else is derived state:
+
+- `run-state.json.last_successful_sprint` — cache, not truth.
+- `claude-progress.txt` — human-readable handoff, not truth.
+- branch name, commit log, `sprint-contract.md` deletion — all derived.
+
+### Consequences
+
+1. The Orchestrator re-derives "which sprints have passed" from
+   `eval-result-{N}.md` files on every invocation; it never trusts
+   `run-state.json` for advancement decisions.
+2. The Orchestrator runs an audit (`audit_sprint_history` in
+   `scripts/orchestrate.py`) **before every routing rule**. If declared state
+   disagrees with the eval-result files — e.g. Sprint N marked advanced while
+   `eval-result-{N}.md` is missing or contains `SPRINT FAIL` — the
+   Orchestrator pauses with `needs_human=true` before any other rule can fire.
+3. The Orchestrator refuses to start Sprint N while any prior Sprint 1..N-1
+   lacks a `SPRINT PASS` eval-result, even if a human tries to edit
+   `run-state.json` past the gap.
+4. A Git pre-commit hook (`.githooks/pre-commit`, installed by
+   `scripts/install-hooks.sh`) refuses commits that advance the sprint
+   counter while any earlier sprint lacks `SPRINT PASS`. The hook can only
+   be bypassed with `HARNESS_BYPASS=1 git commit ...` — intended for
+   explicit, human-reviewed rescue commits only.
+
+### Append-only audit trail (`harness-audit.ndjson`)
+
+All enforcement above is *detective* — it pauses or blocks when things go
+wrong. The **audit log** is the *forensic* companion: a single append-only
+NDJSON file (`harness-audit.ndjson`) that records every harness operation so
+humans can reconstruct what happened without rerunning the orchestrator.
+
+Events written to it:
+
+- `orchestrator_run` — every invocation: `{rule, action, mode, needs_human, rationale}`.
+- `audit_finding` — every `audit_sprint_history` violation, one line per finding.
+- `state_transition` — every change to `run-state.json` with `{key: [old, new]}` diffs.
+- `eval_result_observed` — snapshot of every `eval-result-{N}.md` verdict on
+  each orchestrator run, so offline auditors can reconstruct the verdict
+  timeline from the log alone.
+- `commit_recorded` — written by `.githooks/post-commit` for every commit
+  (sha, author, subject, files, and which "sensitive" paths — run-state.json,
+  eval-result-\*.md, sprint-contract.md, sprint-fence.json — were touched).
+- `commit_blocked` — pre-commit rejection (rule + subject + context).
+- `commit_bypassed` — every use of `HARNESS_BYPASS=1` is recorded so no
+  emergency override is ever invisible.
+- `note` — human free-form annotation via `scripts/harness-log.py note`.
+
+**Never rewrite this file.** To rotate, copy it aside and let a new one be
+created on the next append. Treat it like a write-ahead log.
+
+Useful commands:
+
+```bash
+python3 scripts/harness-log.py tail -n 30
+python3 scripts/harness-log.py filter --event audit_finding
+python3 scripts/harness-log.py filter --sprint 3 --json
+python3 scripts/harness-log.py verify               # reconcile state vs eval-results
+python3 scripts/harness-log.py note --text "reason" # annotate a manual action
+```
+
+### Historical failure modes this invariant prevents
+
+| Failure mode | What used to happen | How the invariant blocks it |
+|--------------|---------------------|-----------------------------|
+| **Bootstrap bypass** | Codex writes Sprint 1 code + `planner-spec.json` in one commit, skipping contract/eval-trigger; later sprints proceed. | Audit fires on next orchestrator run: "eval-result-1.md is missing but Sprint ≥ 2 is already in progress". |
+| **Manual FAIL override** | `chore: sprint N complete, advance to N+1` commit rewrites `run-state.json` while `eval-result-N.md` still says SPRINT FAIL. | (a) pre-commit hook rejects the commit subject pattern when audit fails; (b) if bypassed, the orchestrator pauses on the very next routing call. |
+| **Non-contiguous PASS** | Sprint K marked PASS while some Sprint M \< K has no eval-result. | Audit flags `evaluator_skipped` / `fail_bypassed` for every gap. |
+| **Silent manual override** | Human edits `run-state.json` directly, no audit trail, root-cause takes hours to find. | `post-commit` hook writes a `commit_recorded` entry flagging `run-state.json` as sensitive; `orchestrator_run` writes `state_transition` diffs on every invocation. |
 
 ---
 
