@@ -37,6 +37,8 @@
   专门用于回归和 defect 的输入文件，进入独立 bugfix sprint
 - `sprint-contract.md`
   当前 sprint 的可验收合同，必须先经 Evaluator 批准
+- `sprint-fence.json`
+  当前 sprint 的边界档案（预期 sprint 号 + contract 批准时的 git HEAD），由 Orchestrator 在调用 Codex 之前写入。用来防止跨 sprint 漂移：一旦 `eval-trigger.txt` 里的 sprint 号与 fence 不一致，Orchestrator 直接暂停。
 - `eval-result-{N}.md`
   第 N 个 sprint 的验收结果，只有 Evaluator 可以写
 - `eval-trigger.txt`
@@ -112,19 +114,19 @@ python3 scripts/orchestrate.py --project-dir /absolute/path/to/project --user-pr
    工具无关的总规范，也是 Codex 直接读取的 Generator 操作手册，应该视为总纲。
 2. [CLAUDE.md](./CLAUDE.md)
    Claude Code 侧的运行手册，补充 subagent、MCP、hooks 和 Codex 调用方式。
-3. [agents/planner.md](./agents/planner.md)
-   [agents/generator.md](./agents/generator.md)
-   [agents/evaluator.md](./agents/evaluator.md)
-   [agents/orchestrator.md](./agents/orchestrator.md)
-   更细粒度的角色提示词和执行规则，是 Claude 侧角色实现的镜像定义。
+3. [.claude/agents/planner.md](./.claude/agents/planner.md)
+   [.claude/agents/generator.md](./.claude/agents/generator.md)
+   [.claude/agents/evaluator.md](./.claude/agents/evaluator.md)
+   [.claude/agents/orchestrator.md](./.claude/agents/orchestrator.md)
+   更细粒度的角色提示词和执行规则，是 Claude 侧角色实现的镜像定义。放在 `.claude/` 目录下是为了让 Claude Code 能按约定自动识别为 subagent 定义。
 
 ### 当前实现状态
 
 - 这是一个“流程/协议仓库”，目前只有文档，没有业务代码目录。
 - 当前唯一工作流是以 `planner-spec.json` 为中心的 sprint 循环。
 - 现在支持三类入口：新产品规划、bugfix sprint、版本迭代 sprint。
-- `AGENTS.md`、`CLAUDE.md` 和 `agents/*.md` 已经统一到同一套状态模型。
-- 当前推荐把 `AGENTS.md` 作为规范源头，把 `CLAUDE.md` 作为 Claude 运行手册，把 `agents/*.md` 作为角色细则。
+- `AGENTS.md`、`CLAUDE.md` 和 `.claude/agents/*.md` 已经统一到同一套状态模型。
+- 当前推荐把 `AGENTS.md` 作为规范源头，把 `CLAUDE.md` 作为 Claude 运行手册，把 `.claude/agents/*.md` 作为角色细则。
 
 ## 工作流
 
@@ -136,16 +138,22 @@ python3 scripts/orchestrate.py --project-dir /absolute/path/to/project --user-pr
   -> Planner 生成 planner-spec.json / init.sh / claude-progress.txt
   -> Generator 提议 sprint-contract.md
   -> Evaluator 审核 contract，写入 CONTRACT APPROVED
+  -> Orchestrator 写入 sprint-fence.json（sprint 号 + git HEAD）
   -> Generator 实现 sprint、运行测试、提交代码
   -> Generator 写入 eval-trigger.txt
+  -> Orchestrator 校验 fence 与 eval-trigger.txt 一致
   -> Evaluator 用 Playwright 做真实浏览器验收
   -> 写入 eval-result-{N}.md
-  -> PASS 则进入下一轮 sprint，FAIL 则回到 Generator 修复
+  -> PASS：Orchestrator 删除 sprint-contract.md + sprint-fence.json，推进到下一轮 sprint
+  -> FAIL：Orchestrator 把评审结论 inline 进 retry prompt，删除 eval-result-{N}.md，
+          再次调用 Codex，并在 retry commit 之后重新召回 Evaluator 做 live CHECK。
+          retry_count 有上限，超过则暂停等待人工介入。
 ```
 
-关键门禁只有一个：
+关键门禁：
 
 - 没有 `CONTRACT APPROVED`，Generator 不能开始编码。
+- `sprint-fence.json` 与 `eval-trigger.txt` 不一致时，Orchestrator 拒绝路由到 Evaluator，直接暂停。
 
 关键状态规则：
 
@@ -155,6 +163,7 @@ python3 scripts/orchestrate.py --project-dir /absolute/path/to/project --user-pr
 - 有 `sprint-contract.md` 但未批准，先做 contract review
 - 有 `eval-trigger.txt`，先做 live CHECK
 - 只有 `eval-result-{N}.md` 出现 `SPRINT PASS`，该 sprint 才完成
+- SPRINT PASS 之后，Orchestrator 会删除 `sprint-contract.md` 和 `sprint-fence.json`，下一 sprint 必须重新走一轮 contract 协商
 
 ## 上下文清洁规则
 
@@ -267,25 +276,41 @@ Generator 在进入实现前，应该只重读：
 .
 ├── AGENTS.md
 ├── CLAUDE.md
-├── skills
-│   ├── harness-observability
-│   │   ├── SKILL.md
-│   │   └── references
-│   └── harness-branching
-│       └── SKILL.md
-└── agents
-    ├── evaluator.md
-    ├── generator.md
-    ├── orchestrator.md
-    └── planner.md
+├── README.md
+├── README.zh-CN.md
+├── orchestrate.sh
+├── scripts/
+│   └── orchestrate.py
+├── tests/
+│   └── test_orchestrate.py
+├── .claude/
+│   ├── agents/
+│   │   ├── evaluator.md
+│   │   ├── generator.md
+│   │   ├── orchestrator.md
+│   │   └── planner.md
+│   └── skills/
+│       ├── harness-branching/
+│       │   └── SKILL.md
+│       └── harness-observability/
+│           ├── SKILL.md
+│           └── references/
+├── run-state.example.json
+├── run-events.example.ndjson
+├── orchestrator-log.example.ndjson
+├── human-escalation.example.md
+├── change-request.example.md
+└── bug-report.example.md
 ```
+
+角色提示词和本地 skill 都放在 `.claude/` 下，按 Claude Code 约定自动被识别为 subagent 定义和项目级 skill。
 
 ## 本地 Skill
 
 仓库当前包含两个面向运行治理的本地 skill：
 
-- [skills/harness-observability/SKILL.md](./skills/harness-observability/SKILL.md)
-- [skills/harness-branching/SKILL.md](./skills/harness-branching/SKILL.md)
+- [.claude/skills/harness-observability/SKILL.md](./.claude/skills/harness-observability/SKILL.md)
+- [.claude/skills/harness-branching/SKILL.md](./.claude/skills/harness-branching/SKILL.md)
 
 它们负责把以下能力封装成可复用工作流：
 
@@ -461,11 +486,13 @@ codex exec --full-auto --skip-git-repo-check \
    STOP after writing eval-trigger.txt."
 ```
 
+在 `Codex retry -> Evaluator re-CHECK` 的循环中，`retry_count` **保留不清零**。只有真实的进展（`SPRINT PASS`、进入新 sprint、重新进入 contract/planner 阶段）才会把它归零。一旦计数超过配置的重试上限，Orchestrator 会直接置 `needs_human=true` 并暂停，而不是继续空转。
+
 ## 常用命令
 
 ```bash
 bash init.sh
-pytest -q
+python3 -m pytest tests/test_orchestrate.py -q
 npx playwright test
 cat claude-progress.txt
 cat sprint-contract.md
@@ -490,9 +517,9 @@ cat eval-trigger.txt
 
 ## 已知注意点
 
-- 当前目录不是 Git 仓库，因此 README 中提到的提交、日志、状态恢复流程暂时无法直接演示。
-- 当前仓库仍然是“规范仓库”，还没有配套的最小可运行示例项目。
-- 当前仓库只定义了无人值守模式的状态模型和规则，还没有附带真正的守护脚本或定时任务实现。
+- 当前仓库仍然是“规范仓库”，还没有配套的最小可运行示例项目，因此 `init.sh` 并不在这里提供，完整的 CHECK 链路也无法只靠本仓库端到端演示。
+- 无人值守模式的状态模型和规则已经定义，`scripts/orchestrate.py` 也是一个可运行的最小实现，但尚未配套真正的守护脚本或定时任务。
+- 角色提示词（`.claude/agents/*.md`）和运行 skill（`.claude/skills/*/SKILL.md`）依靠 Claude Code 对 `.claude/` 目录的约定自动加载；若要在 Claude Code 之外运行本 harness，需要自行改造这些入口。
 - 如果你准备继续演进这个仓库，下一步最值得做的是补一套最小可运行示例项目，并让 `init.sh`、测试、验收链路和守护循环可以直接跑通。
 
 ## 参考文献

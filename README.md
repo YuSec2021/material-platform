@@ -37,6 +37,8 @@ The harness is designed as a file-driven state machine rather than a conversatio
   Dedicated defect intake used to create a standalone bugfix sprint
 - `sprint-contract.md`
   The acceptance contract for the current sprint; must be approved by the Evaluator first
+- `sprint-fence.json`
+  Per-sprint boundary record (expected sprint number + git HEAD at contract approval) written by the Orchestrator before invoking Codex. Guards against multi-sprint drift: if `eval-trigger.txt` references a sprint that disagrees with the fence, the Orchestrator pauses.
 - `eval-result-{N}.md`
   Sprint evaluation result for sprint `N`; only the Evaluator can write it
 - `eval-trigger.txt`
@@ -112,19 +114,19 @@ The repository is organized into three documentation layers:
    The tool-agnostic master spec and the Generator handbook read directly by Codex.
 2. [CLAUDE.md](./CLAUDE.md)
    The Claude-side operations guide covering subagents, MCP, hooks, and Codex invocation.
-3. [agents/planner.md](./agents/planner.md)
-   [agents/generator.md](./agents/generator.md)
-   [agents/evaluator.md](./agents/evaluator.md)
-   [agents/orchestrator.md](./agents/orchestrator.md)
-   Finer-grained role prompts and execution rules that mirror the Claude-side role definitions.
+3. [.claude/agents/planner.md](./.claude/agents/planner.md)
+   [.claude/agents/generator.md](./.claude/agents/generator.md)
+   [.claude/agents/evaluator.md](./.claude/agents/evaluator.md)
+   [.claude/agents/orchestrator.md](./.claude/agents/orchestrator.md)
+   Finer-grained role prompts and execution rules that mirror the Claude-side role definitions. Kept under `.claude/` so Claude Code picks them up automatically as subagent definitions.
 
 ### Current Repository Status
 
 - This is a process/protocol repository, not an application code repository.
 - The main workflow today is a sprint loop centered on `planner-spec.json`.
 - The harness currently supports three entry modes: new product planning, bugfix sprints, and iteration sprints.
-- `AGENTS.md`, `CLAUDE.md`, and `agents/*.md` are aligned to the same state model.
-- The recommended source hierarchy is: `AGENTS.md` as the primary spec, `CLAUDE.md` as the Claude runtime guide, and `agents/*.md` as role detail.
+- `AGENTS.md`, `CLAUDE.md`, and `.claude/agents/*.md` are aligned to the same state model.
+- The recommended source hierarchy is: `AGENTS.md` as the primary spec, `CLAUDE.md` as the Claude runtime guide, and `.claude/agents/*.md` as role detail.
 
 ## Workflow
 
@@ -136,16 +138,22 @@ User request
   -> Planner writes planner-spec.json / init.sh / claude-progress.txt
   -> Generator proposes sprint-contract.md
   -> Evaluator reviews the contract and writes CONTRACT APPROVED
+  -> Orchestrator writes sprint-fence.json (sprint number + git HEAD)
   -> Generator implements the sprint, runs tests, and commits
   -> Generator writes eval-trigger.txt
+  -> Orchestrator verifies fence matches eval-trigger.txt
   -> Evaluator performs a live browser acceptance check with Playwright
   -> Evaluator writes eval-result-{N}.md
-  -> PASS moves to the next sprint, FAIL goes back to Generator for fixes
+  -> PASS: Orchestrator deletes sprint-contract.md + sprint-fence.json and advances
+  -> FAIL: Orchestrator inlines the verdict into the retry prompt, deletes
+          eval-result-{N}.md, re-invokes Codex, and re-runs the Evaluator on the
+          retry commit. retry_count is bounded; exceeding it pauses for human review.
 ```
 
-There is one key gate:
+Key gates:
 
 - Without `CONTRACT APPROVED`, the Generator must not start coding.
+- Without `sprint-fence.json` matching `eval-trigger.txt`, the Orchestrator refuses to route to the Evaluator and pauses.
 
 Key state rules:
 
@@ -155,6 +163,7 @@ Key state rules:
 - Unapproved `sprint-contract.md` means contract review comes first
 - `eval-trigger.txt` means live CHECK comes first
 - A sprint is complete only when `eval-result-{N}.md` contains `SPRINT PASS`
+- After a SPRINT PASS the Orchestrator removes `sprint-contract.md` and `sprint-fence.json` so the next sprint must renegotiate its contract
 
 ## Context Hygiene Rules
 
@@ -265,25 +274,42 @@ At minimum, a pause should:
 .
 ├── AGENTS.md
 ├── CLAUDE.md
-├── skills
-│   ├── harness-observability
-│   │   ├── SKILL.md
-│   │   └── references
-│   └── harness-branching
-│       └── SKILL.md
-└── agents
-    ├── evaluator.md
-    ├── generator.md
-    ├── orchestrator.md
-    └── planner.md
+├── README.md
+├── README.zh-CN.md
+├── orchestrate.sh
+├── scripts/
+│   └── orchestrate.py
+├── tests/
+│   └── test_orchestrate.py
+├── .claude/
+│   ├── agents/
+│   │   ├── evaluator.md
+│   │   ├── generator.md
+│   │   ├── orchestrator.md
+│   │   └── planner.md
+│   └── skills/
+│       ├── harness-branching/
+│       │   └── SKILL.md
+│       └── harness-observability/
+│           ├── SKILL.md
+│           └── references/
+├── run-state.example.json
+├── run-events.example.ndjson
+├── orchestrator-log.example.ndjson
+├── human-escalation.example.md
+├── change-request.example.md
+└── bug-report.example.md
 ```
+
+Role prompts and skills live under `.claude/` so Claude Code picks them up
+automatically as subagent definitions and local skills.
 
 ## Local Skills
 
 The repository currently includes two local operational governance skills:
 
-- [skills/harness-observability/SKILL.md](./skills/harness-observability/SKILL.md)
-- [skills/harness-branching/SKILL.md](./skills/harness-branching/SKILL.md)
+- [.claude/skills/harness-observability/SKILL.md](./.claude/skills/harness-observability/SKILL.md)
+- [.claude/skills/harness-branching/SKILL.md](./.claude/skills/harness-branching/SKILL.md)
 
 They package the following capabilities into reusable workflows:
 
@@ -459,11 +485,13 @@ codex exec --full-auto --skip-git-repo-check \
    STOP after writing eval-trigger.txt."
 ```
 
+`retry_count` is preserved — not reset — across the `Codex retry -> Evaluator re-CHECK` cycle. Only genuine progress (`SPRINT PASS`, a new sprint, or a contract/planner phase) zeroes it. When the count exceeds the configured retry limit, the Orchestrator pauses with `needs_human=true` instead of silently looping.
+
 ## Common Commands
 
 ```bash
 bash init.sh
-pytest -q
+python3 -m pytest tests/test_orchestrate.py -q
 npx playwright test
 cat claude-progress.txt
 cat sprint-contract.md
@@ -488,9 +516,9 @@ To make the harness stable in a real project, it helps to enforce the following:
 
 ## Known Notes
 
-- This directory is not currently a Git repository, so the commit, log, and recovery flows described in the docs cannot be demonstrated directly here.
-- The repository is still primarily a protocol repo and does not yet include a minimal runnable example project.
-- The unattended mode state model and rules are defined, but there is no bundled production watchdog or scheduler implementation yet.
+- The repository is still primarily a protocol repo and does not yet include a minimal runnable example project, so `init.sh` is not provided here and the full CHECK flow cannot be demonstrated end to end from this repo alone.
+- The unattended mode state model and rules are defined, and `scripts/orchestrate.py` is a working minimal implementation, but there is no bundled production watchdog or scheduler yet.
+- Role prompts (`.claude/agents/*.md`) and operational skills (`.claude/skills/*/SKILL.md`) are loaded by Claude Code via the `.claude/` convention; running the harness outside Claude Code requires adapting those entrypoints manually.
 - If you continue evolving this repository, the highest-value next step is to add a minimal runnable example project so `init.sh`, tests, evaluation, and the unattended loop can run end to end.
 
 ## Reference
