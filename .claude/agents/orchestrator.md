@@ -171,11 +171,24 @@ IF eval-trigger.txt exists
           # Orchestrator owns retry_count: increment in run-state.json and update
           # last_run_at BEFORE invoking Codex. Codex only fixes code and re-commits.
           increment run-state.json: retry_count += 1, last_run_at = now()
+          # The retry prompt INLINES eval-result-N.md so Codex has full context.
+          # eval-result-N.md is then DELETED so the next orchestrator round
+          # (after Codex re-commits) sees no eval-result and routes back to the
+          # Evaluator for a fresh live CHECK. Without this deletion the
+          # orchestrator would loop on the stale FAIL verdict, burning retry
+          # budget while the Evaluator never gets to re-verify.
+          inline eval-result-N.md body into the codex prompt
+          delete eval-result-N.md
           → Bash: codex exec --full-auto --skip-git-repo-check \
-              "Sprint N failed. Read eval-result-N.md. Fix only the cited issues.
-               Re-commit and update eval-trigger.txt. Follow AGENTS.md Generator rules."
+              "Sprint N failed. Fix ONLY the cited issues from the Evaluator
+               verdict below (inlined). Re-commit and write eval-trigger.txt.
+               STOP after writing eval-trigger.txt. Follow AGENTS.md Generator rules."
 
     IF no eval-result file exists yet
+      # This branch now also fires mid retry cycle: Codex has committed a
+      # fix, the stale FAIL was purged by the previous retry round, and the
+      # Evaluator must now re-CHECK the new commit. retry_count is NOT reset
+      # here — only genuine progress (SPRINT PASS, new sprint) clears it.
       → Agent(subagent_type="evaluator",
               prompt="Run CHECK for Sprint N. Read sprint-contract.md and eval-trigger.txt.")
 ```

@@ -99,6 +99,17 @@ The goal is hands-off progress with explicit stop conditions, not infinite auton
 - The Orchestrator sets `mode`, `needs_human`, `active_branch`, and `last_failure_reason`.
 - Generator (Codex) must never write to `run-state.json`.
 - Evaluator must never write to `run-state.json`.
+- `retry_count` is **preserved**, not reset, when the Orchestrator routes to the
+  Evaluator mid-cycle (i.e. right after a Codex retry has re-committed). Only
+  genuine forward progress — SPRINT PASS, contract/planner phases, or starting
+  the next sprint — zeroes the counter. Otherwise the retry budget for a stubborn
+  sprint would be silently unbounded.
+- When the Orchestrator routes to `invoke_codex_for_retry` it **inlines** the
+  body of `eval-result-{N}.md` into the Codex prompt and **deletes** the file
+  before Codex runs. This forces the next round to re-invoke the Evaluator on
+  the retry commit instead of looping on a stale FAIL verdict. Codex must never
+  depend on the file still being on disk during the retry — the verdict lives
+  in the prompt.
 
 ### Required unattended artifacts
 
