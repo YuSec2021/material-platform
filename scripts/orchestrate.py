@@ -156,6 +156,16 @@ class RouteDecision:
     # When True, sprint-contract.md and sprint-fence.json are deleted so the
     # next sprint must go through full contract negotiation before coding starts.
     cleanup_contract: bool = False
+    # When True, eval-result-{current_sprint}.md is deleted *before* Codex runs
+    # its retry. Without this the orchestrator loops on the stale FAIL verdict:
+    # Codex rewriting eval-trigger.txt with the same sprint number leaves the
+    # file system indistinguishable from the pre-retry state, so every
+    # subsequent round routes to `invoke_codex_for_retry` again while the
+    # Evaluator never gets a chance to re-verify the fix. The retry prompt
+    # inlines the full FAIL body so Codex has complete context even after
+    # the file is gone; the next orchestrator round then sees the missing
+    # eval-result and correctly routes to invoke_evaluator.
+    cleanup_eval_result: bool = False
 
 
 class HarnessProject:
@@ -364,6 +374,7 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                     needs_human=True,
                     last_failure_reason=f"Sprint {trigger_sprint} exceeded retry limit",
                 )
+            failed_body = read_text(failed_eval).strip()
             return RouteDecision(
                 rule="eval_trigger_with_fail",
                 action="invoke_codex_for_retry",
@@ -371,11 +382,16 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
                 mode="implementing",
                 current_sprint=trigger_sprint,
                 command=codex_command(
-                    f"Sprint {trigger_sprint} failed. Read {failed_eval.name}. Fix ONLY the cited issues. "
+                    f"Sprint {trigger_sprint} failed. Fix ONLY the cited issues from the "
+                    f"Evaluator verdict below; do not add unrelated changes.\n\n"
+                    f"=== Evaluator verdict ({failed_eval.name}) ===\n"
+                    f"{failed_body}\n"
+                    f"=== end verdict ===\n\n"
                     f"Re-commit and write eval-trigger.txt containing exactly: sprint={trigger_sprint}. "
                     "STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. "
                     "Follow AGENTS.md Generator rules."
                 ),
+                cleanup_eval_result=True,
             )
         return RouteDecision(
             rule="eval_trigger_exists",
@@ -505,7 +521,12 @@ def update_run_state(project: HarnessProject, decision: RouteDecision) -> None:
     state["last_run_at"] = iso_now()
     if decision.action == "invoke_codex_for_retry":
         state["retry_count"] = int(state.get("retry_count", 0) or 0) + 1
-    elif decision.action != "pause_for_human":
+    elif decision.action not in {"pause_for_human", "invoke_evaluator"}:
+        # invoke_evaluator can legitimately appear mid retry cycle — right
+        # after Codex has fixed the cited issues and is waiting for re-CHECK.
+        # Resetting retry_count there would silently grant an infinite retry
+        # budget for the same sprint. Only genuine progress (sprint PASS,
+        # starting the next sprint, contract/planner phases) clears it.
         state["retry_count"] = 0
 
     if decision.action == "invoke_codex_for_bugfix_contract":
@@ -571,6 +592,14 @@ def maybe_cleanup_sprint_artifacts(project: HarnessProject, decision: RouteDecis
         for path in (project.contract_path, project.sprint_fence_path):
             if path.exists():
                 path.unlink()
+    if decision.cleanup_eval_result and decision.current_sprint:
+        # Drop the stale FAIL verdict so the next orchestrator round sees
+        # eval-trigger.txt without any eval-result and routes to the
+        # Evaluator instead of another Codex retry. The retry prompt already
+        # inlined the verdict body, so Codex does not need the file.
+        stale = project.root / f"eval-result-{decision.current_sprint}.md"
+        if stale.exists():
+            stale.unlink()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

@@ -450,11 +450,13 @@ Only `SPRINT PASS` completes the sprint.
 
 ### 7. Fixing a Sprint FAIL
 
-If the Evaluator fails a sprint, the Generator may only address the issues explicitly named in `eval-result-{N}.md`:
+If the Evaluator fails a sprint, the Orchestrator inlines the verdict into the retry prompt and deletes `eval-result-{N}.md` before invoking Codex. This deletion is deliberate: the next orchestrator round must re-invoke the Evaluator on the retry commit instead of looping on a stale FAIL. Codex may only address the issues named in the inlined verdict:
 
 ```bash
 codex exec --full-auto --skip-git-repo-check \
-  "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
+  "Sprint N failed. Fix ONLY the cited issues from the inlined Evaluator verdict. \
+   Re-commit and write eval-trigger.txt containing sprint=N. \
+   STOP after writing eval-trigger.txt."
 ```
 
 ## Common Commands

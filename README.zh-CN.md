@@ -452,11 +452,13 @@ Evaluator 有两种模式：
 
 ### 7. Sprint FAIL 修复
 
-如果 Evaluator 判定失败，Generator 只能修复 `eval-result-{N}.md` 中明确指出的问题：
+Evaluator 判定失败时，Orchestrator 会把评审结论 inline 进 retry prompt，并在调用 Codex **之前**删除 `eval-result-{N}.md`。这一步删除是有意为之：让下一轮 orchestrator 看到"没有 eval-result"→强制重新召回 Evaluator 做 live CHECK，而不是在过期的 FAIL 结论上反复空转。Generator 只能修复 inline prompt 里列出的问题：
 
 ```bash
 codex exec --full-auto --skip-git-repo-check \
-  "Sprint N failed. Read eval-result-N.md. Fix only the cited issues. Re-commit and update eval-trigger.txt."
+  "Sprint N failed. Fix ONLY the cited issues from the inlined Evaluator verdict. \
+   Re-commit and write eval-trigger.txt containing sprint=N. \
+   STOP after writing eval-trigger.txt."
 ```
 
 ## 常用命令

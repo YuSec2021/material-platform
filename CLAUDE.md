@@ -218,11 +218,22 @@ codex exec --full-auto \
 
 ```bash
 # Retry — scope is still bounded to Sprint N; sprint-fence.json is unchanged.
+# The Orchestrator inlines the Evaluator verdict INTO the prompt and deletes
+# eval-result-N.md before this command runs, so Codex must not depend on the
+# file being on disk. The deletion is the mechanism that forces the NEXT
+# orchestrator round to re-invoke the Evaluator instead of routing to yet
+# another Codex retry on the stale FAIL verdict.
 codex exec --full-auto \
   -c 'sandbox_permissions=["disk-full-read-access"]' \
   -c 'shell_environment_policy.inherit=all' \
   --skip-git-repo-check \
-  "Sprint N failed. Read eval-result-N.md. Fix ONLY the cited issues. Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. Follow AGENTS.md Generator rules."
+  "Sprint N failed. Fix ONLY the cited issues from the Evaluator verdict below; do not add unrelated changes.
+
+=== Evaluator verdict (eval-result-N.md) ===
+<inlined body of the previous eval-result-N.md>
+=== end verdict ===
+
+Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. Follow AGENTS.md Generator rules."
 ```
 
 ---

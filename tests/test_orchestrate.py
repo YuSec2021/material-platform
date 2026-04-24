@@ -300,6 +300,149 @@ def test_implementation_prompt_includes_stop_instruction(tmp_path: Path) -> None
     assert "ONLY" in command, "Implementation prompt must say 'Sprint N ONLY'"
 
 
+def test_retry_deletes_stale_eval_result_so_evaluator_can_recheck(tmp_path: Path) -> None:
+    """Routing to invoke_codex_for_retry must remove eval-result-{N}.md so the
+    Evaluator is forced to re-verify the next commit."""
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+    (tmp_path / "sprint-fence.json").write_text(
+        '{"sprint": 1, "base_commit": "abc123", "started_at": "2026-01-01T00:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+    (tmp_path / "eval-result-1.md").write_text(
+        "## Verdict: SPRINT FAIL\n\nRequired fixes:\n1. Add CTA button\n",
+        encoding="utf-8",
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "invoke_codex_for_retry"
+    assert not (tmp_path / "eval-result-1.md").exists(), (
+        "eval-result-1.md must be deleted after routing to retry so the next "
+        "orchestrator round routes back to the Evaluator"
+    )
+
+
+def test_retry_prompt_inlines_eval_result_fail_details(tmp_path: Path) -> None:
+    """Because the stale eval-result is deleted before Codex runs, the retry
+    prompt itself must carry every line Codex needs to fix."""
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+    (tmp_path / "eval-result-1.md").write_text(
+        "## Verdict: SPRINT FAIL\n\nRequired fixes:\n1. Add CTA button on /home\n",
+        encoding="utf-8",
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    command = payload["command"] or ""
+    assert "Add CTA button on /home" in command, (
+        "retry prompt must inline the eval-result body so Codex has the "
+        "cited fixes even after the file is deleted"
+    )
+    assert "STOP" in command, "retry prompt must still include STOP after eval-trigger.txt"
+
+
+def test_next_round_after_retry_routes_to_evaluator(tmp_path: Path) -> None:
+    """End-to-end: once Codex has rewritten eval-trigger.txt after a retry, the
+    NEXT orchestrator call must invoke the Evaluator for live re-CHECK
+    rather than looping on another Codex retry."""
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+    (tmp_path / "sprint-fence.json").write_text(
+        '{"sprint": 1, "base_commit": "abc123", "started_at": "2026-01-01T00:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+    (tmp_path / "eval-result-1.md").write_text(
+        "## Verdict: SPRINT FAIL\n\nFix: add button\n", encoding="utf-8"
+    )
+
+    first = run_orchestrator(tmp_path, "--json")
+    first_payload = json.loads(first.stdout)
+    assert first_payload["action"] == "invoke_codex_for_retry"
+
+    (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+
+    second = run_orchestrator(tmp_path, "--json")
+    second_payload = json.loads(second.stdout)
+    assert second_payload["rule"] == "eval_trigger_exists"
+    assert second_payload["action"] == "invoke_evaluator", (
+        f"expected invoke_evaluator after Codex retry, got "
+        f"{second_payload['action']} (rule={second_payload['rule']})"
+    )
+    run_state = json.loads((tmp_path / "run-state.json").read_text(encoding="utf-8"))
+    assert run_state["retry_count"] == 1, (
+        "retry_count should still be 1 — invoking Evaluator must not consume "
+        "another retry slot"
+    )
+
+
+def test_retry_budget_exhausts_across_full_evaluator_retry_cycles(tmp_path: Path) -> None:
+    """Full state-machine walk: every Codex retry must count against the budget
+    even when it is interleaved with Evaluator re-CHECK rounds. After the
+    retry limit (2) has been exceeded the orchestrator must pause."""
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+    (tmp_path / "sprint-fence.json").write_text(
+        '{"sprint": 1, "base_commit": "abc123", "started_at": "2026-01-01T00:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+
+    def simulate_evaluator_fail() -> None:
+        (tmp_path / "eval-result-1.md").write_text(
+            "## Verdict: SPRINT FAIL\n\nFix: stubborn defect\n", encoding="utf-8"
+        )
+
+    def simulate_codex_retry() -> None:
+        (tmp_path / "eval-trigger.txt").write_text("sprint=1", encoding="utf-8")
+
+    observed_retry_counts: list[int] = []
+    observed_actions: list[str] = []
+
+    for round_idx in range(10):
+        result = run_orchestrator(tmp_path, "--json")
+        payload = json.loads(result.stdout)
+        run_state = json.loads(
+            (tmp_path / "run-state.json").read_text(encoding="utf-8")
+        )
+        observed_actions.append(payload["action"])
+        observed_retry_counts.append(run_state["retry_count"])
+
+        if payload["action"] == "pause_for_human":
+            break
+        if payload["action"] == "invoke_evaluator":
+            simulate_evaluator_fail()
+        elif payload["action"] == "invoke_codex_for_retry":
+            simulate_codex_retry()
+        else:
+            raise AssertionError(
+                f"unexpected action {payload['action']} in retry cycle"
+            )
+    else:
+        raise AssertionError(
+            f"retry budget never exhausted after 10 rounds; actions={observed_actions}, "
+            f"retry_counts={observed_retry_counts}"
+        )
+
+    assert payload["rule"] == "retry_limit_exceeded", (
+        f"expected retry_limit_exceeded, got rule={payload['rule']}, "
+        f"actions={observed_actions}, retry_counts={observed_retry_counts}"
+    )
+    retry_actions = [a for a in observed_actions if a == "invoke_codex_for_retry"]
+    assert len(retry_actions) == 3, (
+        f"expected exactly 3 retries, got {len(retry_actions)}: {observed_actions}"
+    )
+
+
 def test_compress_triggered_by_multi_paragraph_narrative(tmp_path: Path) -> None:
     from scripts.orchestrate import compress_progress, _has_multi_paragraph_narrative
 
