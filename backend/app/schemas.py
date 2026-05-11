@@ -159,6 +159,11 @@ class MaterialTransitionIn(BaseModel):
     reason: str
 
 
+class ManualStopPurchaseIn(BaseModel):
+    reason: str
+    actor: str = "super_admin"
+
+
 class MaterialOut(BaseModel):
     id: int
     code: str
@@ -175,6 +180,7 @@ class MaterialOut(BaseModel):
     status: str
     description: str
     attributes: dict[str, Any]
+    lifecycle_history: list[dict[str, Any]] = Field(default_factory=list)
     enabled: bool
     created_at: str
     updated_at: str
@@ -257,6 +263,10 @@ class WorkflowApplicationIn(BaseModel):
     type: str
     applicant: str = "material_manager"
     business_reason: str
+    material_id: int | None = None
+    reason_code: str | None = None
+    reason: str | None = None
+    acknowledge_terminal: bool = False
     material_library_id: int | None = None
     parent_category_id: int | None = None
     proposed_category_name: str | None = None
