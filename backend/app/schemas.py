@@ -314,3 +314,119 @@ class WorkflowApplicationOut(BaseModel):
     created_resource_id: int | None
     created_at: str
     updated_at: str
+
+
+class RoleSummaryOut(BaseModel):
+    id: int
+    name: str
+    code: str
+    enabled: bool
+
+
+class UserIn(BaseModel):
+    username: str
+    display_name: str
+    unit: str = ""
+    department: str = ""
+    team: str = ""
+    email: str = ""
+    status: str = "active"
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    unit: str | None = None
+    department: str | None = None
+    team: str | None = None
+    email: str | None = None
+    status: str | None = None
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    hcm_id: str
+    unit: str
+    department: str
+    team: str
+    email: str
+    account_ownership: str
+    account_owner: str
+    status: str
+    roles: list[RoleSummaryOut] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class PasswordResetOut(BaseModel):
+    user_id: int
+    username: str
+    reset_token: str
+    temporary_password: str
+    message: str
+
+
+class RoleIn(BaseModel):
+    name: str
+    code: str
+    description: str = ""
+    enabled: bool = True
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = None
+    code: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
+class UserSummaryOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    unit: str
+    department: str
+    team: str
+    account_ownership: str
+    status: str
+
+
+class PermissionEntry(BaseModel):
+    module: str
+    permission_type: str
+    permission_key: str
+    label: str
+
+
+class RoleOut(BaseModel):
+    id: int
+    name: str
+    code: str
+    description: str
+    enabled: bool
+    users: list[UserSummaryOut] = Field(default_factory=list)
+    user_count: int = 0
+    permissions: list[PermissionEntry] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class RoleUserBindingIn(BaseModel):
+    user_id: int
+
+
+class RoleUserReplaceIn(BaseModel):
+    user_ids: list[int] = Field(default_factory=list)
+
+
+class RolePermissionsIn(BaseModel):
+    permission_keys: list[str] = Field(default_factory=list)
+    permissions: list[PermissionEntry] = Field(default_factory=list)
+
+
+class RolePermissionsOut(BaseModel):
+    role_id: int
+    role_name: str
+    permissions: list[PermissionEntry]
+    catalog: list[PermissionEntry]

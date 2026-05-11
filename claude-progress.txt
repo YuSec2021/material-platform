@@ -1,8 +1,4 @@
-Project summary: Sprint 7 implements material stop purchase and stop use workflows on the existing FastAPI backend and vanilla browser UI.
-
-Sprint 5: AI material addition and vector matching
-Status: SPRINT PASS before Sprint 7 work.
-Notes: AI preview/confirm and local similarity matching remain covered by regression tests.
+Project summary: Sprint 8 implements user management, HCM-synced read-only users, local user CRUD/password reset, role management, role-user binding, and role permission configuration.
 
 Sprint 6: Material application workflows
 Status: SPRINT PASS before Sprint 7 work.
@@ -12,3 +8,8 @@ Sprint 7: Material stop purchase and stop use workflows
 Status: implemented; git commit blocked by sandbox .git write denial.
 Notes: Added stop_purchase/stop_use application types, approvals/rejections, admin manual stop purchase, lifecycle history, UI forms, and API tests.
 Verification: unittest discover passed; frontend JS syntax passed; pytest unavailable in global shell and venv.
+
+Sprint 8: User management and role management
+Status: implemented; git commit blocked by sandbox .git write denial.
+Notes: Added User/Role/RoleUser/FeaturePermission models, HCM seed users, local user operations, role binding, permission catalog/config APIs, and UI pages.
+Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; pytest unavailable in venv.
