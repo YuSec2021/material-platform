@@ -16,7 +16,19 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Attribute, AttributeChange, Brand, Category, LLMProviderConfig, Material, MaterialLibrary, ProductName
+from .models import (
+    Attribute,
+    AttributeChange,
+    Brand,
+    Category,
+    LLMProviderConfig,
+    Material,
+    MaterialLibrary,
+    ProductName,
+    SystemConfig,
+    WorkflowApplication,
+    WorkflowHistory,
+)
 from .schemas import (
     AiMaterialAddConfirmIn,
     AiMaterialAddPreviewIn,
@@ -43,6 +55,12 @@ from .schemas import (
     ProviderConfigIn,
     ProviderConfigOut,
     RecommendIn,
+    SystemConfigIn,
+    SystemConfigOut,
+    WorkflowActionIn,
+    WorkflowApplicationIn,
+    WorkflowApplicationOut,
+    WorkflowHistoryOut,
 )
 
 
@@ -72,6 +90,9 @@ SEED_CATEGORY = {
 MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
 MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
 AI_CAPABILITIES = {"material_add", "material_match"}
+APPROVAL_MODES = {"simple", "multi_node"}
+APPLICATION_TYPES = {"new_category", "new_material_code"}
+TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
 DEFAULT_PROVIDER = {
     "provider": "mock",
     "model": "mock-material-governance-v1",
@@ -89,6 +110,7 @@ def startup() -> None:
         ensure_seed_product(db)
         ensure_seed_material_context(db)
         ensure_provider_configs(db)
+        ensure_system_config(db)
     finally:
         db.close()
 
@@ -153,6 +175,31 @@ def ensure_provider_configs(db: Session) -> LLMProviderConfig:
     db.commit()
     db.refresh(provider)
     return provider
+
+
+def ensure_system_config(db: Session) -> SystemConfig:
+    Base.metadata.create_all(bind=engine)
+    config = db.query(SystemConfig).filter(SystemConfig.key == "approval_mode").first()
+    if config:
+        return config
+    config = SystemConfig(key="approval_mode", value="multi_node", updated_by="system")
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def approval_mode(db: Session) -> str:
+    value = ensure_system_config(db).value
+    return value if value in APPROVAL_MODES else "multi_node"
+
+
+def config_to_out(config: SystemConfig) -> SystemConfigOut:
+    return SystemConfigOut(
+        approval_mode=config.value,
+        updated_by=config.updated_by,
+        updated_at=config.updated_at.isoformat(),
+    )
 
 
 def provider_for_capability(db: Session, capability: str) -> LLMProviderConfig:
@@ -327,6 +374,243 @@ def material_to_out(material: Material) -> MaterialOut:
         created_at=material.created_at.isoformat(),
         updated_at=material.updated_at.isoformat(),
     )
+
+
+def workflow_payload(value: str | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def history_to_out(item: WorkflowHistory) -> WorkflowHistoryOut:
+    return WorkflowHistoryOut(
+        id=item.id,
+        actor=item.actor,
+        node=item.node,
+        action=item.action,
+        from_status=item.from_status,
+        to_status=item.to_status,
+        comment=item.comment,
+        created_at=item.created_at.isoformat(),
+    )
+
+
+def workflow_to_out(application: WorkflowApplication) -> WorkflowApplicationOut:
+    return WorkflowApplicationOut(
+        id=application.id,
+        application_no=application.application_no,
+        type=application.type,
+        status=application.status,
+        applicant=application.applicant,
+        current_node=application.current_node,
+        business_reason=application.business_reason,
+        rejection_reason=application.rejection_reason,
+        data=workflow_payload(application.payload),
+        approval_history=[history_to_out(item) for item in application.history],
+        created_resource_type=application.created_resource_type,
+        created_resource_id=application.created_resource_id,
+        created_at=application.created_at.isoformat(),
+        updated_at=application.updated_at.isoformat(),
+    )
+
+
+def add_workflow_history(
+    application: WorkflowApplication,
+    action: str,
+    actor: str,
+    node: str,
+    from_status: str,
+    to_status: str,
+    comment: str = "",
+) -> None:
+    application.history.append(
+        WorkflowHistory(
+            actor=actor,
+            node=node,
+            action=action,
+            from_status=from_status,
+            to_status=to_status,
+            comment=comment,
+        )
+    )
+
+
+def initial_workflow_state(mode: str) -> tuple[str, str]:
+    if mode == "simple":
+        return "pending_approval", "approver"
+    return "pending_department_head", "department_head"
+
+
+def next_approval_state(current_node: str, mode: str) -> tuple[str, str]:
+    if mode == "simple" or current_node == "approver":
+        return "approved", "approved"
+    if current_node == "department_head":
+        return "pending_asset_management", "asset_management"
+    if current_node == "asset_management":
+        return "approved", "approved"
+    raise HTTPException(status_code=409, detail=f"Invalid workflow node for approval: {current_node}")
+
+
+def application_no(seed: str) -> str:
+    return f"APP-{sha1(seed.encode('utf-8')).hexdigest()[:10].upper()}"
+
+
+def validate_reference_url(value: str) -> str:
+    link = value.strip()
+    if not re.match(r"^https?://[^\s]+$", link):
+        raise HTTPException(status_code=422, detail="A valid reference mall link URL is required")
+    return link
+
+
+def normalize_reference_images(images: list[dict[str, Any] | str]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, image in enumerate(images, start=1):
+        if isinstance(image, dict):
+            data_url = str(image.get("data_url") or image.get("url") or image.get("content") or "").strip()
+            filename = str(image.get("filename") or f"reference-{index}.png")
+            content_type = str(image.get("content_type") or "image/png")
+        else:
+            data_url = str(image).strip()
+            filename = f"reference-{index}.png"
+            content_type = "image/png"
+        if data_url:
+            normalized.append({"filename": filename, "content_type": content_type, "data_url": data_url})
+    if len(normalized) < 3:
+        raise HTTPException(status_code=422, detail="Three required reference images must be uploaded before submission")
+    return normalized
+
+
+def build_workflow_payload(payload: WorkflowApplicationIn, db: Session) -> dict[str, Any]:
+    if payload.type not in APPLICATION_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported workflow application type")
+    if not payload.business_reason.strip():
+        raise HTTPException(status_code=422, detail="Business reason is required")
+    library = db.get(MaterialLibrary, payload.material_library_id) if payload.material_library_id else None
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+
+    if payload.type == "new_category":
+        name = (payload.proposed_category_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Proposed category name is required")
+        parent = db.get(Category, payload.parent_category_id) if payload.parent_category_id else None
+        if payload.parent_category_id and not parent:
+            raise HTTPException(status_code=404, detail="Parent category not found")
+        code = (payload.proposed_category_code or "").strip() or next_unique_code(db, Category, "CAT", name)
+        return {
+            "material_library_id": library.id,
+            "material_library": library.name,
+            "parent_category_id": parent.id if parent else None,
+            "parent_category": parent.name if parent else "",
+            "proposed_category_name": name,
+            "proposed_category_code": code,
+            "category_path_preview": f"{parent.name} / {name}" if parent else name,
+            "description": payload.description,
+            "business_reason": payload.business_reason,
+        }
+
+    product, material_library, category = material_context_by_payload(
+        db,
+        payload.product_name_id,
+        payload.material_library_id,
+        payload.category_id,
+    )
+    name = (payload.material_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Material name is required")
+    if not payload.unit.strip() and not product.unit:
+        raise HTTPException(status_code=422, detail="Unit is required")
+    existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == name).first()
+    duplicate_matches = material_matches(
+        db,
+        material_library.id,
+        material_search_text(name, "", payload.description, payload.attributes),
+        "",
+        payload.attributes,
+        3,
+    )
+    brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
+    if payload.brand_id and not brand:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    return {
+        "material_library_id": material_library.id,
+        "material_library": material_library.name,
+        "category_id": category.id,
+        "category": category.name,
+        "product_name_id": product.id,
+        "product_name": product.name,
+        "material_name": name,
+        "unit": payload.unit.strip() or product.unit,
+        "brand_id": brand.id if brand else None,
+        "brand": brand.name if brand else "",
+        "attributes": payload.attributes,
+        "description": payload.description,
+        "reference_mall_link": validate_reference_url(payload.reference_mall_link),
+        "reference_images": normalize_reference_images(payload.reference_images),
+        "duplicate_warning": {
+            "existing_material": material_to_out(existing).model_dump() if existing else None,
+            "top_matches": duplicate_matches,
+        },
+        "business_reason": payload.business_reason,
+    }
+
+
+def complete_workflow_application(application: WorkflowApplication, db: Session) -> None:
+    data = workflow_payload(application.payload)
+    if application.type == "new_category":
+        name = str(data.get("proposed_category_name", "")).strip()
+        existing = db.query(Category).filter(Category.name == name).first()
+        proposed_code = str(data.get("proposed_category_code") or "").strip()
+        accepted_code = proposed_code if proposed_code and not db.query(Category).filter(Category.code == proposed_code).first() else ""
+        category = existing or Category(
+            code=accepted_code or next_unique_code(db, Category, "CAT", name),
+            name=name,
+            description=str(data.get("description") or data.get("business_reason") or ""),
+            enabled=True,
+        )
+        if not existing:
+            db.add(category)
+            db.flush()
+        application.created_resource_type = "category"
+        application.created_resource_id = category.id
+        return
+
+    product, library, category = material_context_by_payload(
+        db,
+        int(data.get("product_name_id") or 0),
+        int(data.get("material_library_id") or 0),
+        int(data.get("category_id") or 0),
+    )
+    name = str(data.get("material_name", "")).strip()
+    existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Material already exists for this product name")
+    attrs = material_attributes(data.get("attributes"))
+    attrs["_reference_mall_link"] = data.get("reference_mall_link")
+    attrs["_reference_images"] = data.get("reference_images", [])
+    material = Material(
+        code=next_unique_code(db, Material, "MAT", f"{product.id}:{name}:{application.application_no}"),
+        name=name,
+        product_name_id=product.id,
+        material_library_id=library.id,
+        category_id=category.id,
+        unit=str(data.get("unit") or product.unit),
+        brand_id=data.get("brand_id"),
+        status="normal",
+        description=str(data.get("description") or data.get("business_reason") or ""),
+        attributes=json.dumps(attrs, ensure_ascii=False),
+        enabled=True,
+    )
+    db.add(material)
+    db.flush()
+    application.created_resource_type = "material"
+    application.created_resource_id = material.id
 
 
 def validate_material_status(status: str) -> str:
@@ -920,6 +1204,179 @@ def list_categories(db: Session = Depends(get_db)) -> list[CategoryOut]:
     ensure_seed_material_context(db)
     categories = db.query(Category).order_by(Category.id).all()
     return [category_to_out(category) for category in categories]
+
+
+@app.get("/api/v1/system/config", response_model=SystemConfigOut)
+def get_system_config(db: Session = Depends(get_db)) -> SystemConfigOut:
+    return config_to_out(ensure_system_config(db))
+
+
+@app.put("/api/v1/system/config", response_model=SystemConfigOut)
+def update_system_config(payload: SystemConfigIn, db: Session = Depends(get_db)) -> SystemConfigOut:
+    mode = payload.approval_mode.strip()
+    if mode not in APPROVAL_MODES:
+        raise HTTPException(status_code=422, detail="approval_mode must be simple or multi_node")
+    config = ensure_system_config(db)
+    config.value = mode
+    config.updated_by = "super_admin"
+    config.updated_at = now()
+    db.commit()
+    db.refresh(config)
+    return config_to_out(config)
+
+
+@app.post("/api/v1/system/config", response_model=SystemConfigOut)
+def save_system_config(payload: SystemConfigIn, db: Session = Depends(get_db)) -> SystemConfigOut:
+    return update_system_config(payload, db)
+
+
+@app.get("/api/v1/workflows/applications", response_model=list[WorkflowApplicationOut])
+def list_workflow_applications(
+    applicant: str = "",
+    status: str = "",
+    type: str = "",
+    db: Session = Depends(get_db),
+) -> list[WorkflowApplicationOut]:
+    query = db.query(WorkflowApplication)
+    if applicant:
+        query = query.filter(WorkflowApplication.applicant == applicant)
+    if status:
+        query = query.filter(WorkflowApplication.status == status)
+    if type:
+        query = query.filter(WorkflowApplication.type == type)
+    applications = query.order_by(WorkflowApplication.id.desc()).all()
+    return [workflow_to_out(application) for application in applications]
+
+
+@app.post("/api/v1/workflows/applications", response_model=WorkflowApplicationOut)
+def submit_workflow_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    data = build_workflow_payload(payload, db)
+    mode = approval_mode(db)
+    status, node = initial_workflow_state(mode)
+    seed = f"{payload.type}:{payload.applicant}:{now().isoformat()}:{data}"
+    application = WorkflowApplication(
+        application_no=application_no(seed),
+        type=payload.type,
+        status=status,
+        applicant=payload.applicant.strip() or "material_manager",
+        current_node=node,
+        business_reason=payload.business_reason.strip(),
+        payload=json.dumps(data, ensure_ascii=False),
+    )
+    db.add(application)
+    db.flush()
+    add_workflow_history(
+        application,
+        "submit",
+        application.applicant,
+        "applicant",
+        "draft",
+        status,
+        payload.business_reason.strip(),
+    )
+    db.commit()
+    db.refresh(application)
+    return workflow_to_out(application)
+
+
+@app.post("/api/v1/workflows/applications/new-category", response_model=WorkflowApplicationOut)
+def submit_new_category_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    payload.type = "new_category"
+    return submit_workflow_application(payload, db)
+
+
+@app.post("/api/v1/workflows/applications/new-material-code", response_model=WorkflowApplicationOut)
+def submit_new_material_code_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    payload.type = "new_material_code"
+    return submit_workflow_application(payload, db)
+
+
+@app.get("/api/v1/workflows/tasks", response_model=list[WorkflowApplicationOut])
+def list_workflow_tasks(node: str = "", db: Session = Depends(get_db)) -> list[WorkflowApplicationOut]:
+    query = db.query(WorkflowApplication).filter(WorkflowApplication.status.notin_(TERMINAL_WORKFLOW_STATUSES))
+    if node:
+        query = query.filter(WorkflowApplication.current_node == node)
+    applications = query.order_by(WorkflowApplication.id).all()
+    return [workflow_to_out(application) for application in applications]
+
+
+@app.get("/api/v1/workflows/applications/{application_id}", response_model=WorkflowApplicationOut)
+def get_workflow_application(application_id: int, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    application = db.get(WorkflowApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Workflow application not found")
+    return workflow_to_out(application)
+
+
+@app.post("/api/v1/workflows/applications/{application_id}/approve", response_model=WorkflowApplicationOut)
+def approve_workflow_application(
+    application_id: int,
+    payload: WorkflowActionIn,
+    db: Session = Depends(get_db),
+) -> WorkflowApplicationOut:
+    application = db.get(WorkflowApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Workflow application not found")
+    if application.status in TERMINAL_WORKFLOW_STATUSES:
+        raise HTTPException(status_code=409, detail="Terminal workflow applications cannot be approved again")
+    requested_node = payload.node or application.current_node
+    if requested_node != application.current_node:
+        raise HTTPException(status_code=409, detail=f"Current workflow node is {application.current_node}, not {requested_node}")
+    from_status = application.status
+    to_status, next_node = next_approval_state(application.current_node, approval_mode(db))
+    application.status = to_status
+    application.current_node = next_node
+    application.updated_at = now()
+    if to_status == "approved":
+        complete_workflow_application(application, db)
+    add_workflow_history(
+        application,
+        "approve",
+        payload.actor.strip() or requested_node,
+        requested_node,
+        from_status,
+        to_status,
+        payload.comment,
+    )
+    db.commit()
+    db.refresh(application)
+    return workflow_to_out(application)
+
+
+@app.post("/api/v1/workflows/applications/{application_id}/reject", response_model=WorkflowApplicationOut)
+def reject_workflow_application(
+    application_id: int,
+    payload: WorkflowActionIn,
+    db: Session = Depends(get_db),
+) -> WorkflowApplicationOut:
+    application = db.get(WorkflowApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Workflow application not found")
+    if application.status in TERMINAL_WORKFLOW_STATUSES:
+        raise HTTPException(status_code=409, detail="Terminal workflow applications cannot be rejected again")
+    comment = payload.comment.strip()
+    if not comment:
+        raise HTTPException(status_code=422, detail="A rejection reason is required")
+    requested_node = payload.node or application.current_node
+    if requested_node != application.current_node:
+        raise HTTPException(status_code=409, detail=f"Current workflow node is {application.current_node}, not {requested_node}")
+    from_status = application.status
+    application.status = "rejected"
+    application.current_node = "rejected"
+    application.rejection_reason = comment
+    application.updated_at = now()
+    add_workflow_history(
+        application,
+        "reject",
+        payload.actor.strip() or requested_node,
+        requested_node,
+        from_status,
+        "rejected",
+        comment,
+    )
+    db.commit()
+    db.refresh(application)
+    return workflow_to_out(application)
 
 
 @app.get("/api/v1/materials", response_model=list[MaterialOut])

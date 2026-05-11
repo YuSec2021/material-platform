@@ -1,1 +1,1 @@
-sprint=4
+sprint=6
