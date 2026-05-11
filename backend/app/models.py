@@ -151,6 +151,72 @@ class LLMProviderConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ModelConfig(Base):
+    __tablename__ = "model_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    model_name: Mapped[str] = mapped_column(String(180), index=True)
+    base_url: Mapped[str] = mapped_column(String(320), default="")
+    encrypted_api_key: Mapped[str] = mapped_column(Text, default="")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=10)
+    fallback_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_config.id"), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    connection_status: Mapped[str] = mapped_column(String(40), default="untested", index=True)
+    last_test_message: Mapped[str] = mapped_column(Text, default="")
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def model(self) -> str:
+        return self.model_name
+
+    @property
+    def endpoint(self) -> str:
+        return self.base_url
+
+    @property
+    def active(self) -> bool:
+        return self.enabled
+
+
+class CapabilityModelMapping(Base):
+    __tablename__ = "capability_model_mapping"
+    __table_args__ = (UniqueConstraint("capability", name="uq_capability_model_mapping"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    capability: Mapped[str] = mapped_column(String(80), index=True)
+    primary_model_id: Mapped[int] = mapped_column(ForeignKey("model_config.id"), index=True)
+    fallback_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_config.id"), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    primary_model: Mapped[ModelConfig] = relationship(foreign_keys=[primary_model_id])
+    fallback_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[fallback_model_id])
+
+
+class TracerSpan(Base):
+    __tablename__ = "tracer_spans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    trace_id: Mapped[str] = mapped_column(String(80), index=True)
+    span_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    parent_span_id: Mapped[str] = mapped_column(String(80), default="", index=True)
+    operation_name: Mapped[str] = mapped_column(String(160), index=True)
+    span_type: Mapped[str] = mapped_column(String(40), index=True)
+    capability: Mapped[str] = mapped_column(String(80), default="", index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="", index=True)
+    model: Mapped[str] = mapped_column(String(180), default="", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="ok", index=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
 class SystemConfig(Base):
     __tablename__ = "system_config"
 

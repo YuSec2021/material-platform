@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import base64
 import binascii
 import csv
+import secrets
+import time
+import uuid
 from dataclasses import dataclass
+from functools import wraps
 from io import BytesIO, StringIO
 from datetime import datetime, timezone
-from hashlib import sha1
-from typing import Any
+from hashlib import sha1, sha256
+from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -21,15 +28,18 @@ from .models import (
     Attribute,
     AttributeChange,
     Brand,
+    CapabilityModelMapping,
     Category,
     FeaturePermission,
     LLMProviderConfig,
     Material,
     MaterialLibrary,
+    ModelConfig,
     ProductName,
     Role,
     RoleUser,
     SystemConfig,
+    TracerSpan,
     User,
     WorkflowApplication,
     WorkflowHistory,
@@ -46,8 +56,11 @@ from .schemas import (
     BrandLogo,
     BrandOut,
     BrandUpdate,
+    CapabilityMappingIn,
+    CapabilityMappingOut,
     CategoryOut,
     ChangeOut,
+    GatewayInvokeIn,
     GovernanceImportIn,
     GovernancePreviewIn,
     MaterialGovernanceImportIn,
@@ -76,6 +89,8 @@ from .schemas import (
     RoleUserReplaceIn,
     SystemConfigIn,
     SystemConfigOut,
+    TraceDetailOut,
+    TraceSummaryOut,
     UserIn,
     UserOut,
     UserSummaryOut,
@@ -112,7 +127,7 @@ SEED_CATEGORY = {
 }
 MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
 MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
-AI_CAPABILITIES = {"material_add", "material_match"}
+AI_CAPABILITIES = {"material_add", "material_match", "category_match", "material_analysis", "attr_recommend", "material_governance"}
 APPROVAL_MODES = {"simple", "multi_node"}
 APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop_use"}
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
@@ -303,23 +318,96 @@ def normalize_capabilities(capabilities: list[str] | str | None) -> list[str]:
     return [str(item).strip() for item in capabilities if str(item).strip()]
 
 
-def ensure_provider_configs(db: Session) -> LLMProviderConfig:
+def encryption_key() -> bytes:
+    raw = os.environ.get("LLM_GATEWAY_AES_KEY", "").strip()
+    if raw:
+        try:
+            decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+            if len(decoded) == 32:
+                return decoded
+        except (ValueError, binascii.Error):
+            pass
+        return sha256(raw.encode("utf-8")).digest()
+    return sha256(b"material-retrieval-local-aes-256-key").digest()
+
+
+def encrypt_api_key(api_key: str | None) -> str:
+    if not api_key:
+        return ""
+    aes = AESGCM(encryption_key())
+    nonce = secrets.token_bytes(12)
+    ciphertext = aes.encrypt(nonce, api_key.encode("utf-8"), None)
+    return base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+
+
+def decrypt_api_key(encrypted_api_key: str | None) -> str:
+    if not encrypted_api_key:
+        return ""
+    try:
+        payload = base64.urlsafe_b64decode(encrypted_api_key.encode("ascii"))
+        nonce, ciphertext = payload[:12], payload[12:]
+        return AESGCM(encryption_key()).decrypt(nonce, ciphertext, None).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def masked_api_key(encrypted_api_key: str | None) -> str:
+    api_key = decrypt_api_key(encrypted_api_key)
+    if not api_key:
+        return ""
+    if len(api_key) <= 8:
+        return "********"
+    return f"{api_key[:2]}{'*' * max(6, len(api_key) - 6)}{api_key[-4:]}"
+
+
+def provider_display_name(provider: str, model_name: str, fallback: str | None = None) -> str:
+    name = compact_space(fallback or "")
+    if name:
+        return name
+    return f"{provider}-{model_name}"
+
+
+def ai_debug_enabled() -> bool:
+    return os.environ.get("AI_DEBUG", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def ensure_provider_configs(db: Session) -> ModelConfig:
     Base.metadata.create_all(bind=engine)
-    provider = db.query(LLMProviderConfig).filter(LLMProviderConfig.active.is_(True)).first()
+    provider = db.query(ModelConfig).filter(ModelConfig.enabled.is_(True)).first()
     if provider:
         return provider
-    provider = LLMProviderConfig(
+    provider = ModelConfig(
+        display_name=provider_display_name(DEFAULT_PROVIDER["provider"], DEFAULT_PROVIDER["model"], "Default Mock Model"),
         provider=DEFAULT_PROVIDER["provider"],
-        model=DEFAULT_PROVIDER["model"],
-        endpoint=DEFAULT_PROVIDER["endpoint"],
-        capabilities=json.dumps(DEFAULT_PROVIDER["capabilities"]),
-        active=True,
+        model_name=DEFAULT_PROVIDER["model"],
+        base_url=DEFAULT_PROVIDER["endpoint"],
+        timeout_seconds=5,
+        enabled=True,
         connection_status="connected",
+        last_test_message="Local deterministic provider is available",
+        last_test_at=now(),
     )
     db.add(provider)
+    db.flush()
+    for capability in DEFAULT_PROVIDER["capabilities"]:
+        db.add(CapabilityModelMapping(capability=capability, primary_model_id=provider.id, enabled=True))
     db.commit()
     db.refresh(provider)
     return provider
+
+
+def enabled_models_for_mapping(db: Session) -> list[ModelConfig]:
+    ensure_provider_configs(db)
+    return db.query(ModelConfig).filter(ModelConfig.enabled.is_(True)).order_by(ModelConfig.display_name).all()
+
+
+def mapping_for_capability(db: Session, capability: str) -> CapabilityModelMapping | None:
+    ensure_provider_configs(db)
+    return (
+        db.query(CapabilityModelMapping)
+        .filter(CapabilityModelMapping.capability == capability, CapabilityModelMapping.enabled.is_(True))
+        .first()
+    )
 
 
 def ensure_system_config(db: Session) -> SystemConfig:
@@ -371,29 +459,391 @@ def config_to_out(config: SystemConfig) -> SystemConfigOut:
     )
 
 
-def provider_for_capability(db: Session, capability: str) -> LLMProviderConfig:
-    ensure_provider_configs(db)
-    providers = db.query(LLMProviderConfig).filter(LLMProviderConfig.active.is_(True)).order_by(LLMProviderConfig.id.desc()).all()
-    for provider in providers:
-        if capability in normalize_capabilities(provider.capabilities):
-            return provider
-    fallback = db.query(LLMProviderConfig).order_by(LLMProviderConfig.id.desc()).first()
+def provider_for_capability(db: Session, capability: str) -> ModelConfig:
+    mapping = mapping_for_capability(db, capability)
+    if mapping and mapping.primary_model and mapping.primary_model.enabled:
+        return mapping.primary_model
+    fallback = db.query(ModelConfig).filter(ModelConfig.enabled.is_(True)).order_by(ModelConfig.id.desc()).first()
     if fallback:
         return fallback
     return ensure_provider_configs(db)
 
 
-def provider_to_out(provider: LLMProviderConfig) -> ProviderConfigOut:
+def capabilities_for_model(db: Session, provider: ModelConfig) -> list[str]:
+    mappings = (
+        db.query(CapabilityModelMapping)
+        .filter(
+            CapabilityModelMapping.enabled.is_(True),
+            or_(
+                CapabilityModelMapping.primary_model_id == provider.id,
+                CapabilityModelMapping.fallback_model_id == provider.id,
+            ),
+        )
+        .order_by(CapabilityModelMapping.capability)
+        .all()
+    )
+    return [mapping.capability for mapping in mappings]
+
+
+def provider_to_out(provider: ModelConfig, db: Session) -> ProviderConfigOut:
+    capabilities = capabilities_for_model(db, provider)
     return ProviderConfigOut(
         id=provider.id,
+        display_name=provider.display_name,
         provider=provider.provider,
-        model=provider.model,
-        endpoint=provider.endpoint,
-        capabilities=normalize_capabilities(provider.capabilities),
-        active=provider.active,
+        model=provider.model_name,
+        model_name=provider.model_name,
+        endpoint=provider.base_url,
+        base_url=provider.base_url,
+        api_key_masked=masked_api_key(provider.encrypted_api_key),
+        capabilities=capabilities,
+        active=provider.enabled,
+        enabled=provider.enabled,
+        timeout_seconds=provider.timeout_seconds,
+        fallback_model_id=provider.fallback_model_id,
         connection_status=provider.connection_status,
+        last_test_message=provider.last_test_message,
+        last_test_at=provider.last_test_at.isoformat() if provider.last_test_at else None,
         updated_at=provider.updated_at.isoformat(),
     )
+
+
+def mapping_to_out(mapping: CapabilityModelMapping) -> CapabilityMappingOut:
+    return CapabilityMappingOut(
+        id=mapping.id,
+        capability=mapping.capability,
+        primary_model_id=mapping.primary_model_id,
+        primary_model_name=mapping.primary_model.display_name if mapping.primary_model else "",
+        fallback_model_id=mapping.fallback_model_id,
+        fallback_model_name=mapping.fallback_model.display_name if mapping.fallback_model else "",
+        enabled=mapping.enabled,
+        updated_at=mapping.updated_at.isoformat(),
+    )
+
+
+class SpanCollector:
+    def __init__(self, operation_name: str, capability: str = ""):
+        self.trace_id = f"trace-{uuid.uuid4().hex[:20]}"
+        self.spans: list[dict[str, Any]] = []
+        self.root_span_id = self.start_span(operation_name, "chain", capability=capability)
+
+    def start_span(
+        self,
+        operation_name: str,
+        span_type: str,
+        *,
+        capability: str = "",
+        parent_span_id: str | None = None,
+        provider: str = "",
+        model: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        span_id = f"span-{uuid.uuid4().hex[:20]}"
+        self.spans.append(
+            {
+                "trace_id": self.trace_id,
+                "span_id": span_id,
+                "parent_span_id": parent_span_id if parent_span_id is not None else "",
+                "operation_name": operation_name,
+                "span_type": span_type,
+                "capability": capability,
+                "provider": provider,
+                "model": model,
+                "status": "running",
+                "start_time": now(),
+                "end_time": None,
+                "duration_ms": 0,
+                "metadata": metadata or {},
+                "error": "",
+            }
+        )
+        return span_id
+
+    def finish_span(self, span_id: str, status: str = "ok", error: str = "", metadata: dict[str, Any] | None = None) -> None:
+        ended = now()
+        for span in self.spans:
+            if span["span_id"] != span_id:
+                continue
+            span["end_time"] = ended
+            span["status"] = status
+            span["error"] = error
+            if metadata:
+                span["metadata"].update(metadata)
+            span["duration_ms"] = int((ended - span["start_time"]).total_seconds() * 1000)
+            return
+
+    def flush(self, db: Session) -> None:
+        for span in self.spans:
+            if span["status"] == "running":
+                self.finish_span(span["span_id"])
+            db.add(
+                TracerSpan(
+                    trace_id=span["trace_id"],
+                    span_id=span["span_id"],
+                    parent_span_id=span["parent_span_id"],
+                    operation_name=span["operation_name"],
+                    span_type=span["span_type"],
+                    capability=span["capability"],
+                    provider=span["provider"],
+                    model=span["model"],
+                    status=span["status"],
+                    start_time=span["start_time"],
+                    end_time=span["end_time"],
+                    duration_ms=span["duration_ms"],
+                    metadata_json=json.dumps(span["metadata"], ensure_ascii=False),
+                    error=span["error"],
+                )
+            )
+        db.commit()
+
+
+def trace(operation_name: str, span_type: str = "chain") -> Callable:
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            collector: SpanCollector | None = kwargs.get("collector")
+            if collector is None:
+                return func(*args, **kwargs)
+            model = kwargs.get("model_config")
+            span_id = collector.start_span(
+                operation_name,
+                span_type,
+                capability=kwargs.get("capability", ""),
+                parent_span_id=kwargs.get("parent_span_id") or collector.root_span_id,
+                provider=getattr(model, "provider", ""),
+                model=getattr(model, "model_name", ""),
+                metadata=kwargs.get("metadata") or {},
+            )
+            try:
+                result = func(*args, **kwargs)
+                collector.finish_span(span_id, "ok")
+                return result
+            except Exception as exc:
+                collector.finish_span(span_id, "error", str(exc))
+                raise
+
+        return wrapper
+
+    return decorator
+
+
+def model_chat_url(model_config: ModelConfig) -> str:
+    base_url = (model_config.base_url or "").rstrip("/")
+    if not base_url or base_url.startswith("local://"):
+        return ""
+    if base_url.endswith("/v1/chat/completions"):
+        return base_url
+    return f"{base_url}/v1/chat/completions"
+
+
+def local_model_completion(model_config: ModelConfig, prompt: str, capability: str) -> dict[str, Any]:
+    return {
+        "content": f"{model_config.model_name} handled {capability}: {prompt}",
+        "provider": model_config.provider,
+        "model": model_config.model_name,
+        "raw": {"local": True},
+    }
+
+
+@trace("llm.provider.chat", "llm")
+def call_model_config(
+    *,
+    model_config: ModelConfig,
+    prompt: str,
+    messages: list[dict[str, Any]],
+    capability: str,
+    collector: SpanCollector | None = None,
+    parent_span_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if model_config.provider == "mock" or (model_config.base_url or "").startswith("local://"):
+        return local_model_completion(model_config, prompt, capability)
+    url = model_chat_url(model_config)
+    if not url:
+        raise RuntimeError("Model base URL is not configured")
+    request_messages = messages or [{"role": "user", "content": prompt}]
+    headers = {"Content-Type": "application/json"}
+    api_key = decrypt_api_key(model_config.encrypted_api_key)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    started = time.perf_counter()
+    response = httpx.post(
+        url,
+        json={"model": model_config.model_name, "messages": request_messages, "temperature": 0},
+        headers=headers,
+        timeout=max(1, model_config.timeout_seconds),
+    )
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    if response.status_code >= 500:
+        raise RuntimeError(f"Provider returned HTTP {response.status_code}")
+    if response.status_code >= 400:
+        raise RuntimeError(f"Provider rejected request with HTTP {response.status_code}")
+    body = response.json()
+    content = ""
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if choices and isinstance(choices, list):
+        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        content = str(message.get("content") or choices[0].get("text") or "")
+    return {
+        "content": content,
+        "provider": model_config.provider,
+        "model": model_config.model_name,
+        "latency_ms": elapsed_ms,
+        "raw": body,
+    }
+
+
+def test_model_connection(model_config: ModelConfig) -> dict[str, Any]:
+    try:
+        result = call_model_config(
+            model_config=model_config,
+            prompt="connection test",
+            messages=[{"role": "user", "content": "connection test"}],
+            capability="connection_test",
+        )
+        return {
+            "ok": True,
+            "status": "connected",
+            "message": f"Connection test succeeded for {result['model']}",
+        }
+    except (httpx.TimeoutException, httpx.ConnectError) as exc:
+        return {"ok": False, "status": "failed", "message": f"Connection failed or timed out: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "status": "failed", "message": str(exc)}
+
+
+def invoke_gateway_capability(
+    db: Session,
+    capability: str,
+    prompt: str,
+    messages: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    mapping = mapping_for_capability(db, capability)
+    primary = mapping.primary_model if mapping else provider_for_capability(db, capability)
+    fallback = mapping.fallback_model if mapping and mapping.fallback_model_id else None
+    if not fallback and primary.fallback_model_id:
+        fallback = db.get(ModelConfig, primary.fallback_model_id)
+    collector = SpanCollector(f"gateway.{capability}", capability)
+    attempted: list[dict[str, Any]] = []
+    try:
+        try:
+            result = call_model_config(
+                model_config=primary,
+                prompt=prompt,
+                messages=messages or [],
+                capability=capability,
+                collector=collector,
+                metadata={"role": "primary"},
+            )
+            attempted.append({"model_id": primary.id, "model": primary.model_name, "status": "ok"})
+            collector.finish_span(collector.root_span_id, "ok", metadata={"fallback_used": False, "model": primary.model_name})
+            return {
+                "capability": capability,
+                "trace_id": collector.trace_id,
+                "provider": primary.provider,
+                "model": primary.model_name,
+                "content": result["content"],
+                "raw": result.get("raw", {}),
+                "fallback_used": False,
+                "attempted_models": attempted,
+            }
+        except Exception as primary_error:
+            attempted.append({"model_id": primary.id, "model": primary.model_name, "status": "error", "error": str(primary_error)})
+            if not fallback or not fallback.enabled:
+                collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
+                raise
+            fallback_span = collector.start_span(
+                "gateway.fallback_decision",
+                "chain",
+                capability=capability,
+                parent_span_id=collector.root_span_id,
+                metadata={"primary_model": primary.model_name, "reason": str(primary_error), "fallback_model": fallback.model_name},
+            )
+            collector.finish_span(fallback_span, "ok")
+            result = call_model_config(
+                model_config=fallback,
+                prompt=prompt,
+                messages=messages or [],
+                capability=capability,
+                collector=collector,
+                metadata={"role": "fallback"},
+            )
+            attempted.append({"model_id": fallback.id, "model": fallback.model_name, "status": "ok"})
+            collector.finish_span(collector.root_span_id, "ok", metadata={"fallback_used": True, "fallback_reason": str(primary_error)})
+            return {
+                "capability": capability,
+                "trace_id": collector.trace_id,
+                "provider": fallback.provider,
+                "model": fallback.model_name,
+                "content": result["content"],
+                "raw": result.get("raw", {}),
+                "fallback_used": True,
+                "fallback_reason": str(primary_error),
+                "attempted_models": attempted,
+            }
+    finally:
+        collector.flush(db)
+
+
+def model_values_from_payload(payload: ProviderConfigIn) -> dict[str, Any]:
+    provider = compact_space(payload.provider or "mock")
+    model_name = compact_space(payload.model_name or payload.model or "mock-material-governance-v1")
+    display_name = provider_display_name(provider, model_name, payload.display_name or payload.name)
+    base_url = compact_space(payload.base_url if payload.base_url is not None else payload.endpoint or "")
+    enabled = payload.enabled if payload.enabled is not None else payload.active
+    if enabled is None:
+        enabled = True
+    return {
+        "display_name": display_name,
+        "provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+        "enabled": bool(enabled),
+        "timeout_seconds": max(1, min(120, int(payload.timeout_seconds or 10))),
+        "fallback_model_id": payload.fallback_model_id,
+    }
+
+
+def apply_model_payload(db: Session, provider: ModelConfig, payload: ProviderConfigIn) -> ModelConfig:
+    values = model_values_from_payload(payload)
+    fallback_id = values.pop("fallback_model_id")
+    if fallback_id:
+        fallback = db.get(ModelConfig, fallback_id)
+        if not fallback:
+            raise HTTPException(status_code=404, detail="Fallback model not found")
+        if fallback.id == provider.id:
+            raise HTTPException(status_code=422, detail="Fallback model must be different from primary model")
+    for field, value in values.items():
+        setattr(provider, field, value)
+    provider.fallback_model_id = fallback_id
+    if payload.api_key and not payload.api_key.startswith("**"):
+        provider.encrypted_api_key = encrypt_api_key(payload.api_key)
+    provider.updated_at = now()
+    db.flush()
+    test_result = test_model_connection(provider)
+    provider.connection_status = test_result["status"]
+    provider.last_test_message = test_result["message"]
+    provider.last_test_at = now()
+    db.flush()
+    sync_model_capabilities(db, provider, payload.capabilities)
+    return provider
+
+
+def sync_model_capabilities(db: Session, provider: ModelConfig, capabilities: list[str] | str | None) -> None:
+    requested = [capability for capability in normalize_capabilities(capabilities) if capability in AI_CAPABILITIES]
+    if not requested:
+        return
+    for capability in requested:
+        mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == capability).first()
+        if not mapping:
+            mapping = CapabilityModelMapping(capability=capability, primary_model_id=provider.id, enabled=True)
+            db.add(mapping)
+        else:
+            mapping.primary_model_id = provider.id
+            if mapping.fallback_model_id == provider.id:
+                mapping.fallback_model_id = None
+            mapping.enabled = True
+        mapping.updated_at = now()
 
 
 @dataclass
@@ -2554,10 +3004,11 @@ def create_material(
 
 
 def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> dict[str, Any]:
-    provider = provider_for_capability(db, "material_add")
     text = compact_space(payload.input_text)
     if not text:
         raise HTTPException(status_code=422, detail="input_text is required")
+    gateway_result = invoke_gateway_capability(db, "material_add", text)
+    match_gateway = invoke_gateway_capability(db, "material_match", text)
     library = db.get(MaterialLibrary, payload.material_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
@@ -2602,7 +3053,7 @@ def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> d
     query_text = material_search_text(name, brand_name, description, attributes)
     matches = material_matches(db, library.id, query_text, brand_name, attributes, 3)
     top_classification = matches[0]["classification"] if matches else "normal"
-    trace_id = f"trace-{sha1(f'{provider.id}:{provider.provider}:{provider.model}:{text}'.encode('utf-8')).hexdigest()[:16]}"
+    trace_id = gateway_result["trace_id"]
     proposed = {
         "name": name,
         "unit": unit,
@@ -2621,8 +3072,8 @@ def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> d
     db.commit()
     return {
         "capability": "material_add",
-        "provider": provider.provider,
-        "model": provider.model,
+        "provider": gateway_result["provider"],
+        "model": gateway_result["model"],
         "trace_id": trace_id,
         "preview_token": sha1(json.dumps(proposed, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
         "confidence": confidence,
@@ -2643,8 +3094,9 @@ def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> d
         "proposed_material": proposed,
         "duplicate_check": {
             "capability": "material_match",
-            "provider": provider_for_capability(db, "material_match").provider,
-            "model": provider_for_capability(db, "material_match").model,
+            "provider": match_gateway["provider"],
+            "model": match_gateway["model"],
+            "trace_id": match_gateway["trace_id"],
             "engine": "qdrant_hybrid_with_local_fallback",
             "classification": top_classification,
             "top_matches": matches,
@@ -2733,19 +3185,21 @@ def match_materials(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/match")),
 ) -> dict[str, Any]:
-    provider = provider_for_capability(db, "material_match")
     library = db.get(MaterialLibrary, payload.material_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
     require_library_scope(auth, library.id)
     brand = db.get(Brand, payload.brand_id).name if payload.brand_id and db.get(Brand, payload.brand_id) else (payload.brand or "")
     query_text = payload.query or material_search_text(payload.name or "", brand, payload.description, payload.attributes)
+    gateway_result = invoke_gateway_capability(db, "material_match", query_text)
     matches = material_matches(db, library.id, query_text, brand, payload.attributes, payload.top_k)
     return {
         "capability": "material_match",
-        "provider": provider.provider,
-        "model": provider.model,
-        "embedding_provider": provider.provider,
+        "provider": gateway_result["provider"],
+        "model": gateway_result["model"],
+        "trace_id": gateway_result["trace_id"],
+        "fallback_used": gateway_result["fallback_used"],
+        "embedding_provider": gateway_result["provider"],
         "engine": "qdrant_hybrid_with_local_fallback",
         "query": query_text,
         "matches": matches,
@@ -2785,8 +3239,8 @@ def list_ai_providers(
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
 ) -> list[ProviderConfigOut]:
     ensure_provider_configs(db)
-    providers = db.query(LLMProviderConfig).order_by(LLMProviderConfig.active.desc(), LLMProviderConfig.id.desc()).all()
-    return [provider_to_out(provider) for provider in providers]
+    providers = db.query(ModelConfig).order_by(ModelConfig.enabled.desc(), ModelConfig.id.desc()).all()
+    return [provider_to_out(provider, db) for provider in providers]
 
 
 @app.post("/api/v1/ai/providers", response_model=ProviderConfigOut)
@@ -2795,31 +3249,84 @@ def save_ai_provider(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
 ) -> ProviderConfigOut:
-    capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
-    if not capabilities:
-        raise HTTPException(status_code=422, detail="At least one supported capability is required")
+    values = model_values_from_payload(payload)
     provider = (
-        db.query(LLMProviderConfig)
-        .filter(LLMProviderConfig.provider == payload.provider, LLMProviderConfig.model == payload.model)
+        db.query(ModelConfig)
+        .filter(ModelConfig.display_name == values["display_name"])
         .first()
     )
     if not provider:
-        provider = LLMProviderConfig(provider=payload.provider, model=payload.model)
+        provider = ModelConfig(display_name=values["display_name"], provider=values["provider"], model_name=values["model_name"])
         db.add(provider)
-    provider.endpoint = payload.endpoint
-    provider.capabilities = json.dumps(capabilities)
-    provider.active = payload.active
-    provider.connection_status = "connected" if payload.provider == "mock" or payload.endpoint.startswith(("local://", "http://", "https://")) else "configured"
-    provider.updated_at = now()
-    db.flush()
-    if payload.active:
-        for other in db.query(LLMProviderConfig).filter(LLMProviderConfig.id != provider.id).all():
-            if set(normalize_capabilities(other.capabilities)) & set(capabilities):
-                other.active = False
-                other.updated_at = now()
+    apply_model_payload(db, provider, payload)
     db.commit()
     db.refresh(provider)
-    return provider_to_out(provider)
+    return provider_to_out(provider, db)
+
+
+@app.get("/api/v1/ai/providers/{provider_id}", response_model=ProviderConfigOut)
+def get_ai_provider(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> ProviderConfigOut:
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+    return provider_to_out(provider, db)
+
+
+@app.put("/api/v1/ai/providers/{provider_id}", response_model=ProviderConfigOut)
+def update_ai_provider(
+    provider_id: int,
+    payload: ProviderConfigIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> ProviderConfigOut:
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+    apply_model_payload(db, provider, payload)
+    db.commit()
+    db.refresh(provider)
+    return provider_to_out(provider, db)
+
+
+@app.patch("/api/v1/ai/providers/{provider_id}/disable", response_model=ProviderConfigOut)
+def disable_ai_provider(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> ProviderConfigOut:
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+    provider.enabled = False
+    provider.updated_at = now()
+    db.commit()
+    db.refresh(provider)
+    return provider_to_out(provider, db)
+
+
+@app.delete("/api/v1/ai/providers/{provider_id}")
+def delete_ai_provider(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> dict[str, Any]:
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+    if db.query(CapabilityModelMapping).filter(
+        or_(
+            CapabilityModelMapping.primary_model_id == provider.id,
+            CapabilityModelMapping.fallback_model_id == provider.id,
+        )
+    ).first():
+        raise HTTPException(status_code=409, detail="Model is referenced by a capability mapping; disable it instead")
+    db.delete(provider)
+    db.commit()
+    return {"deleted": True, "id": provider_id}
 
 
 @app.post("/api/v1/ai/providers/test")
@@ -2827,18 +3334,165 @@ def test_ai_provider(
     payload: ProviderConfigIn,
     auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
 ) -> dict[str, Any]:
-    capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
-    if not capabilities:
-        raise HTTPException(status_code=422, detail="At least one supported capability is required")
-    ok = payload.provider == "mock" or payload.endpoint.startswith(("local://", "http://", "https://"))
+    values = model_values_from_payload(payload)
+    provider = ModelConfig(
+        display_name=values["display_name"],
+        provider=values["provider"],
+        model_name=values["model_name"],
+        base_url=values["base_url"],
+        timeout_seconds=values["timeout_seconds"],
+        encrypted_api_key=encrypt_api_key(payload.api_key),
+        enabled=values["enabled"],
+    )
+    result = test_model_connection(provider)
     return {
-        "ok": ok,
-        "provider": payload.provider,
-        "model": payload.model,
-        "capabilities": capabilities,
-        "status": "connected" if ok else "configured",
-        "message": "Connection test succeeded with test-safe provider configuration" if ok else "Provider saved for offline configuration",
+        "ok": result["ok"],
+        "provider": provider.provider,
+        "model": provider.model_name,
+        "capabilities": [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES],
+        "status": result["status"],
+        "message": result["message"],
     }
+
+
+@app.post("/api/v1/ai/providers/{provider_id}/test")
+def test_saved_ai_provider(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> dict[str, Any]:
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+    result = test_model_connection(provider)
+    provider.connection_status = result["status"]
+    provider.last_test_message = result["message"]
+    provider.last_test_at = now()
+    provider.updated_at = now()
+    db.commit()
+    return {"ok": result["ok"], "status": result["status"], "message": result["message"], "provider": provider.provider, "model": provider.model_name}
+
+
+@app.get("/api/v1/ai/capability-mappings", response_model=list[CapabilityMappingOut])
+def list_capability_mappings(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> list[CapabilityMappingOut]:
+    ensure_provider_configs(db)
+    mappings = db.query(CapabilityModelMapping).order_by(CapabilityModelMapping.capability).all()
+    return [mapping_to_out(mapping) for mapping in mappings]
+
+
+@app.put("/api/v1/ai/capability-mappings/{capability}", response_model=CapabilityMappingOut)
+def save_capability_mapping(
+    capability: str,
+    payload: CapabilityMappingIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> CapabilityMappingOut:
+    capability = capability or payload.capability
+    if capability not in AI_CAPABILITIES:
+        raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    primary = db.get(ModelConfig, payload.primary_model_id)
+    if not primary or not primary.enabled:
+        raise HTTPException(status_code=409, detail="Primary model must exist and be enabled")
+    fallback = db.get(ModelConfig, payload.fallback_model_id) if payload.fallback_model_id else None
+    if payload.fallback_model_id and (not fallback or not fallback.enabled):
+        raise HTTPException(status_code=409, detail="Fallback model must exist and be enabled")
+    mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == capability).first()
+    if not mapping:
+        mapping = CapabilityModelMapping(capability=capability, primary_model_id=primary.id)
+        db.add(mapping)
+    mapping.primary_model_id = primary.id
+    mapping.fallback_model_id = fallback.id if fallback else None
+    mapping.enabled = payload.enabled
+    mapping.updated_at = now()
+    db.commit()
+    db.refresh(mapping)
+    return mapping_to_out(mapping)
+
+
+@app.post("/api/v1/ai/capabilities/{capability}/invoke")
+def invoke_ai_capability(
+    capability: str,
+    payload: GatewayInvokeIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/ai-add/preview")),
+) -> dict[str, Any]:
+    if capability not in AI_CAPABILITIES:
+        raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    return invoke_gateway_capability(db, capability, payload.prompt, payload.messages)
+
+
+@app.get("/api/v1/debug/trace", response_model=list[TraceSummaryOut])
+def list_traces(
+    status: str = "",
+    operation: str = "",
+    capability: str = "",
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> list[TraceSummaryOut]:
+    if not ai_debug_enabled():
+        raise HTTPException(status_code=403, detail="AI debug trace UI is disabled")
+    query = db.query(TracerSpan)
+    if status:
+        query = query.filter(TracerSpan.status == status)
+    if capability:
+        query = query.filter(TracerSpan.capability == capability)
+    if operation:
+        query = query.filter(TracerSpan.operation_name.like(f"%{operation}%"))
+    spans = query.order_by(TracerSpan.start_time.desc()).limit(500).all()
+    grouped: dict[str, list[TracerSpan]] = {}
+    for span in spans:
+        grouped.setdefault(span.trace_id, []).append(span)
+    summaries: list[TraceSummaryOut] = []
+    for trace_id, trace_spans in grouped.items():
+        root = next((span for span in trace_spans if not span.parent_span_id), trace_spans[0])
+        summaries.append(
+            TraceSummaryOut(
+                trace_id=trace_id,
+                operation_name=root.operation_name,
+                capability=root.capability,
+                status="error" if any(span.status == "error" for span in trace_spans) else root.status,
+                start_time=root.start_time.isoformat(),
+                duration_ms=sum(span.duration_ms for span in trace_spans if not span.parent_span_id) or root.duration_ms,
+                span_count=len(trace_spans),
+            )
+        )
+    return sorted(summaries, key=lambda item: item.start_time, reverse=True)
+
+
+@app.get("/api/v1/debug/trace/{trace_id}", response_model=TraceDetailOut)
+def get_trace_detail(
+    trace_id: str,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> TraceDetailOut:
+    if not ai_debug_enabled():
+        raise HTTPException(status_code=403, detail="AI debug trace UI is disabled")
+    spans = db.query(TracerSpan).filter(TracerSpan.trace_id == trace_id).order_by(TracerSpan.start_time).all()
+    if not spans:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return TraceDetailOut(
+        trace_id=trace_id,
+        spans=[
+            {
+                "span_id": span.span_id,
+                "parent_span_id": span.parent_span_id,
+                "operation_name": span.operation_name,
+                "span_type": span.span_type,
+                "capability": span.capability,
+                "provider": span.provider,
+                "model": span.model,
+                "status": span.status,
+                "start_time": span.start_time.isoformat(),
+                "duration_ms": span.duration_ms,
+                "metadata": json.loads(span.metadata_json or "{}"),
+                "error": span.error,
+            }
+            for span in spans
+        ],
+    )
 
 
 @app.put("/api/v1/materials/{material_id}", response_model=MaterialOut)
