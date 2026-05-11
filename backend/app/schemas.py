@@ -196,3 +196,48 @@ class MaterialGovernanceImportIn(BaseModel):
     material_library_id: int | None = None
     category_id: int | None = None
     items: list[dict[str, Any]]
+
+
+class AiMaterialAddPreviewIn(BaseModel):
+    input_text: str
+    material_library_id: int
+    category_id: int | None = None
+    product_name_id: int | None = None
+    brand_id: int | None = None
+    unit: str | None = None
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AiMaterialAddConfirmIn(BaseModel):
+    preview: dict[str, Any]
+    allow_duplicate: bool = False
+
+
+class MaterialMatchIn(BaseModel):
+    material_library_id: int
+    query: str | None = None
+    name: str | None = None
+    brand: str | None = None
+    brand_id: int | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    description: str = ""
+    top_k: int = 3
+
+
+class ProviderConfigIn(BaseModel):
+    provider: str = "mock"
+    model: str = "mock-material-governance-v1"
+    endpoint: str = ""
+    capabilities: list[str] = Field(default_factory=lambda: ["material_add", "material_match"])
+    active: bool = True
+
+
+class ProviderConfigOut(BaseModel):
+    id: int
+    provider: str
+    model: str
+    endpoint: str
+    capabilities: list[str]
+    active: bool
+    connection_status: str
+    updated_at: str
