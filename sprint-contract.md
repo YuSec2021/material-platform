@@ -1,79 +1,102 @@
-## Sprint 5: AI Material Addition and Vector Matching
+## Sprint 6: Material Application Workflows - New Category and Code
 
 ### Features
-- F08-AI natural language material addition (capability: `material_add`)
-- F08-Frontend: multi-step AI add material wizard
-- F09-AI vector similarity matching (capability: `material_match`)
-- Qdrant vector DB integration with hybrid search, with deterministic local fallback allowed only when Qdrant is unavailable in the test environment
-- Frontend: duplicate detection UI with Top-3 matches and confidence scores
-- AI-powered attribute extraction from unstructured material input before material creation
-- LLM provider integration for AI governance responses, including visible provider/capability metadata and configurable provider selection
+- F10-New Material Category Application workflow
+- F11-New Material Code Application workflow
+- Approval mode configuration for simple approval and multi-node workflow
+- Frontend: workflow form, approval history, status tracking, approver task list
+- Backend: workflow state machine with approval, rejection, return reason, and immutable workflow history
+- Approved category applications auto-create categories in the category library
+- Approved material code applications auto-add materials to the material catalog
 
-### AI Material Addition Fields
-An AI material addition request contains:
-- `input_text` (string, required, unstructured material description)
-- `material_library_id` (integer, required)
-- optional `category_id`, `product_name_id`, `brand_id`, and `unit` hints
-- optional image or attachment metadata when supplied by the browser
+### Workflow Application Fields
+A workflow application record contains:
+- `id` (integer, primary key)
+- `application_no` (string, auto-generated, stable user-facing number)
+- `type` (string enum: `new_category`, `new_material_code`)
+- `status` (string enum: `draft`, `submitted`, `pending_department_head`, `pending_asset_management`, `pending_approval`, `approved`, `rejected`)
+- `applicant` or applicant identity fields visible in the UI
+- `current_node` (string, current approval step or terminal state)
+- `reason` or `business_reason` (string, required on submit)
+- `approval_history` (ordered list of submit/approve/reject events with actor, node, action, comment, and timestamp)
+- `created_at`, `updated_at` (timestamps)
 
-An AI material addition preview returns:
-- `capability` (string, value `material_add`)
-- `provider` (string, active LLM provider name, e.g. `mock`, `dashscope`, `azure`, `vllm`, or `ollama`)
-- `model` (string, active model identifier)
-- `trace_id` (string, stable non-empty identifier for the AI governance request)
-- proposed material fields: name, unit, category/product-name binding, brand, description, and attributes
-- extraction confidence and field-level extraction sources
-- vector duplicate check summary with Top-3 matches, match scores, and threshold classification
+A new material category application contains:
+- `material_library_id` or target library selection
+- target parent category selection when applicable
+- proposed category name (required)
+- proposed category code or auto-generated category code preview
+- category level/path preview
+- description or business justification
+
+A new material code application contains:
+- `material_library_id` (required)
+- category and product-name binding (required)
+- material name (required)
+- unit (required)
+- brand (optional unless selected product rules require it)
+- attributes object with user-entered attribute values
+- reference mall link (required URL)
+- exactly three or more uploaded reference images, with three images required before submission
+- duplicate/matching warning from existing material catalog when available
 
 ### Success criteria (black-box-verifiable)
-- [ ] A user can run an AI material addition wizard from unstructured input, review extracted fields, approve the preview, and create a material with an auto-generated code.
+- [ ] A material manager can submit a new material category application, complete a multi-node approval flow, and see the approved category created in the category library.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Navigate to the AI material addition area from the visible navigation or open `http://localhost:5173/materials/ai-add`.
-  3. Enter a unique unstructured description such as `申请新增 华为 24口千兆交换机 S1730S-L24T-A1，单位台，品牌华为，端口数24，速率1000Mbps，适用于办公网络接入`, select a material library, and run AI analysis.
-  4. Assert the preview page shows extracted material name, unit, brand, product/category recommendation, and at least two attribute values derived from the unstructured input.
-  5. Assert the preview includes visible AI governance metadata: `material_add` capability, provider name, model name, trace ID, and confidence.
-  6. Approve or confirm the preview from the browser UI and assert a success message reports that a material was created.
-  7. Search the material list at `http://localhost:5173/materials` for the unique material name and assert the created material appears with an auto-generated material code in `MAT-XXXXXXXX` format and `normal` status.
+  2. Open the approval configuration area from visible navigation, or open `http://localhost:5173/system/config`, set approval mode to multi-node workflow, and save.
+  3. Open the new category application page from visible navigation, or open `http://localhost:5173/workflows/new-category`.
+  4. Submit a unique category request as a material manager with a target category library, optional parent category, category name such as `测试新增类目-<timestamp>`, description, and business reason.
+  5. Assert the application detail page shows an auto-generated application number, status `pending_department_head`, current node for department-head approval, and a submit event in approval history.
+  6. Open the approver task list from visible navigation, or open `http://localhost:5173/workflows/tasks`, approve the application as the department head, and assert the status changes to `pending_asset_management`.
+  7. Approve the same application as asset management and assert the final status is `approved` with both approval events visible in chronological approval history.
+  8. Open the category management page at `http://localhost:5173/categories`, search for the unique category name, and assert the category exists under the selected library/path with a generated or accepted category code.
 
-- [ ] AI attribute extraction is available through documented HTTP surfaces and returns structured, validated field suggestions from plain text.
+- [ ] Category application rejection returns the request to the applicant with a required reason and does not create a category.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Open `http://localhost:5173/workflows/new-category` and submit a unique category request with a target library, category name such as `测试驳回类目-<timestamp>`, description, and business reason.
+  3. Open `http://localhost:5173/workflows/tasks`, attempt to reject without a comment, and assert the UI blocks the action or displays a validation error requiring a rejection reason.
+  4. Reject the application with a visible reason such as `类目名称不符合标准命名规则`.
+  5. Assert the applicant-facing application list at `http://localhost:5173/workflows/applications` shows the request with status `rejected` and displays the rejection reason in the detail/history view.
+  6. Open `http://localhost:5173/categories`, search for the rejected category name, and assert no category was created.
+
+- [ ] A material manager can submit a new material code application with a reference mall link and three required images, approve it, and find the new material in the catalog.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Open the new material code application page from visible navigation, or open `http://localhost:5173/workflows/new-material-code`.
+  3. Fill the form with a unique material name such as `测试编码物料-<timestamp>`, material library, category/product-name binding, unit, brand when available, at least two attribute values, reference mall link `https://example.com/material-code-test`, and business reason.
+  4. Attempt to submit with fewer than three uploaded images and assert the UI blocks submission with a visible validation message for the three required reference images.
+  5. Upload three valid image files, submit the application, and assert the application detail shows an auto-generated application number, submitted material fields, uploaded image thumbnails, reference mall link, and pending approval status.
+  6. Approve the application through `http://localhost:5173/workflows/tasks` using the configured approval flow and assert the final application status is `approved`.
+  7. Open the material list at `http://localhost:5173/materials`, search for the unique material name, and assert the material appears with an auto-generated material code in `MAT-XXXXXXXX` format, `normal` status, the submitted unit/attributes, and the reference link or images visible in detail.
+
+- [ ] Material code application rejection returns the request with reason, preserves submitted evidence, and does not add the material to the catalog.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Open `http://localhost:5173/workflows/new-material-code` and submit a unique material code application with a reference mall URL, three uploaded images, required category/product/material fields, and attribute values.
+  3. Open `http://localhost:5173/workflows/tasks`, reject the application with a reason such as `商城链接与申请物料不一致`.
+  4. Assert the applicant-facing detail page shows status `rejected`, the rejection reason, the original submitted reference mall link, and the three uploaded image thumbnails.
+  5. Open `http://localhost:5173/materials`, search for the rejected material name, and assert no material was created in the catalog.
+
+- [ ] Simple approval mode can be configured externally and shortens both application workflows to a single approval step without restarting the system.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173/system/config` in a browser.
+  2. Change approval mode from multi-node workflow to simple approval and save; do not restart the backend or rerun `bash init.sh`.
+  3. Submit a new category application from `http://localhost:5173/workflows/new-category` and assert its status is `pending_approval` or an equivalent single approver state, not `pending_department_head`.
+  4. Approve the category application once from `http://localhost:5173/workflows/tasks` and assert it becomes `approved` and the category appears at `http://localhost:5173/categories`.
+  5. Submit a new material code application from `http://localhost:5173/workflows/new-material-code` with a valid reference mall link and three images.
+  6. Approve the material code application once from `http://localhost:5173/workflows/tasks` and assert it becomes `approved` and the material appears at `http://localhost:5173/materials`.
+
+- [ ] Workflow APIs are documented and enforce state-machine rules independently of source-code inspection.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:8000/openapi.json` in a browser.
-  2. Assert the OpenAPI document lists an AI material addition preview endpoint, for example `/api/v1/materials/ai-add/preview` or `/api/v1/ai/material-add/preview`, and that the operation exposes the `material_add` capability.
-  3. Send a real HTTP request to the preview endpoint with an unstructured description containing a material name, unit, brand, and at least two attribute facts.
-  4. Assert the JSON response contains `capability: "material_add"`, non-empty provider/model metadata, a non-empty `trace_id`, proposed material fields, and an `attributes` object containing extracted values from the request text.
-  5. Assert the response identifies missing or ambiguous required fields with visible validation errors instead of creating a material automatically.
-  6. Send a valid HTTP confirmation request for the preview result and assert the response returns a persisted material with an auto-generated `MAT-XXXXXXXX` code.
-
-- [ ] Semantic search and vector matching detect likely duplicate materials and classify matches by score thresholds.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Create or confirm the existence of at least three baseline materials in the same material library, including one with substantially similar text, brand, and attributes to the material that will be added through AI.
-  3. Open `http://localhost:5173/materials/ai-add`, enter an unstructured description that is semantically similar to the baseline material but not an exact text copy, and run AI analysis.
-  4. Assert the duplicate detection section displays the Top-3 candidate matches with material code, name, brand or attributes, numeric confidence scores, and a visible classification of highly duplicate, suspicious, or normal.
-  5. Assert a highly similar material is classified as highly duplicate when the score is at least `0.90`, a moderately similar material is classified as suspicious when the score is at least `0.75` and below `0.90`, and a low-similarity material is classified as normal when below `0.75`.
-  6. Assert the UI allows the user to reject/cancel creation because of a duplicate warning and that the rejected preview does not create a new material in the material list.
-  7. Repeat with a clearly distinct material description, approve creation, and assert the vector matching result is normal and the material is created successfully.
-
-- [ ] Vector matching is exposed through a documented API used by the browser and returns hybrid matching evidence, not only exact keyword matches.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:8000/openapi.json` in a browser.
-  2. Assert the OpenAPI document lists a material matching endpoint, for example `/api/v1/materials/match` or `/api/v1/ai/material-match`, and that the operation exposes the `material_match` capability.
-  3. Use the browser or a real HTTP request to create two materials with different wording but semantically close meaning in the same material library.
-  4. Send a real HTTP request to the matching endpoint with a query description that uses synonyms or reordered attributes rather than the exact stored material name.
-  5. Assert the response returns up to three matches with `capability: "material_match"`, total score, semantic score, text score, brand score, and threshold classification for each match.
-  6. Assert the semantically closest existing material appears ahead of an unrelated material, proving the result is not limited to exact substring search.
-  7. Open `http://localhost:5173/materials/ai-add` and assert the browser UI displays the same matching evidence during the AI add flow.
-
-- [ ] LLM provider governance can be configured externally and is reflected in AI material addition and matching results without a server restart.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Open the AI governance or model provider configuration area from navigation, or open `http://localhost:5173/ai/providers`.
-  3. Add or select a test-safe provider configuration using a local/mock provider with no real secret required, map `material_add` and `material_match` to that provider, and save the configuration.
-  4. Run a connection test from the browser UI and assert the UI reports success with the selected provider and model.
-  5. Without restarting `bash init.sh` or the backend server, run an AI material addition preview from `http://localhost:5173/materials/ai-add`.
-  6. Assert the preview response shown in the UI uses the newly selected provider/model metadata for `material_add`.
-  7. Run vector matching during the same flow and assert the matching result also includes visible provider or embedding provider metadata for `material_match`.
+  2. Assert the OpenAPI document lists endpoints for workflow application creation, listing/detail, approval, rejection, approval-mode configuration, and task retrieval under paths such as `/api/v1/workflows/applications`, `/api/v1/workflows/tasks`, or `/api/v1/system/config`.
+  3. Send a real HTTP request to create a new category application and assert the JSON response includes `application_no`, `type: "new_category"`, non-terminal pending status, current node, and an approval history entry for submission.
+  4. Send an invalid approval request for the wrong current node or for an already terminal application and assert the API returns a 4xx response with a clear state-transition error instead of mutating the workflow.
+  5. Send valid approval requests for the configured approval mode and assert the terminal response is `approved` and contains the full ordered approval history.
+  6. Verify through a real HTTP request or browser page at `http://localhost:5173/categories` or `http://localhost:8000/openapi.json`-listed category endpoint that the approved category application created a category in the target library.
+  7. Repeat the API flow for a new material code application and assert approval creates a material catalog entry while rejection returns `rejected` and creates no material.
 
 ---
 

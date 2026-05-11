@@ -241,3 +241,66 @@ class ProviderConfigOut(BaseModel):
     active: bool
     connection_status: str
     updated_at: str
+
+
+class SystemConfigIn(BaseModel):
+    approval_mode: str
+
+
+class SystemConfigOut(BaseModel):
+    approval_mode: str
+    updated_by: str
+    updated_at: str
+
+
+class WorkflowApplicationIn(BaseModel):
+    type: str
+    applicant: str = "material_manager"
+    business_reason: str
+    material_library_id: int | None = None
+    parent_category_id: int | None = None
+    proposed_category_name: str | None = None
+    proposed_category_code: str | None = None
+    description: str = ""
+    product_name_id: int | None = None
+    category_id: int | None = None
+    material_name: str | None = None
+    unit: str = ""
+    brand_id: int | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    reference_mall_link: str = ""
+    reference_images: list[dict[str, Any] | str] = Field(default_factory=list)
+
+
+class WorkflowActionIn(BaseModel):
+    actor: str = "approver"
+    node: str | None = None
+    comment: str = ""
+
+
+class WorkflowHistoryOut(BaseModel):
+    id: int
+    actor: str
+    node: str
+    action: str
+    from_status: str
+    to_status: str
+    comment: str
+    created_at: str
+
+
+class WorkflowApplicationOut(BaseModel):
+    id: int
+    application_no: str
+    type: str
+    status: str
+    applicant: str
+    current_node: str
+    business_reason: str
+    rejection_reason: str
+    data: dict[str, Any]
+    approval_history: list[WorkflowHistoryOut]
+    created_resource_type: str
+    created_resource_id: int | None
+    created_at: str
+    updated_at: str

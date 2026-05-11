@@ -11,6 +11,7 @@ let editingMaterialId = null;
 let materialPreviewItems = [];
 let materialGovernanceFile = null;
 let aiMaterialPreview = null;
+let workflowReferenceImages = [];
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;",
@@ -824,9 +825,329 @@ async function deleteBrand(id) {
   renderBrands();
 }
 
+function workflowStatusBadge(status) {
+  return `<span class="status-badge status-workflow-${esc(status)}">${esc(status)}</span>`;
+}
+
+function workflowHistory(history) {
+  if (!history?.length) return `<div class="empty">No approval history</div>`;
+  return `
+    <table>
+      <thead><tr><th>Time</th><th>Actor</th><th>Node</th><th>Action</th><th>Status</th><th>Comment</th></tr></thead>
+      <tbody>
+        ${history.map((event) => `
+          <tr>
+            <td>${esc(event.created_at)}</td>
+            <td>${esc(event.actor)}</td>
+            <td>${esc(event.node)}</td>
+            <td>${esc(event.action)}</td>
+            <td>${esc(event.from_status)} -> ${esc(event.to_status)}</td>
+            <td>${esc(event.comment)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function workflowDetail(application) {
+  const data = application.data || {};
+  return `
+    <section class="panel">
+      <div class="toolbar">
+        <h3>${esc(application.application_no)}</h3>
+        ${workflowStatusBadge(application.status)}
+        <span class="pill">current node: ${esc(application.current_node)}</span>
+      </div>
+      <p><strong>Applicant:</strong> ${esc(application.applicant)}</p>
+      <p><strong>Business reason:</strong> ${esc(application.business_reason)}</p>
+      ${application.rejection_reason ? `<p><strong>Rejection reason:</strong> ${esc(application.rejection_reason)}</p>` : ""}
+      <div class="workflow-evidence">
+        ${data.reference_mall_link ? `<a href="${esc(data.reference_mall_link)}" target="_blank" rel="noreferrer">${esc(data.reference_mall_link)}</a>` : ""}
+        ${(data.reference_images || []).map((image) => `<img class="thumb large-thumb" src="${esc(image.data_url)}" alt="${esc(image.filename || "reference image")}" />`).join("")}
+      </div>
+      <pre>${esc(JSON.stringify(data, null, 2))}</pre>
+      <h3>Approval history</h3>
+      ${workflowHistory(application.approval_history)}
+    </section>
+  `;
+}
+
+async function renderSystemConfig() {
+  const config = await request("/system/config");
+  app.innerHTML = `
+    <h2>System Configuration</h2>
+    <section class="panel narrow-panel">
+      <label>Approval mode
+        <select id="approvalMode">
+          <option value="multi_node" ${config.approval_mode === "multi_node" ? "selected" : ""}>multi-node workflow</option>
+          <option value="simple" ${config.approval_mode === "simple" ? "selected" : ""}>simple approval</option>
+        </select>
+      </label>
+      <button id="saveApprovalMode">Save configuration</button>
+      <div id="configStatus" class="status muted">Current mode: ${esc(config.approval_mode)}. Last update: ${esc(config.updated_at)}</div>
+    </section>
+  `;
+  document.getElementById("saveApprovalMode").addEventListener("click", async () => {
+    const saved = await request("/system/config", {
+      method: "PUT",
+      body: JSON.stringify({ approval_mode: document.getElementById("approvalMode").value })
+    });
+    document.getElementById("configStatus").textContent = `Saved approval mode: ${saved.approval_mode}`;
+  });
+}
+
+async function renderCategories() {
+  await loadMaterialContext();
+  const search = document.getElementById("categorySearch")?.value || "";
+  const filtered = categories.filter((category) => {
+    const text = `${category.name} ${category.code} ${category.description}`.toLowerCase();
+    return text.includes(search.toLowerCase());
+  });
+  app.innerHTML = `
+    <h2>Category Management</h2>
+    <div class="toolbar">
+      <input id="categorySearch" value="${esc(search)}" placeholder="Search categories" />
+      <button id="searchCategory" class="secondary">Search</button>
+      <button id="clearCategorySearch" class="secondary">Clear</button>
+    </div>
+    <section class="panel">
+      <table>
+        <thead><tr><th>Category</th><th>Code</th><th>Description</th><th>Status</th></tr></thead>
+        <tbody>
+          ${filtered.map((category) => `
+            <tr>
+              <td>${esc(category.name)}</td>
+              <td>${esc(category.code)}</td>
+              <td>${esc(category.description)}</td>
+              <td>${category.enabled ? "enabled" : "disabled"}</td>
+            </tr>
+          `).join("") || `<tr><td colspan="4"><div class="empty">No categories found</div></td></tr>`}
+        </tbody>
+      </table>
+    </section>
+  `;
+  document.getElementById("searchCategory").addEventListener("click", renderCategories);
+  document.getElementById("clearCategorySearch").addEventListener("click", () => {
+    document.getElementById("categorySearch").value = "";
+    renderCategories();
+  });
+}
+
+async function renderNewCategoryWorkflow() {
+  await loadMaterialContext();
+  app.innerHTML = `
+    <h2>New Material Category Application</h2>
+    <div class="grid">
+      <section class="panel">
+        ${materialLibrarySelect()}
+        <label>Parent category
+          <select id="parentCategorySelect">
+            <option value="">No parent category</option>
+            ${categories.map((category) => `<option value="${category.id}">${esc(category.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Proposed category name<input id="categoryWorkflowName" placeholder="测试新增类目" /></label>
+        <label>Proposed category code<input id="categoryWorkflowCode" placeholder="Optional, otherwise auto-generated" /></label>
+        <label>Description<textarea id="categoryWorkflowDescription" placeholder="Category scope and usage"></textarea></label>
+        <label>Business reason<textarea id="categoryWorkflowReason" placeholder="Why this category is needed"></textarea></label>
+        <button id="submitCategoryWorkflow">Submit category application</button>
+        <div id="categoryWorkflowStatus" class="status muted"></div>
+      </section>
+      <section id="categoryWorkflowDetail"><div class="empty">Submitted workflow status will appear here</div></section>
+    </div>
+  `;
+  document.getElementById("submitCategoryWorkflow").addEventListener("click", submitCategoryWorkflow);
+}
+
+async function submitCategoryWorkflow() {
+  const payload = {
+    type: "new_category",
+    applicant: "material_manager",
+    material_library_id: Number(document.getElementById("materialLibrarySelect").value),
+    parent_category_id: document.getElementById("parentCategorySelect").value ? Number(document.getElementById("parentCategorySelect").value) : null,
+    proposed_category_name: document.getElementById("categoryWorkflowName").value.trim(),
+    proposed_category_code: document.getElementById("categoryWorkflowCode").value.trim(),
+    description: document.getElementById("categoryWorkflowDescription").value,
+    business_reason: document.getElementById("categoryWorkflowReason").value.trim()
+  };
+  try {
+    const application = await request("/workflows/applications", { method: "POST", body: JSON.stringify(payload) });
+    document.getElementById("categoryWorkflowStatus").textContent = `Submitted ${application.application_no}`;
+    document.getElementById("categoryWorkflowDetail").innerHTML = workflowDetail(application);
+  } catch (error) {
+    document.getElementById("categoryWorkflowStatus").textContent = error.message;
+  }
+}
+
+function imageInputHint() {
+  return workflowReferenceImages.length
+    ? `${workflowReferenceImages.length} reference images ready`
+    : "Three required reference images must be uploaded before submission";
+}
+
+async function renderNewMaterialCodeWorkflow() {
+  await loadMaterialContext();
+  workflowReferenceImages = [];
+  app.innerHTML = `
+    <h2>New Material Code Application</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        ${productSelect()}
+        ${materialLibrarySelect()}
+        ${categorySelect()}
+        ${brandSelect()}
+        <label>Material name<input id="codeWorkflowName" placeholder="测试编码物料" /></label>
+        <label>Unit<input id="codeWorkflowUnit" placeholder="台" /></label>
+        <label>Attributes<textarea id="codeWorkflowAttributes" placeholder="型号: TEST-100&#10;规格: 标准"></textarea></label>
+        <label>Reference mall link<input id="codeWorkflowLink" value="https://example.com/material-code-test" /></label>
+        <label>Reference images<input id="codeWorkflowImages" type="file" accept="image/*" multiple /></label>
+        <label>Business reason<textarea id="codeWorkflowReason" placeholder="Why this material code is needed"></textarea></label>
+        <button id="submitCodeWorkflow">Submit material code application</button>
+        <div id="codeWorkflowStatus" class="status muted">${imageInputHint()}</div>
+        <div id="codeImagePreview" class="thumb-row"></div>
+      </section>
+      <section id="codeWorkflowDetail"><div class="empty">Submitted workflow status will appear here</div></section>
+    </div>
+  `;
+  bindProductSelect(() => {});
+  document.getElementById("codeWorkflowImages").addEventListener("change", async (event) => {
+    const files = Array.from(event.target.files || []);
+    workflowReferenceImages = await Promise.all(files.map(async (file) => ({
+      filename: file.name,
+      content_type: file.type || "image/png",
+      data_url: await fileDataUrl(file)
+    })));
+    document.getElementById("codeWorkflowStatus").textContent = imageInputHint();
+    document.getElementById("codeImagePreview").innerHTML = workflowReferenceImages.map((image) => `<img class="thumb large-thumb" src="${esc(image.data_url)}" alt="${esc(image.filename)}" />`).join("");
+  });
+  document.getElementById("submitCodeWorkflow").addEventListener("click", submitMaterialCodeWorkflow);
+}
+
+async function submitMaterialCodeWorkflow() {
+  const status = document.getElementById("codeWorkflowStatus");
+  if (workflowReferenceImages.length < 3) {
+    status.textContent = "Three required reference images must be uploaded before submission";
+    return;
+  }
+  const payload = {
+    type: "new_material_code",
+    applicant: "material_manager",
+    material_library_id: Number(document.getElementById("materialLibrarySelect").value),
+    category_id: Number(document.getElementById("categorySelect").value),
+    product_name_id: Number(document.getElementById("productSelect").value),
+    brand_id: document.getElementById("materialBrand").value ? Number(document.getElementById("materialBrand").value) : null,
+    material_name: document.getElementById("codeWorkflowName").value.trim(),
+    unit: document.getElementById("codeWorkflowUnit").value.trim(),
+    attributes: parseAttributes(document.getElementById("codeWorkflowAttributes").value),
+    reference_mall_link: document.getElementById("codeWorkflowLink").value.trim(),
+    reference_images: workflowReferenceImages,
+    business_reason: document.getElementById("codeWorkflowReason").value.trim()
+  };
+  try {
+    const application = await request("/workflows/applications", { method: "POST", body: JSON.stringify(payload) });
+    status.textContent = `Submitted ${application.application_no}`;
+    document.getElementById("codeWorkflowDetail").innerHTML = workflowDetail(application);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function workflowTable(applications, taskMode = false) {
+  if (!applications.length) return `<div class="empty">No workflow applications found</div>`;
+  return `
+    <table>
+      <thead><tr><th>Application</th><th>Type</th><th>Status</th><th>Current node</th><th>Submitted data</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${applications.map((application) => {
+          const data = application.data || {};
+          const title = data.proposed_category_name || data.material_name || application.application_no;
+          return `
+            <tr>
+              <td>${esc(application.application_no)}<div class="muted">${esc(title)}</div></td>
+              <td>${esc(application.type)}</td>
+              <td>${workflowStatusBadge(application.status)}${application.rejection_reason ? `<div class="invalid">${esc(application.rejection_reason)}</div>` : ""}</td>
+              <td>${esc(application.current_node)}</td>
+              <td>${data.reference_mall_link ? `<a href="${esc(data.reference_mall_link)}" target="_blank" rel="noreferrer">reference mall link</a>` : esc(data.category_path_preview || "")}</td>
+              <td class="actions">
+                <button class="secondary" data-workflow-detail="${application.id}">Detail</button>
+                ${taskMode ? `<button data-workflow-approve="${application.id}" data-node="${esc(application.current_node)}">Approve</button><button class="danger" data-workflow-reject="${application.id}" data-node="${esc(application.current_node)}">Reject</button>` : ""}
+              </td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function renderWorkflowTasks() {
+  const applications = await request("/workflows/tasks");
+  app.innerHTML = `
+    <h2>Approver Task List</h2>
+    <section class="panel">
+      <label>Approval or rejection reason<input id="workflowActionComment" placeholder="Required for rejection; optional for approval" /></label>
+      <div id="workflowTaskStatus" class="status muted"></div>
+      ${workflowTable(applications, true)}
+    </section>
+    <section id="workflowTaskDetail"></section>
+  `;
+  bindWorkflowActions("workflowTaskDetail", renderWorkflowTasks);
+}
+
+async function renderWorkflowApplications() {
+  const applications = await request("/workflows/applications?applicant=material_manager");
+  app.innerHTML = `
+    <h2>Applicant Application List</h2>
+    <section class="panel">${workflowTable(applications, false)}</section>
+    <section id="workflowApplicationDetail"></section>
+  `;
+  bindWorkflowActions("workflowApplicationDetail", renderWorkflowApplications);
+}
+
+function bindWorkflowActions(detailId, refresh) {
+  document.querySelectorAll("[data-workflow-detail]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const application = await request(`/workflows/applications/${button.dataset.workflowDetail}`);
+      document.getElementById(detailId).innerHTML = workflowDetail(application);
+    });
+  });
+  document.querySelectorAll("[data-workflow-approve]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const comment = document.getElementById("workflowActionComment")?.value || "";
+      await request(`/workflows/applications/${button.dataset.workflowApprove}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ actor: button.dataset.node, node: button.dataset.node, comment })
+      });
+      refresh();
+    });
+  });
+  document.querySelectorAll("[data-workflow-reject]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const comment = document.getElementById("workflowActionComment")?.value || "";
+      const status = document.getElementById("workflowTaskStatus");
+      if (!comment.trim()) {
+        if (status) status.textContent = "A rejection reason is required";
+        return;
+      }
+      await request(`/workflows/applications/${button.dataset.workflowReject}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ actor: button.dataset.node, node: button.dataset.node, comment })
+      });
+      refresh();
+    });
+  });
+}
+
 async function route() {
   try {
     const path = window.location.pathname;
+    if (path.includes("/system/config")) return renderSystemConfig();
+    if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();
+    if (path.includes("/workflows/new-material-code")) return renderNewMaterialCodeWorkflow();
+    if (path.includes("/workflows/tasks")) return renderWorkflowTasks();
+    if (path.includes("/workflows/applications")) return renderWorkflowApplications();
+    if (path.includes("/categories")) return renderCategories();
     if (path.includes("/materials/governance")) return renderMaterialGovernance();
     if (path.includes("/materials")) return renderMaterials();
     if (path.includes("/standard/product-names")) return renderProductNames();
