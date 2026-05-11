@@ -5,12 +5,13 @@ import re
 import base64
 import binascii
 import csv
+from dataclasses import dataclass
 from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -36,6 +37,8 @@ from .models import (
 from .schemas import (
     AiMaterialAddConfirmIn,
     AiMaterialAddPreviewIn,
+    AuthLoginIn,
+    AuthUserOut,
     AttributeIn,
     AttributeOut,
     AttributeUpdate,
@@ -51,7 +54,9 @@ from .schemas import (
     MaterialGovernancePreviewIn,
     MaterialMatchIn,
     MaterialIn,
+    MaterialLibraryIn,
     MaterialLibraryOut,
+    MaterialLibraryUpdate,
     MaterialOut,
     MaterialTransitionIn,
     MaterialUpdate,
@@ -144,17 +149,100 @@ PERMISSION_CATALOG = [
     {"module": "material_archives", "permission_type": "directory", "permission_key": "directory.material_archives", "label": "Material Archives Directory"},
     {"module": "attribute_management", "permission_type": "directory", "permission_key": "directory.attribute_management", "label": "Attribute Management Directory"},
     {"module": "material_library", "permission_type": "directory", "permission_key": "directory.material_library", "label": "Material Library Directory"},
+    {"module": "workflow", "permission_type": "directory", "permission_key": "directory.workflow", "label": "Workflow Directory"},
+    {"module": "system_admin", "permission_type": "directory", "permission_key": "directory.system_admin", "label": "System Admin Directory"},
+    {"module": "category_management", "permission_type": "directory", "permission_key": "directory.category_management", "label": "Category Management Directory"},
+    {"module": "brand_management", "permission_type": "directory", "permission_key": "directory.brand_management", "label": "Brand Management Directory"},
+    {"module": "product_name_management", "permission_type": "directory", "permission_key": "directory.product_name_management", "label": "Product Name Directory"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.create", "label": "Material Archive Create"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.edit", "label": "Material Archive Edit"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.delete", "label": "Material Archive Delete"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.import", "label": "Material Archive Import"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.export", "label": "Material Archive Export"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.approval", "label": "Material Lifecycle Approval"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.create", "label": "Material Library Create"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.edit", "label": "Material Library Edit"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.delete", "label": "Material Library Delete"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.import", "label": "Material Library Import"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.export", "label": "Material Library Export"},
+    {"module": "material_library", "permission_type": "button", "permission_key": "button.material_library.approval", "label": "Material Library Approval"},
+    {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.create", "label": "Attribute Create"},
+    {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.edit", "label": "Attribute Edit"},
+    {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.delete", "label": "Attribute Delete"},
     {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.import", "label": "Attribute Import"},
     {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.export", "label": "Attribute Export"},
+    {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.submit", "label": "Workflow Submit"},
+    {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.approve", "label": "Workflow Approve"},
+    {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.reject", "label": "Workflow Reject"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.users.create", "label": "Create Local User"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.users.edit", "label": "Edit Local User"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.users.delete", "label": "Delete Local User"},
     {"module": "system_admin", "permission_type": "button", "permission_key": "button.users.reset_password", "label": "Reset Local User Password"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.roles.create", "label": "Create Role"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.roles.edit", "label": "Edit Role"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.roles.delete", "label": "Delete Role"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.roles.bind_users", "label": "Bind Role Users"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.roles.configure_permissions", "label": "Configure Role Permissions"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.GET./api/v1/material-libraries", "label": "GET /api/v1/material-libraries"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.POST./api/v1/material-libraries", "label": "POST /api/v1/material-libraries"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.GET./api/v1/material-libraries/{library_id}", "label": "GET /api/v1/material-libraries/{library_id}"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.PUT./api/v1/material-libraries/{library_id}", "label": "PUT /api/v1/material-libraries/{library_id}"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.DELETE./api/v1/material-libraries/{library_id}", "label": "DELETE /api/v1/material-libraries/{library_id}"},
     {"module": "material_archives", "permission_type": "api", "permission_key": "api.GET./api/v1/materials", "label": "GET /api/v1/materials"},
     {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials", "label": "POST /api/v1/materials"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.GET./api/v1/materials/{material_id}", "label": "GET /api/v1/materials/{material_id}"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.PUT./api/v1/materials/{material_id}", "label": "PUT /api/v1/materials/{material_id}"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.DELETE./api/v1/materials/{material_id}", "label": "DELETE /api/v1/materials/{material_id}"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.PATCH./api/v1/materials/{material_id}/stop-purchase", "label": "PATCH /api/v1/materials/{material_id}/stop-purchase"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/{material_id}/transition", "label": "POST /api/v1/materials/{material_id}/transition"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/governance/preview", "label": "POST /api/v1/materials/governance/preview"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/governance/import", "label": "POST /api/v1/materials/governance/import"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/ai-add/preview", "label": "POST /api/v1/materials/ai-add/preview"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/ai-add/confirm", "label": "POST /api/v1/materials/ai-add/confirm"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/match", "label": "POST /api/v1/materials/match"},
     {"module": "attribute_management", "permission_type": "api", "permission_key": "api.GET./api/v1/attributes", "label": "GET /api/v1/attributes"},
     {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/attributes", "label": "POST /api/v1/attributes"},
-    {"module": "material_library", "permission_type": "api", "permission_key": "api.GET./api/v1/material-libraries", "label": "GET /api/v1/material-libraries"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/attributes/{attribute_id}", "label": "PUT /api/v1/attributes/{attribute_id}"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/attributes/{attribute_id}", "label": "DELETE /api/v1/attributes/{attribute_id}"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.GET./api/v1/attributes/changes", "label": "GET /api/v1/attributes/changes"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.GET./api/v1/attributes/{attribute_id}/changes", "label": "GET /api/v1/attributes/{attribute_id}/changes"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/attributes/governance/preview", "label": "POST /api/v1/attributes/governance/preview"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/attributes/governance/import", "label": "POST /api/v1/attributes/governance/import"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/attribute-recommend", "label": "POST /api/v1/ai/attribute-recommend"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.GET./api/v1/workflows/applications", "label": "GET /api/v1/workflows/applications"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.POST./api/v1/workflows/applications", "label": "POST /api/v1/workflows/applications"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.GET./api/v1/workflows/applications/{application_id}", "label": "GET /api/v1/workflows/applications/{application_id}"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.POST./api/v1/workflows/applications/{application_id}/approve", "label": "POST /api/v1/workflows/applications/{application_id}/approve"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.POST./api/v1/workflows/applications/{application_id}/reject", "label": "POST /api/v1/workflows/applications/{application_id}/reject"},
+    {"module": "workflow", "permission_type": "api", "permission_key": "api.GET./api/v1/workflows/tasks", "label": "GET /api/v1/workflows/tasks"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/users", "label": "GET /api/v1/users"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.POST./api/v1/users", "label": "POST /api/v1/users"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/users/{user_id}", "label": "GET /api/v1/users/{user_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/users/{user_id}", "label": "PUT /api/v1/users/{user_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.DELETE./api/v1/users/{user_id}", "label": "DELETE /api/v1/users/{user_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.POST./api/v1/users/{user_id}/password-reset", "label": "POST /api/v1/users/{user_id}/password-reset"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/roles", "label": "GET /api/v1/roles"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.POST./api/v1/roles", "label": "POST /api/v1/roles"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/roles/{role_id}", "label": "GET /api/v1/roles/{role_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/roles/{role_id}", "label": "PUT /api/v1/roles/{role_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.DELETE./api/v1/roles/{role_id}", "label": "DELETE /api/v1/roles/{role_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PATCH./api/v1/roles/{role_id}/enable", "label": "PATCH /api/v1/roles/{role_id}/enable"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PATCH./api/v1/roles/{role_id}/disable", "label": "PATCH /api/v1/roles/{role_id}/disable"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/roles/{role_id}/users", "label": "GET /api/v1/roles/{role_id}/users"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.POST./api/v1/roles/{role_id}/users", "label": "POST /api/v1/roles/{role_id}/users"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/roles/{role_id}/users", "label": "PUT /api/v1/roles/{role_id}/users"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.DELETE./api/v1/roles/{role_id}/users/{user_id}", "label": "DELETE /api/v1/roles/{role_id}/users/{user_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/roles/{role_id}/permissions", "label": "GET /api/v1/roles/{role_id}/permissions"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/roles/{role_id}/permissions", "label": "PUT /api/v1/roles/{role_id}/permissions"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/permissions/catalog", "label": "GET /api/v1/permissions/catalog"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories", "label": "GET /api/v1/categories"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names", "label": "GET /api/v1/product-names"},
+    {"module": "brand_management", "permission_type": "api", "permission_key": "api.GET./api/v1/brands", "label": "GET /api/v1/brands"},
+    {"module": "brand_management", "permission_type": "api", "permission_key": "api.POST./api/v1/brands", "label": "POST /api/v1/brands"},
+    {"module": "brand_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/brands/{brand_id}", "label": "PUT /api/v1/brands/{brand_id}"},
+    {"module": "brand_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/brands/{brand_id}", "label": "DELETE /api/v1/brands/{brand_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/system/config", "label": "GET /api/v1/system/config"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/system/config", "label": "PUT /api/v1/system/config"},
 ]
 
 
@@ -308,12 +396,121 @@ def provider_to_out(provider: LLMProviderConfig) -> ProviderConfigOut:
     )
 
 
-def permission_catalog_entries() -> list[PermissionEntry]:
-    return [PermissionEntry(**item) for item in PERMISSION_CATALOG]
+@dataclass
+class AuthContext:
+    user: User | None
+    username: str
+    display_name: str
+    permissions: set[str]
+    library_scope_ids: set[int] | None
+    is_super_admin: bool = False
+
+    def has(self, permission_key: str) -> bool:
+        return self.is_super_admin or permission_key in self.permissions
 
 
-def permission_catalog_by_key() -> dict[str, PermissionEntry]:
-    return {item.permission_key: item for item in permission_catalog_entries()}
+def permission_catalog_entries(db: Session | None = None) -> list[PermissionEntry]:
+    entries = [PermissionEntry(**item) for item in PERMISSION_CATALOG]
+    if db is not None:
+        ensure_seed_material_context(db)
+        libraries = db.query(MaterialLibrary).order_by(MaterialLibrary.id).all()
+        entries.extend(
+            PermissionEntry(
+                module="material_library",
+                permission_type="scope",
+                permission_key=f"scope.material_library.{library.id}",
+                label=f"Material Library Scope: {library.name}",
+            )
+            for library in libraries
+        )
+    return entries
+
+
+def permission_catalog_by_key(db: Session | None = None) -> dict[str, PermissionEntry]:
+    return {item.permission_key: item for item in permission_catalog_entries(db)}
+
+
+def super_admin_auth(db: Session | None = None) -> AuthContext:
+    scope_ids = None
+    permissions = set(permission_catalog_by_key(db).keys())
+    return AuthContext(
+        user=None,
+        username="super_admin",
+        display_name="Seeded Administrator",
+        permissions=permissions,
+        library_scope_ids=scope_ids,
+        is_super_admin=True,
+    )
+
+
+def effective_auth_for_user(user: User, db: Session) -> AuthContext:
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="User account is disabled")
+    permissions: set[str] = set()
+    scope_ids: set[int] = set()
+    has_scope_permissions = False
+    enabled_roles = [link.role for link in user.role_links if link.role.enabled]
+    for role in enabled_roles:
+        for permission in role.permissions:
+            if not permission.enabled:
+                continue
+            permissions.add(permission.permission_key)
+            if permission.permission_key.startswith("scope.material_library."):
+                has_scope_permissions = True
+                try:
+                    scope_ids.add(int(permission.permission_key.rsplit(".", 1)[1]))
+                except ValueError:
+                    continue
+    return AuthContext(
+        user=user,
+        username=user.username,
+        display_name=user.display_name,
+        permissions=permissions,
+        library_scope_ids=scope_ids if has_scope_permissions else None,
+        is_super_admin=False,
+    )
+
+
+def current_auth(request: Request, db: Session) -> AuthContext:
+    role_header = request.headers.get("X-User-Role", "").strip()
+    if role_header == "super_admin":
+        return super_admin_auth(db)
+    user_id = request.headers.get("X-User-Id", "").strip()
+    username = request.headers.get("X-Username", "").strip()
+    if not user_id and not username:
+        return super_admin_auth(db)
+    user = db.get(User, int(user_id)) if user_id.isdigit() else None
+    if not user and username:
+        if username == "super_admin":
+            return super_admin_auth(db)
+        user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=403, detail="Authenticated user not found")
+    return effective_auth_for_user(user, db)
+
+
+def require_api_permission(permission_key: str):
+    def dependency(request: Request, db: Session = Depends(get_db)) -> AuthContext:
+        auth = current_auth(request, db)
+        if not auth.has(permission_key):
+            raise HTTPException(status_code=403, detail=f"Missing permission: {permission_key}")
+        return auth
+
+    return dependency
+
+
+def require_button_permission(auth: AuthContext, permission_key: str) -> None:
+    if not auth.has(permission_key):
+        raise HTTPException(status_code=403, detail=f"Missing permission: {permission_key}")
+
+
+def is_library_in_scope(auth: AuthContext, library_id: int) -> bool:
+    return auth.is_super_admin or auth.library_scope_ids is None or library_id in auth.library_scope_ids
+
+
+def require_library_scope(auth: AuthContext, library_id: int) -> None:
+    if not is_library_in_scope(auth, library_id):
+        raise HTTPException(status_code=403, detail="Material library is outside the user's permission scope")
 
 
 def role_summary(role: Role) -> dict[str, Any]:
@@ -423,8 +620,8 @@ def validate_bindable_role(role: Role) -> None:
         raise HTTPException(status_code=409, detail="Disabled roles cannot be bound to users")
 
 
-def normalize_permission_payload(payload: RolePermissionsIn) -> list[PermissionEntry]:
-    catalog = permission_catalog_by_key()
+def normalize_permission_payload(payload: RolePermissionsIn, db: Session) -> list[PermissionEntry]:
+    catalog = permission_catalog_by_key(db)
     entries: list[PermissionEntry] = []
     seen: set[str] = set()
     for key in payload.permission_keys:
@@ -1522,34 +1719,167 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def auth_to_out(auth: AuthContext) -> AuthUserOut:
+    roles = [role_summary(link.role) for link in sorted(auth.user.role_links, key=lambda link: link.role.name)] if auth.user else []
+    return AuthUserOut(
+        id=auth.user.id if auth.user else None,
+        username=auth.username,
+        display_name=auth.display_name,
+        is_super_admin=auth.is_super_admin,
+        permissions=sorted(auth.permissions),
+        material_library_scope_ids=None if auth.library_scope_ids is None else sorted(auth.library_scope_ids),
+        roles=roles,
+    )
+
+
+@app.get("/api/v1/auth/me", response_model=AuthUserOut)
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> AuthUserOut:
+    return auth_to_out(current_auth(request, db))
+
+
+@app.post("/api/v1/auth/login", response_model=AuthUserOut)
+def login(payload: AuthLoginIn, db: Session = Depends(get_db)) -> AuthUserOut:
+    username = payload.username.strip()
+    if username == "super_admin":
+        return auth_to_out(super_admin_auth(db))
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return auth_to_out(effective_auth_for_user(user, db))
+
+
 @app.get("/api/v1/product-names", response_model=list[ProductNameOut])
-def list_product_names(db: Session = Depends(get_db)) -> list[ProductNameOut]:
+def list_product_names(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/product-names")),
+) -> list[ProductNameOut]:
     ensure_seed_product(db)
     products = db.query(ProductName).order_by(ProductName.id).all()
     return [ProductNameOut(id=p.id, name=p.name, unit=p.unit, category=p.category) for p in products]
 
 
 @app.get("/api/v1/material-libraries", response_model=list[MaterialLibraryOut])
-def list_material_libraries(db: Session = Depends(get_db)) -> list[MaterialLibraryOut]:
+def list_material_libraries(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries")),
+) -> list[MaterialLibraryOut]:
     ensure_seed_material_context(db)
-    libraries = db.query(MaterialLibrary).order_by(MaterialLibrary.id).all()
+    query = db.query(MaterialLibrary)
+    if not auth.is_super_admin and auth.library_scope_ids is not None:
+        query = query.filter(MaterialLibrary.id.in_(auth.library_scope_ids or {-1}))
+    libraries = query.order_by(MaterialLibrary.id).all()
     return [library_to_out(library) for library in libraries]
 
 
+@app.post("/api/v1/material-libraries", response_model=MaterialLibraryOut)
+def create_material_library(
+    payload: MaterialLibraryIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
+) -> MaterialLibraryOut:
+    require_button_permission(auth, "button.material_library.create")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Material library name is required")
+    if db.query(MaterialLibrary).filter(MaterialLibrary.name == name).first():
+        raise HTTPException(status_code=409, detail="Material library name must be unique")
+    library = MaterialLibrary(
+        code=next_unique_code(db, MaterialLibrary, "MLIB", f"{name}:{now().isoformat()}"),
+        name=name,
+        description=payload.description.strip(),
+        enabled=payload.enabled,
+    )
+    db.add(library)
+    db.commit()
+    db.refresh(library)
+    return library_to_out(library)
+
+
+@app.get("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
+def get_material_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialLibraryOut:
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    return library_to_out(library)
+
+
+@app.put("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
+def update_material_library(
+    library_id: int,
+    payload: MaterialLibraryUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/material-libraries/{library_id}")),
+) -> MaterialLibraryOut:
+    require_button_permission(auth, "button.material_library.edit")
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Material library name is required")
+        duplicate = db.query(MaterialLibrary).filter(MaterialLibrary.name == name, MaterialLibrary.id != library.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Material library name must be unique")
+        library.name = name
+    if payload.description is not None:
+        library.description = payload.description.strip()
+    if payload.enabled is not None:
+        library.enabled = payload.enabled
+    library.updated_at = now()
+    db.commit()
+    db.refresh(library)
+    return library_to_out(library)
+
+
+@app.delete("/api/v1/material-libraries/{library_id}")
+def delete_material_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/material-libraries/{library_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.material_library.delete")
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    if db.query(Material).filter(Material.material_library_id == library.id).first():
+        raise HTTPException(status_code=409, detail="Material library cannot be deleted while it contains materials")
+    db.delete(library)
+    db.commit()
+    return {"deleted": True, "id": library_id}
+
+
 @app.get("/api/v1/categories", response_model=list[CategoryOut])
-def list_categories(db: Session = Depends(get_db)) -> list[CategoryOut]:
+def list_categories(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories")),
+) -> list[CategoryOut]:
     ensure_seed_material_context(db)
     categories = db.query(Category).order_by(Category.id).all()
     return [category_to_out(category) for category in categories]
 
 
 @app.get("/api/v1/system/config", response_model=SystemConfigOut)
-def get_system_config(db: Session = Depends(get_db)) -> SystemConfigOut:
+def get_system_config(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> SystemConfigOut:
     return config_to_out(ensure_system_config(db))
 
 
 @app.put("/api/v1/system/config", response_model=SystemConfigOut)
-def update_system_config(payload: SystemConfigIn, db: Session = Depends(get_db)) -> SystemConfigOut:
+def update_system_config(
+    payload: SystemConfigIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> SystemConfigOut:
     mode = payload.approval_mode.strip()
     if mode not in APPROVAL_MODES:
         raise HTTPException(status_code=422, detail="approval_mode must be simple or multi_node")
@@ -1563,8 +1893,12 @@ def update_system_config(payload: SystemConfigIn, db: Session = Depends(get_db))
 
 
 @app.post("/api/v1/system/config", response_model=SystemConfigOut)
-def save_system_config(payload: SystemConfigIn, db: Session = Depends(get_db)) -> SystemConfigOut:
-    return update_system_config(payload, db)
+def save_system_config(
+    payload: SystemConfigIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> SystemConfigOut:
+    return update_system_config(payload, db, auth)
 
 
 @app.get("/api/v1/users", response_model=list[UserOut])
@@ -1575,6 +1909,7 @@ def list_users(
     team: str = "",
     account_ownership: str = "",
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/users")),
 ) -> list[UserOut]:
     ensure_hcm_seed_users(db)
     query = db.query(User)
@@ -1595,7 +1930,12 @@ def list_users(
 
 
 @app.post("/api/v1/users", response_model=UserOut)
-def create_user(payload: UserIn, db: Session = Depends(get_db)) -> UserOut:
+def create_user(
+    payload: UserIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/users")),
+) -> UserOut:
+    require_button_permission(auth, "button.users.create")
     ensure_hcm_seed_users(db)
     username = payload.username.strip()
     display_name = payload.display_name.strip()
@@ -1620,13 +1960,23 @@ def create_user(payload: UserIn, db: Session = Depends(get_db)) -> UserOut:
 
 
 @app.get("/api/v1/users/{user_id}", response_model=UserOut)
-def get_user(user_id: int, db: Session = Depends(get_db)) -> UserOut:
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/users/{user_id}")),
+) -> UserOut:
     ensure_hcm_seed_users(db)
     return user_to_out(get_user_or_404(db, user_id))
 
 
 @app.put("/api/v1/users/{user_id}", response_model=UserOut)
-def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)) -> UserOut:
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/users/{user_id}")),
+) -> UserOut:
+    require_button_permission(auth, "button.users.edit")
     user = get_user_or_404(db, user_id)
     require_local_user(user)
     for field in ["display_name", "unit", "department", "team", "email"]:
@@ -1644,7 +1994,12 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
 
 
 @app.post("/api/v1/users/{user_id}/password-reset", response_model=PasswordResetOut)
-def reset_user_password(user_id: int, db: Session = Depends(get_db)) -> PasswordResetOut:
+def reset_user_password(
+    user_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/users/{user_id}/password-reset")),
+) -> PasswordResetOut:
+    require_button_permission(auth, "button.users.reset_password")
     user = get_user_or_404(db, user_id)
     require_local_user(user)
     token = sha1(f"password-reset:{user.id}:{user.username}:{now().isoformat()}".encode("utf-8")).hexdigest()[:12].upper()
@@ -1661,7 +2016,12 @@ def reset_user_password(user_id: int, db: Session = Depends(get_db)) -> Password
 
 
 @app.delete("/api/v1/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/users/{user_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.users.delete")
     user = get_user_or_404(db, user_id)
     require_local_user(user)
     db.delete(user)
@@ -1670,12 +2030,20 @@ def delete_user(user_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @app.get("/api/v1/permissions/catalog", response_model=list[PermissionEntry])
-def get_permission_catalog() -> list[PermissionEntry]:
-    return permission_catalog_entries()
+def get_permission_catalog(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/permissions/catalog")),
+) -> list[PermissionEntry]:
+    return permission_catalog_entries(db)
 
 
 @app.get("/api/v1/roles", response_model=list[RoleOut])
-def list_roles(search: str = "", enabled: bool | None = None, db: Session = Depends(get_db)) -> list[RoleOut]:
+def list_roles(
+    search: str = "",
+    enabled: bool | None = None,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/roles")),
+) -> list[RoleOut]:
     query = db.query(Role)
     if search:
         like = f"%{search}%"
@@ -1686,7 +2054,12 @@ def list_roles(search: str = "", enabled: bool | None = None, db: Session = Depe
 
 
 @app.post("/api/v1/roles", response_model=RoleOut)
-def create_role(payload: RoleIn, db: Session = Depends(get_db)) -> RoleOut:
+def create_role(
+    payload: RoleIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/roles")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.create")
     name = payload.name.strip()
     code = payload.code.strip()
     if not name or not code:
@@ -1700,12 +2073,22 @@ def create_role(payload: RoleIn, db: Session = Depends(get_db)) -> RoleOut:
 
 
 @app.get("/api/v1/roles/{role_id}", response_model=RoleOut)
-def get_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+def get_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/roles/{role_id}")),
+) -> RoleOut:
     return role_to_out(get_role_or_404(db, role_id))
 
 
 @app.put("/api/v1/roles/{role_id}", response_model=RoleOut)
-def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)) -> RoleOut:
+def update_role(
+    role_id: int,
+    payload: RoleUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/roles/{role_id}")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.edit")
     role = get_role_or_404(db, role_id)
     name = payload.name.strip() if payload.name is not None else role.name
     code = payload.code.strip() if payload.code is not None else role.code
@@ -1725,7 +2108,12 @@ def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)
 
 
 @app.patch("/api/v1/roles/{role_id}/enable", response_model=RoleOut)
-def enable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+def enable_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PATCH./api/v1/roles/{role_id}/enable")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.edit")
     role = get_role_or_404(db, role_id)
     role.enabled = True
     role.updated_at = now()
@@ -1735,7 +2123,12 @@ def enable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
 
 
 @app.patch("/api/v1/roles/{role_id}/disable", response_model=RoleOut)
-def disable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+def disable_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PATCH./api/v1/roles/{role_id}/disable")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.edit")
     role = get_role_or_404(db, role_id)
     role.enabled = False
     role.updated_at = now()
@@ -1745,7 +2138,12 @@ def disable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
 
 
 @app.delete("/api/v1/roles/{role_id}")
-def delete_role(role_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def delete_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/roles/{role_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.roles.delete")
     role = get_role_or_404(db, role_id)
     db.delete(role)
     db.commit()
@@ -1753,13 +2151,23 @@ def delete_role(role_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @app.get("/api/v1/roles/{role_id}/users", response_model=list[UserSummaryOut])
-def list_role_users(role_id: int, db: Session = Depends(get_db)) -> list[UserSummaryOut]:
+def list_role_users(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/roles/{role_id}/users")),
+) -> list[UserSummaryOut]:
     role = get_role_or_404(db, role_id)
     return [user_summary(link.user) for link in sorted(role.user_links, key=lambda link: link.user.username)]
 
 
 @app.post("/api/v1/roles/{role_id}/users", response_model=RoleOut)
-def add_role_user(role_id: int, payload: RoleUserBindingIn, db: Session = Depends(get_db)) -> RoleOut:
+def add_role_user(
+    role_id: int,
+    payload: RoleUserBindingIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/roles/{role_id}/users")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.bind_users")
     role = get_role_or_404(db, role_id)
     validate_bindable_role(role)
     user = get_user_or_404(db, payload.user_id)
@@ -1773,7 +2181,13 @@ def add_role_user(role_id: int, payload: RoleUserBindingIn, db: Session = Depend
 
 
 @app.put("/api/v1/roles/{role_id}/users", response_model=RoleOut)
-def replace_role_users(role_id: int, payload: RoleUserReplaceIn, db: Session = Depends(get_db)) -> RoleOut:
+def replace_role_users(
+    role_id: int,
+    payload: RoleUserReplaceIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/roles/{role_id}/users")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.bind_users")
     role = get_role_or_404(db, role_id)
     validate_bindable_role(role)
     user_ids = set(payload.user_ids)
@@ -1792,7 +2206,13 @@ def replace_role_users(role_id: int, payload: RoleUserReplaceIn, db: Session = D
 
 
 @app.delete("/api/v1/roles/{role_id}/users/{user_id}", response_model=RoleOut)
-def remove_role_user(role_id: int, user_id: int, db: Session = Depends(get_db)) -> RoleOut:
+def remove_role_user(
+    role_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/roles/{role_id}/users/{user_id}")),
+) -> RoleOut:
+    require_button_permission(auth, "button.roles.bind_users")
     role = get_role_or_404(db, role_id)
     get_user_or_404(db, user_id)
     link = db.query(RoleUser).filter(RoleUser.role_id == role.id, RoleUser.user_id == user_id).first()
@@ -1805,7 +2225,11 @@ def remove_role_user(role_id: int, user_id: int, db: Session = Depends(get_db)) 
 
 
 @app.get("/api/v1/roles/{role_id}/permissions", response_model=RolePermissionsOut)
-def get_role_permissions(role_id: int, db: Session = Depends(get_db)) -> RolePermissionsOut:
+def get_role_permissions(
+    role_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/roles/{role_id}/permissions")),
+) -> RolePermissionsOut:
     role = get_role_or_404(db, role_id)
     return RolePermissionsOut(
         role_id=role.id,
@@ -1815,7 +2239,7 @@ def get_role_permissions(role_id: int, db: Session = Depends(get_db)) -> RolePer
             for permission in sorted(role.permissions, key=lambda item: (item.permission_type, item.permission_key))
             if permission.enabled
         ],
-        catalog=permission_catalog_entries(),
+        catalog=permission_catalog_entries(db),
     )
 
 
@@ -1824,9 +2248,11 @@ def save_role_permissions(
     role_id: int,
     payload: RolePermissionsIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/roles/{role_id}/permissions")),
 ) -> RolePermissionsOut:
+    require_button_permission(auth, "button.roles.configure_permissions")
     role = get_role_or_404(db, role_id)
-    entries = normalize_permission_payload(payload)
+    entries = normalize_permission_payload(payload, db)
     db.query(FeaturePermission).filter(FeaturePermission.role_id == role.id).delete()
     for entry in entries:
         db.add(
@@ -1842,7 +2268,7 @@ def save_role_permissions(
     role.updated_at = now()
     db.commit()
     db.refresh(role)
-    return get_role_permissions(role.id, db)
+    return get_role_permissions(role.id, db, auth)
 
 
 @app.get("/api/v1/workflows/applications", response_model=list[WorkflowApplicationOut])
@@ -1852,6 +2278,7 @@ def list_workflow_applications(
     type: str = "",
     material_id: int | None = None,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/workflows/applications")),
 ) -> list[WorkflowApplicationOut]:
     query = db.query(WorkflowApplication)
     if applicant:
@@ -1871,7 +2298,18 @@ def list_workflow_applications(
 
 
 @app.post("/api/v1/workflows/applications", response_model=WorkflowApplicationOut)
-def submit_workflow_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def submit_workflow_application(
+    payload: WorkflowApplicationIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications")),
+) -> WorkflowApplicationOut:
+    require_button_permission(auth, "button.workflow.submit")
+    if payload.material_library_id:
+        require_library_scope(auth, payload.material_library_id)
+    if payload.material_id:
+        material = db.get(Material, payload.material_id)
+        if material:
+            require_library_scope(auth, material.material_library_id)
     data = build_workflow_payload(payload, db)
     mode = approval_mode(db)
     status, node = initial_workflow_state(mode)
@@ -1902,31 +2340,51 @@ def submit_workflow_application(payload: WorkflowApplicationIn, db: Session = De
 
 
 @app.post("/api/v1/workflows/applications/new-category", response_model=WorkflowApplicationOut)
-def submit_new_category_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def submit_new_category_application(
+    payload: WorkflowApplicationIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications")),
+) -> WorkflowApplicationOut:
     payload.type = "new_category"
-    return submit_workflow_application(payload, db)
+    return submit_workflow_application(payload, db, auth)
 
 
 @app.post("/api/v1/workflows/applications/new-material-code", response_model=WorkflowApplicationOut)
-def submit_new_material_code_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def submit_new_material_code_application(
+    payload: WorkflowApplicationIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications")),
+) -> WorkflowApplicationOut:
     payload.type = "new_material_code"
-    return submit_workflow_application(payload, db)
+    return submit_workflow_application(payload, db, auth)
 
 
 @app.post("/api/v1/workflows/applications/stop-purchase", response_model=WorkflowApplicationOut)
-def submit_stop_purchase_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def submit_stop_purchase_application(
+    payload: WorkflowApplicationIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications")),
+) -> WorkflowApplicationOut:
     payload.type = "stop_purchase"
-    return submit_workflow_application(payload, db)
+    return submit_workflow_application(payload, db, auth)
 
 
 @app.post("/api/v1/workflows/applications/stop-use", response_model=WorkflowApplicationOut)
-def submit_stop_use_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def submit_stop_use_application(
+    payload: WorkflowApplicationIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications")),
+) -> WorkflowApplicationOut:
     payload.type = "stop_use"
-    return submit_workflow_application(payload, db)
+    return submit_workflow_application(payload, db, auth)
 
 
 @app.get("/api/v1/workflows/tasks", response_model=list[WorkflowApplicationOut])
-def list_workflow_tasks(node: str = "", db: Session = Depends(get_db)) -> list[WorkflowApplicationOut]:
+def list_workflow_tasks(
+    node: str = "",
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/workflows/tasks")),
+) -> list[WorkflowApplicationOut]:
     query = db.query(WorkflowApplication).filter(WorkflowApplication.status.notin_(TERMINAL_WORKFLOW_STATUSES))
     if node:
         query = query.filter(WorkflowApplication.current_node == node)
@@ -1935,7 +2393,11 @@ def list_workflow_tasks(node: str = "", db: Session = Depends(get_db)) -> list[W
 
 
 @app.get("/api/v1/workflows/applications/{application_id}", response_model=WorkflowApplicationOut)
-def get_workflow_application(application_id: int, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+def get_workflow_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/workflows/applications/{application_id}")),
+) -> WorkflowApplicationOut:
     application = db.get(WorkflowApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Workflow application not found")
@@ -1947,7 +2409,9 @@ def approve_workflow_application(
     application_id: int,
     payload: WorkflowActionIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications/{application_id}/approve")),
 ) -> WorkflowApplicationOut:
+    require_button_permission(auth, "button.workflow.approve")
     application = db.get(WorkflowApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Workflow application not found")
@@ -1982,7 +2446,9 @@ def reject_workflow_application(
     application_id: int,
     payload: WorkflowActionIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/workflows/applications/{application_id}/reject")),
 ) -> WorkflowApplicationOut:
+    require_button_permission(auth, "button.workflow.reject")
     application = db.get(WorkflowApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Workflow application not found")
@@ -2019,9 +2485,12 @@ def list_materials(
     status: str = "",
     product_name_id: int | None = None,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials")),
 ) -> list[MaterialOut]:
     ensure_seed_material_context(db)
     query = db.query(Material).join(ProductName).join(MaterialLibrary).join(Category)
+    if not auth.is_super_admin and auth.library_scope_ids is not None:
+        query = query.filter(Material.material_library_id.in_(auth.library_scope_ids or {-1}))
     if product_name_id:
         query = query.filter(Material.product_name_id == product_name_id)
     if status:
@@ -2043,7 +2512,13 @@ def list_materials(
 
 
 @app.post("/api/v1/materials", response_model=MaterialOut)
-def create_material(payload: MaterialIn, db: Session = Depends(get_db)) -> MaterialOut:
+def create_material(
+    payload: MaterialIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials")),
+) -> MaterialOut:
+    require_button_permission(auth, "button.material_archives.create")
+    require_library_scope(auth, payload.material_library_id)
     status = validate_material_status(payload.status)
     if status != "normal":
         raise HTTPException(status_code=400, detail="New materials must start in normal status")
@@ -2181,7 +2656,12 @@ def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> d
     "/api/v1/materials/ai-add/preview",
     description="AI natural language material addition preview. capability: material_add",
 )
-def preview_ai_material_add(payload: AiMaterialAddPreviewIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+def preview_ai_material_add(
+    payload: AiMaterialAddPreviewIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/ai-add/preview")),
+) -> dict[str, Any]:
+    require_library_scope(auth, payload.material_library_id)
     return build_ai_material_preview(payload, db)
 
 
@@ -2189,7 +2669,12 @@ def preview_ai_material_add(payload: AiMaterialAddPreviewIn, db: Session = Depen
     "/api/v1/materials/ai-add/confirm",
     description="AI natural language material addition confirmation. capability: material_add",
 )
-def confirm_ai_material_add(payload: AiMaterialAddConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+def confirm_ai_material_add(
+    payload: AiMaterialAddConfirmIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/ai-add/confirm")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.material_archives.create")
     preview = payload.preview
     provider = provider_for_capability(db, "material_add")
     errors = preview.get("validation_errors") or []
@@ -2208,6 +2693,7 @@ def confirm_ai_material_add(payload: AiMaterialAddConfirmIn, db: Session = Depen
         int(proposed.get("material_library_id") or 0),
         int(proposed.get("category_id") or 0),
     )
+    require_library_scope(auth, library.id)
     brand_id = proposed.get("brand_id")
     brand = db.get(Brand, int(brand_id)) if brand_id else get_or_create_brand(db, str(proposed.get("brand", "")).strip())
     existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == name).first()
@@ -2242,11 +2728,16 @@ def confirm_ai_material_add(payload: AiMaterialAddConfirmIn, db: Session = Depen
     "/api/v1/materials/match",
     description="AI vector similarity material matching. capability: material_match; hybrid semantic + BM25 evidence with Qdrant-compatible local fallback.",
 )
-def match_materials(payload: MaterialMatchIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+def match_materials(
+    payload: MaterialMatchIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/match")),
+) -> dict[str, Any]:
     provider = provider_for_capability(db, "material_match")
     library = db.get(MaterialLibrary, payload.material_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
     brand = db.get(Brand, payload.brand_id).name if payload.brand_id and db.get(Brand, payload.brand_id) else (payload.brand or "")
     query_text = payload.query or material_search_text(payload.name or "", brand, payload.description, payload.attributes)
     matches = material_matches(db, library.id, query_text, brand, payload.attributes, payload.top_k)
@@ -2262,29 +2753,48 @@ def match_materials(payload: MaterialMatchIn, db: Session = Depends(get_db)) -> 
 
 
 @app.post("/api/v1/ai/material-add/preview")
-def preview_ai_material_add_alias(payload: AiMaterialAddPreviewIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return preview_ai_material_add(payload, db)
+def preview_ai_material_add_alias(
+    payload: AiMaterialAddPreviewIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/ai-add/preview")),
+) -> dict[str, Any]:
+    return preview_ai_material_add(payload, db, auth)
 
 
 @app.post("/api/v1/ai/material-add/confirm")
-def confirm_ai_material_add_alias(payload: AiMaterialAddConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return confirm_ai_material_add(payload, db)
+def confirm_ai_material_add_alias(
+    payload: AiMaterialAddConfirmIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/ai-add/confirm")),
+) -> dict[str, Any]:
+    return confirm_ai_material_add(payload, db, auth)
 
 
 @app.post("/api/v1/ai/material-match")
-def match_materials_alias(payload: MaterialMatchIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return match_materials(payload, db)
+def match_materials_alias(
+    payload: MaterialMatchIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/match")),
+) -> dict[str, Any]:
+    return match_materials(payload, db, auth)
 
 
 @app.get("/api/v1/ai/providers", response_model=list[ProviderConfigOut])
-def list_ai_providers(db: Session = Depends(get_db)) -> list[ProviderConfigOut]:
+def list_ai_providers(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
+) -> list[ProviderConfigOut]:
     ensure_provider_configs(db)
     providers = db.query(LLMProviderConfig).order_by(LLMProviderConfig.active.desc(), LLMProviderConfig.id.desc()).all()
     return [provider_to_out(provider) for provider in providers]
 
 
 @app.post("/api/v1/ai/providers", response_model=ProviderConfigOut)
-def save_ai_provider(payload: ProviderConfigIn, db: Session = Depends(get_db)) -> ProviderConfigOut:
+def save_ai_provider(
+    payload: ProviderConfigIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> ProviderConfigOut:
     capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
     if not capabilities:
         raise HTTPException(status_code=422, detail="At least one supported capability is required")
@@ -2313,7 +2823,10 @@ def save_ai_provider(payload: ProviderConfigIn, db: Session = Depends(get_db)) -
 
 
 @app.post("/api/v1/ai/providers/test")
-def test_ai_provider(payload: ProviderConfigIn) -> dict[str, Any]:
+def test_ai_provider(
+    payload: ProviderConfigIn,
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
+) -> dict[str, Any]:
     capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
     if not capabilities:
         raise HTTPException(status_code=422, detail="At least one supported capability is required")
@@ -2329,10 +2842,19 @@ def test_ai_provider(payload: ProviderConfigIn) -> dict[str, Any]:
 
 
 @app.put("/api/v1/materials/{material_id}", response_model=MaterialOut)
-def update_material(material_id: int, payload: MaterialUpdate, db: Session = Depends(get_db)) -> MaterialOut:
+def update_material(
+    material_id: int,
+    payload: MaterialUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/materials/{material_id}")),
+) -> MaterialOut:
+    require_button_permission(auth, "button.material_archives.edit")
     material = db.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    require_library_scope(auth, material.material_library_id)
+    if payload.material_library_id:
+        require_library_scope(auth, payload.material_library_id)
     if payload.product_name_id or payload.material_library_id or payload.category_id:
         product, library, category = material_context_by_payload(
             db,
@@ -2386,10 +2908,15 @@ def update_material(material_id: int, payload: MaterialUpdate, db: Session = Dep
 
 
 @app.get("/api/v1/materials/{material_id}", response_model=MaterialOut)
-def get_material(material_id: int, db: Session = Depends(get_db)) -> MaterialOut:
+def get_material(
+    material_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials/{material_id}")),
+) -> MaterialOut:
     material = db.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    require_library_scope(auth, material.material_library_id)
     return material_to_out(material)
 
 
@@ -2398,10 +2925,13 @@ def admin_stop_purchase_material(
     material_id: int,
     payload: ManualStopPurchaseIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PATCH./api/v1/materials/{material_id}/stop-purchase")),
 ) -> MaterialOut:
+    require_button_permission(auth, "button.material_archives.approval")
     material = db.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    require_library_scope(auth, material.material_library_id)
     reason = payload.reason.strip()
     if not reason:
         raise HTTPException(status_code=422, detail="An exemption reason is required for manual stop purchase")
@@ -2451,10 +2981,13 @@ def transition_material(
     material_id: int,
     payload: MaterialTransitionIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/{material_id}/transition")),
 ) -> MaterialOut:
+    require_button_permission(auth, "button.material_archives.edit")
     material = db.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    require_library_scope(auth, material.material_library_id)
     enforce_material_transition(material.status, payload.target_status, payload.reason)
     if material.status != payload.target_status:
         record_material_lifecycle(material, material.status, payload.target_status, payload.reason, "manual", "super_admin")
@@ -2466,10 +2999,16 @@ def transition_material(
 
 
 @app.delete("/api/v1/materials/{material_id}")
-def delete_material(material_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def delete_material(
+    material_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/materials/{material_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.material_archives.delete")
     material = db.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
+    require_library_scope(auth, material.material_library_id)
     db.delete(material)
     db.commit()
     return {"deleted": True, "id": material_id}
@@ -2482,7 +3021,10 @@ def delete_material(material_id: int, db: Session = Depends(get_db)) -> dict[str
 def preview_material_governance(
     payload: MaterialGovernancePreviewIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/governance/preview")),
 ) -> dict[str, Any]:
+    if payload.material_library_id:
+        require_library_scope(auth, payload.material_library_id)
     items = material_governance_items(payload, db)
     return {"capability": "material_governance", "items": items, "count": len(items)}
 
@@ -2495,7 +3037,11 @@ def preview_material_governance(
 def import_material_governance(
     payload: MaterialGovernanceImportIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/governance/import")),
 ) -> list[MaterialOut]:
+    require_button_permission(auth, "button.material_archives.import")
+    if payload.material_library_id:
+        require_library_scope(auth, payload.material_library_id)
     product = product_by_payload(db, payload.product_name_id, payload.product_name) if payload.product_name_id or payload.product_name else ensure_seed_product(db)
     default_library, default_category = ensure_seed_material_context(db)
     imported: list[Material] = []
@@ -2507,6 +3053,7 @@ def import_material_governance(
             raise HTTPException(status_code=422, detail="Material name is required")
         item_product = db.get(ProductName, int(item.get("product_name_id") or product.id)) or product
         library = db.get(MaterialLibrary, int(item.get("material_library_id") or payload.material_library_id or default_library.id)) or default_library
+        require_library_scope(auth, library.id)
         category = db.get(Category, int(item.get("category_id") or payload.category_id or default_category.id)) or default_category
         brand_id = item.get("brand_id")
         brand_name = str(item.get("brand_name", "")).strip()
@@ -2552,37 +3099,53 @@ def import_material_governance(
 def preview_ai_material_governance(
     payload: MaterialGovernancePreviewIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/governance/preview")),
 ) -> dict[str, Any]:
-    return preview_material_governance(payload, db)
+    return preview_material_governance(payload, db, auth)
 
 
 @app.post("/api/v1/ai/material-governance/import", response_model=list[MaterialOut])
 def import_ai_material_governance(
     payload: MaterialGovernanceImportIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/governance/import")),
 ) -> list[MaterialOut]:
-    return import_material_governance(payload, db)
+    return import_material_governance(payload, db, auth)
 
 
 @app.get("/api/v1/attributes/changes", response_model=list[ChangeOut])
-def list_attribute_changes(db: Session = Depends(get_db)) -> list[ChangeOut]:
+def list_attribute_changes(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/attributes/changes")),
+) -> list[ChangeOut]:
     changes = db.query(AttributeChange).order_by(AttributeChange.id.desc()).all()
     return [change_to_out(change) for change in changes]
 
 
 @app.post("/api/v1/attributes/governance/preview")
-def preview_attribute_governance(payload: GovernancePreviewIn) -> dict[str, Any]:
+def preview_attribute_governance(
+    payload: GovernancePreviewIn,
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/attributes/governance/preview")),
+) -> dict[str, Any]:
     items = governance_items(payload.rows)
     return {"items": items, "count": len(items)}
 
 
 @app.post("/api/v1/ai/attribute-governance/preview")
-def preview_ai_attribute_governance(payload: GovernancePreviewIn) -> dict[str, Any]:
-    return preview_attribute_governance(payload)
+def preview_ai_attribute_governance(
+    payload: GovernancePreviewIn,
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/attributes/governance/preview")),
+) -> dict[str, Any]:
+    return preview_attribute_governance(payload, auth)
 
 
 @app.post("/api/v1/attributes/governance/import", response_model=list[AttributeOut])
-def import_attribute_governance(payload: GovernanceImportIn, db: Session = Depends(get_db)) -> list[AttributeOut]:
+def import_attribute_governance(
+    payload: GovernanceImportIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/attributes/governance/import")),
+) -> list[AttributeOut]:
+    require_button_permission(auth, "button.attribute_management.import")
     product = product_by_payload(db, payload.product_name_id, payload.product_name)
     imported: list[Attribute] = []
     for item in payload.items:
@@ -2620,8 +3183,9 @@ def import_attribute_governance(payload: GovernanceImportIn, db: Session = Depen
 def import_ai_attribute_governance(
     payload: GovernanceImportIn,
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/attributes/governance/import")),
 ) -> list[AttributeOut]:
-    return import_attribute_governance(payload, db)
+    return import_attribute_governance(payload, db, auth)
 
 
 @app.get("/api/v1/attributes", response_model=list[AttributeOut])
@@ -2629,6 +3193,7 @@ def list_attributes(
     product_name_id: int | None = None,
     search: str = "",
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/attributes")),
 ) -> list[AttributeOut]:
     query = db.query(Attribute).join(ProductName)
     if product_name_id:
@@ -2641,7 +3206,12 @@ def list_attributes(
 
 
 @app.post("/api/v1/attributes", response_model=AttributeOut)
-def create_attribute(payload: AttributeIn, db: Session = Depends(get_db)) -> AttributeOut:
+def create_attribute(
+    payload: AttributeIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/attributes")),
+) -> AttributeOut:
+    require_button_permission(auth, "button.attribute_management.create")
     product = product_by_payload(db, payload.product_name_id, payload.product_name)
     attribute = Attribute(
         code=next_unique_code(db, Attribute, "ATTR", f"{product.id}:{payload.name}:{func.now()}"),
@@ -2664,7 +3234,13 @@ def create_attribute(payload: AttributeIn, db: Session = Depends(get_db)) -> Att
 
 
 @app.put("/api/v1/attributes/{attribute_id}", response_model=AttributeOut)
-def update_attribute(attribute_id: int, payload: AttributeUpdate, db: Session = Depends(get_db)) -> AttributeOut:
+def update_attribute(
+    attribute_id: int,
+    payload: AttributeUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/attributes/{attribute_id}")),
+) -> AttributeOut:
+    require_button_permission(auth, "button.attribute_management.edit")
     attribute = db.get(Attribute, attribute_id)
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
@@ -2690,7 +3266,12 @@ def update_attribute(attribute_id: int, payload: AttributeUpdate, db: Session = 
 
 
 @app.delete("/api/v1/attributes/{attribute_id}")
-def delete_attribute(attribute_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def delete_attribute(
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/attributes/{attribute_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.attribute_management.delete")
     attribute = db.get(Attribute, attribute_id)
     if not attribute:
         raise HTTPException(status_code=404, detail="Attribute not found")
@@ -2700,7 +3281,11 @@ def delete_attribute(attribute_id: int, db: Session = Depends(get_db)) -> dict[s
 
 
 @app.get("/api/v1/attributes/{attribute_id}/changes", response_model=list[ChangeOut])
-def get_attribute_changes(attribute_id: int, db: Session = Depends(get_db)) -> list[ChangeOut]:
+def get_attribute_changes(
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/attributes/{attribute_id}/changes")),
+) -> list[ChangeOut]:
     changes = (
         db.query(AttributeChange)
         .filter(AttributeChange.attribute_id == attribute_id)
@@ -2711,7 +3296,11 @@ def get_attribute_changes(attribute_id: int, db: Session = Depends(get_db)) -> l
 
 
 @app.post("/api/v1/ai/attribute-recommend")
-def recommend_attributes(payload: RecommendIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+def recommend_attributes(
+    payload: RecommendIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/attribute-recommend")),
+) -> dict[str, Any]:
     product = product_by_payload(db, payload.product_name_id, payload.product_name)
     recommendations = [
         {
@@ -2752,7 +3341,11 @@ def recommend_attributes(payload: RecommendIn, db: Session = Depends(get_db)) ->
 
 
 @app.get("/api/v1/brands", response_model=list[BrandOut])
-def list_brands(search: str = "", db: Session = Depends(get_db)) -> list[BrandOut]:
+def list_brands(
+    search: str = "",
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/brands")),
+) -> list[BrandOut]:
     query = db.query(Brand)
     if search:
         like = f"%{search}%"
@@ -2762,7 +3355,11 @@ def list_brands(search: str = "", db: Session = Depends(get_db)) -> list[BrandOu
 
 
 @app.post("/api/v1/brands", response_model=BrandOut)
-def create_brand(payload: BrandIn, db: Session = Depends(get_db)) -> BrandOut:
+def create_brand(
+    payload: BrandIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/brands")),
+) -> BrandOut:
     existing = db.query(Brand).filter(Brand.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Brand already exists")
@@ -2780,7 +3377,12 @@ def create_brand(payload: BrandIn, db: Session = Depends(get_db)) -> BrandOut:
 
 
 @app.put("/api/v1/brands/{brand_id}", response_model=BrandOut)
-def update_brand(brand_id: int, payload: BrandUpdate, db: Session = Depends(get_db)) -> BrandOut:
+def update_brand(
+    brand_id: int,
+    payload: BrandUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/brands/{brand_id}")),
+) -> BrandOut:
     brand = db.get(Brand, brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
@@ -2797,7 +3399,11 @@ def update_brand(brand_id: int, payload: BrandUpdate, db: Session = Depends(get_
 
 
 @app.delete("/api/v1/brands/{brand_id}")
-def delete_brand(brand_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+def delete_brand(
+    brand_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/brands/{brand_id}")),
+) -> dict[str, Any]:
     brand = db.get(Brand, brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
