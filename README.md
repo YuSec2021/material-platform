@@ -137,25 +137,27 @@ python3 scripts/harness-log.py note --text "reason"  # annotate a manual action
 
 ### Documentation Layers
 
-The repository is organized into three documentation layers:
+The repository is organized into hot-path prompts and cold reference docs:
 
 1. [AGENTS.md](./AGENTS.md)
-   The tool-agnostic master spec and the Generator handbook read directly by Codex.
+   Compact Codex operating contract. This is read directly by Codex and should stay small.
 2. [CLAUDE.md](./CLAUDE.md)
-   The Claude-side operations guide covering subagents, MCP, hooks, and Codex invocation.
+   Compact Claude Code routing guide.
 3. [.claude/agents/planner.md](./.claude/agents/planner.md)
    [.claude/agents/generator.md](./.claude/agents/generator.md)
    [.claude/agents/evaluator.md](./.claude/agents/evaluator.md)
    [.claude/agents/orchestrator.md](./.claude/agents/orchestrator.md)
-   Finer-grained role prompts and execution rules that mirror the Claude-side role definitions. Kept under `.claude/` so Claude Code picks them up automatically as subagent definitions.
+   Role-specific prompts loaded by Claude Code.
+4. [docs/protocol.md](./docs/protocol.md)
+   Full historical protocol reference. Read on demand; do not treat it as a hot-path prompt.
 
 ### Current Repository Status
 
 - This is a process/protocol repository, not an application code repository.
 - The main workflow today is a sprint loop centered on `planner-spec.json`.
 - The harness currently supports three entry modes: new product planning, bugfix sprints, and iteration sprints.
-- `AGENTS.md`, `CLAUDE.md`, and `.claude/agents/*.md` are aligned to the same state model.
-- The recommended source hierarchy is: `AGENTS.md` as the primary spec, `CLAUDE.md` as the Claude runtime guide, and `.claude/agents/*.md` as role detail.
+- `AGENTS.md`, `CLAUDE.md`, and `.claude/agents/*.md` are intentionally compact.
+- `docs/protocol.md` preserves the longer protocol and historical rationale for on-demand reference.
 
 ## Workflow
 

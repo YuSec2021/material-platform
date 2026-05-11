@@ -1,245 +1,62 @@
 # CLAUDE.md
 
-> Claude Code configuration for the Planner -> Generator -> Evaluator harness.
-> `AGENTS.md` is the tool-agnostic source of truth and Codex's instruction set.
-> This file explains the Claude-side routing model, subagent roles, and local integration points.
+Compact Claude Code guide for SprintFoundry. Keep this file small; detailed
+protocol notes live in `docs/protocol.md`, and role-specific prompts live in
+`.claude/agents/`.
 
----
+## Runtime Roles
 
-## Tool Assignment
-
-| Agent | Runtime | Invocation |
+| Role | Runtime | Invocation |
 | --- | --- | --- |
-| Planner | Claude Code subagent | `Agent(subagent_type="planner", ...)` |
-| Generator | Codex CLI | `Bash("codex exec --full-auto --skip-git-repo-check '...'")` |
-| Evaluator | Claude Code subagent | `Agent(subagent_type="evaluator", ...)` |
-| Orchestrator | Claude Code main agent or subagent | entry point |
+| Planner | Claude subagent | `Agent(subagent_type="planner", ...)` |
+| Generator | Codex CLI | `codex exec --full-auto ...` |
+| Evaluator | Claude subagent | `Agent(subagent_type="evaluator", ...)` |
+| Orchestrator | Claude main/subagent | routes by file state |
 
-Generator is always Codex CLI. Never invoke `Agent(subagent_type="generator")`.
+Generator is always Codex CLI. Never invoke a Claude `generator` subagent.
 
----
+## Startup Snapshot
 
-## Hard Environment Requirements
-
-| Requirement | Minimum version |
-|-------------|----------------|
-| Node.js | 18 LTS |
-| npm | 9 |
-| Python | 3.9 |
-| pytest | 7 |
-| Git | 2.30 |
-| Bash | 4 |
-| Codex CLI | latest stable |
-| Codex authenticated session or `OPENAI_API_KEY` | — |
-| Playwright MCP | pinned only for `verification.mode=browser` |
-
-These are harness-level requirements. Not every item should be enforced by
-`init.sh`: app startup should validate runtime dependencies, while Codex auth
-and verification-tool availability should be checked only by the phases that need them.
-
-## Codex Prerequisites
+At the start of a harness session, read current files instead of relying on
+memory:
 
 ```bash
-codex --version
+cat run-state.json 2>/dev/null || echo "[no run-state]"
+cat claude-progress.txt 2>/dev/null || echo "[no progress]"
+cat eval-trigger.txt 2>/dev/null || echo "[no eval-trigger]"
+cat sprint-contract.md 2>/dev/null | head -40 || echo "[no contract]"
+ls eval-result-*.md 2>/dev/null || echo "[no eval results]"
+git branch --show-current 2>/dev/null || true
+git log --oneline -5 2>/dev/null || true
 ```
 
-If Codex is already authenticated in the local environment, no extra
-`OPENAI_API_KEY` export is required. Use `OPENAI_API_KEY` only in plain CLI
-setups where Codex has not already been logged in.
+If `run-state.json.needs_human` is true, stop and surface the pause reason.
+Do not route any agent until a human explicitly clears it.
 
----
+If `run-state.json.active_branch` is set and differs from the current Git
+branch, stop and resolve the branch mismatch before routing.
 
-## Architecture Summary
+## Routing Order
 
-Claude handles planning and evaluation. Codex handles implementation.
+Apply this order:
 
-```text
-User prompt
-  -> Planner writes planner-spec.json / init.sh / claude-progress.txt
-  [Per-sprint loop — every sprint must complete all four steps]
-  -> Generator proposes sprint-contract.md
-  -> Evaluator reviews contract  →  CONTRACT APPROVED
-  -> Orchestrator writes sprint-fence.json  (records expected sprint + git HEAD)
-  -> Generator implements Sprint N ONLY, commits, writes eval-trigger.txt  →  STOPS
-  -> Evaluator runs black-box CHECK using planner-spec.json verification.mode
-  -> Evaluator writes eval-result-{N}.md
-  -> SPRINT PASS:  Orchestrator deletes sprint-contract.md, sprint-fence.json,
-                   eval-trigger.txt  →  next sprint starts from scratch
-  -> SPRINT FAIL:  Generator retries (max 2) or Orchestrator pauses
-```
+1. `needs_human=true` -> pause.
+2. Missing `planner-spec.json` -> Planner creates spec, `init.sh`, progress log.
+3. Sprint-history audit inconsistent -> pause.
+4. `eval-trigger.txt` exists -> Evaluator CHECK or targeted Codex retry.
+5. `sprint-contract.md` exists but unapproved -> Evaluator contract review.
+6. Approved `sprint-contract.md` -> prepare branch/fence, invoke Codex implementation.
+7. `bug-report.md` -> Codex proposes bugfix contract.
+8. `change-request.md` -> route by `Type`.
+9. All planned sprints PASS -> complete.
+10. Otherwise -> Codex proposes the next sprint contract.
 
-Primary state lives in files, not conversation memory:
+The only authoritative completion signal is `eval-result-{N}.md` containing
+`SPRINT PASS`.
 
-- `planner-spec.json`
-- `claude-progress.txt`
-- `sprint-contract.md` — **absent between sprints**; presence signals "sprint in progress"
-- `sprint-fence.json` — written by Orchestrator before Codex runs; names the one permitted sprint
-- `eval-result-{N}.md`
-- `eval-trigger.txt`
-- `run-state.json`
-- `init.sh`
+## Verification Modes
 
----
-
-## Unattended Mode
-
-This harness supports unattended operation only as a bounded control loop.
-
-What that means:
-
-- each run starts from file state, not chat history
-- retry counts are tracked explicitly
-- repeated failure causes pause, not endless looping
-- the system leaves behind enough state for clean resume
-
-Recommended `run-state.json` fields:
-
-- `mode`
-- `current_sprint`
-- `retry_count`
-- `last_successful_sprint`
-- `last_failure_reason`
-- `needs_human`
-- `last_run_at`
-- `active_branch`
-- `base_branch`
-
-Recommended pause conditions:
-
-- same sprint fails more than 2 times
-- `init.sh` cannot recover the environment
-- evaluator indicates architecture drift instead of a local fix
-- required credentials or services are missing
-
-When pausing, update `run-state.json` and write a short summary to `claude-progress.txt`.
-
----
-
-## Context Hygiene
-
-This harness is designed to reduce long-run context pollution and AI patch drift.
-
-Core rules:
-
-- Re-read artifacts before routing instead of trusting prior conversation state.
-- Keep `claude-progress.txt` short and summary-oriented.
-- Prefer current repo reality over remembered intent.
-- Do not let Claude or Codex accumulate a second unofficial state machine in chat.
-
-`claude-progress.txt` should stay compact:
-
-- keep the latest project summary plus the latest 3 sprint entries
-- keep each sprint entry to 3 to 5 lines
-- summarize older entries instead of appending forever
-
-If artifacts and chat context disagree, treat artifacts as authoritative and resolve the mismatch explicitly.
-
----
-
-## Sprint Branching
-
-This harness works best with one Git branch per sprint.
-
-Recommended naming:
-
-- `codex/sprint-<N>-<short-slug>`
-
-Why this helps:
-
-- isolates each sprint's implementation and retry history
-- makes evaluator failures easier to inspect
-- keeps `main` cleaner
-- gives unattended mode an explicit active branch to resume from
-
-Recommended rules:
-
-- create or switch to the sprint branch before implementation starts
-- keep retries on the same sprint branch
-- track `active_branch` and `base_branch` in `run-state.json`
-- only merge a sprint branch after `SPRINT PASS`
-
----
-
-## Claude Subagents
-
-Subagents live in `.claude/agents/` — see the role definitions in this repository's [.claude/agents](./.claude/agents) directory.
-
-### Planner
-
-Planner runs once at project start, or when the orchestrator explicitly asks
-for a plan revision.
-
-Planner must:
-
-- read existing state before planning
-- turn a short user prompt into a complete `planner-spec.json`
-- write `init.sh`
-- append an initial handoff to `claude-progress.txt`
-- stay high-level and avoid application code
-
-### Evaluator
-
-Evaluator runs in two modes:
-
-1. Contract Review
-   Review `sprint-contract.md` and either append `CONTRACT APPROVED` or request changes.
-2. Live CHECK
-   Run `bash init.sh`, execute black-box steps through the configured verification surface, and write `eval-result-{N}.md`.
-
-Evaluator must never approve without independent black-box evidence. For `browser` mode that evidence comes from Playwright MCP; for backend and tooling projects it comes from API responses, CLI outputs, job side effects, or an external library consumer harness.
-
-### Generator
-
-Generator is not a Claude subagent. Claude only invokes Codex with explicit Bash commands.
-
-Typical Codex invocations:
-
-```bash
-# Codex >= 0.120.0
-# disk-full-read-access: lets git read ~/.gitconfig and ~/.ssh for commit/push
-# shell_environment_policy.inherit=all: passes GIT_* env vars through the sandbox
-codex exec --full-auto \
-  -c 'sandbox_permissions=["disk-full-read-access"]' \
-  -c 'shell_environment_policy.inherit=all' \
-  --skip-git-repo-check \
-  "Read planner-spec.json. Propose sprint-contract.md for Sprint N. Follow AGENTS.md Generator rules. Stop after writing the file."
-```
-
-```bash
-# Implementation — sprint boundary is enforced by sprint-fence.json written
-# by the Orchestrator before this command is run.
-codex exec --full-auto \
-  -c 'sandbox_permissions=["disk-full-read-access"]' \
-  -c 'shell_environment_policy.inherit=all' \
-  --skip-git-repo-check \
-  "sprint-contract.md is approved. Implement Sprint N ONLY. After committing, write eval-trigger.txt containing exactly: sprint=N. STOP IMMEDIATELY after writing eval-trigger.txt. Do NOT implement Sprint N+1 or any later sprint. Follow AGENTS.md Generator rules."
-```
-
-```bash
-# Retry — scope is still bounded to Sprint N; sprint-fence.json is unchanged.
-# The Orchestrator inlines the Evaluator verdict INTO the prompt and deletes
-# eval-result-N.md before this command runs, so Codex must not depend on the
-# file being on disk. The deletion is the mechanism that forces the NEXT
-# orchestrator round to re-invoke the Evaluator instead of routing to yet
-# another Codex retry on the stale FAIL verdict.
-codex exec --full-auto \
-  -c 'sandbox_permissions=["disk-full-read-access"]' \
-  -c 'shell_environment_policy.inherit=all' \
-  --skip-git-repo-check \
-  "Sprint N failed. Fix ONLY the cited issues from the Evaluator verdict below; do not add unrelated changes.
-
-=== Evaluator verdict (eval-result-N.md) ===
-<inlined body of the previous eval-result-N.md>
-=== end verdict ===
-
-Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after writing eval-trigger.txt. Do NOT advance to any later sprint. Follow AGENTS.md Generator rules."
-```
-
----
-
-## Verification Tools
-
-`planner-spec.json` should include:
+Planner should include:
 
 ```json
 {
@@ -251,157 +68,88 @@ Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after wr
 }
 ```
 
-Evaluator tool choice:
+Evaluator CHECK uses:
 
 - `browser`: Playwright MCP.
-- `api`: real HTTP requests with `curl`, `httpx`, OpenAPI/Newman-style checks, or equivalent.
-- `cli`: shell commands with exit-code and stdout/stderr assertions.
-- `job`: enqueue/trigger work, poll status, and verify side effects.
-- `library`: install/import from an external consumer harness and verify public API output.
+- `api`: HTTP requests and response assertions.
+- `cli`: shell commands, exit codes, stdout/stderr, generated files.
+- `job`: queue/job triggers, polling, side effects.
+- `library`: external consumer harness.
 
-### Playwright MCP
+Missing verification tools are environment failures: write SPRINT FAIL with a
+clear unavailable-tool reason and pause without consuming retry budget.
 
-Recommended MCP config:
+## Codex Commands
 
-```json
-{
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@0.0.29"],
-      "description": "Browser-mode automation for Evaluator"
-    }
-  }
-}
-```
-
-Pin the version (`@0.0.29` or latest known-good release) to prevent `@latest`
-from pulling in a breaking change mid-project. Update the pin deliberately after
-verifying the new version is compatible.
-
-Configure this in `.claude/settings.json` or pass it via `--mcp-config`.
-
-### Verification tool unavailability — pause protocol
-
-If the Evaluator cannot reach the required verification tool for the configured
-mode (for example Playwright MCP for `browser`, the HTTP service for `api`, or
-the CLI binary for `cli`), the Evaluator must:
-
-1. Write `SPRINT FAIL` with reason: `Verification tool unavailable — cannot run CHECK`.
-2. The Orchestrator treats this as a pause condition (not a retry-eligible failure).
-3. Set `run-state.json` → `mode: "paused"`, `needs_human: true`,
-   `last_failure_reason: "Verification tool unavailable"`.
-4. Do not increment `retry_count` for this class of failure.
-
----
-
-## Hooks
-
-Example `.claude/settings.json` hooks:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash(git commit*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Committed - update claude-progress.txt next'"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/verify-clean-state.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Example `.claude/hooks/verify-clean-state.sh`:
+Use the version-aware command emitted by `scripts/orchestrate.py` whenever
+possible. Modern Codex invocation:
 
 ```bash
-#!/bin/bash
-if ! git diff --quiet; then
-  echo "Uncommitted changes detected - commit or revert before ending session"
-  exit 1
-fi
-if ! pytest -q --tb=no 2>/dev/null; then
-  echo "Tests failing - do not end session with broken tests"
-  exit 1
-fi
-echo "Clean state confirmed"
+codex exec --full-auto \
+  -c 'sandbox_permissions=["disk-full-read-access"]' \
+  -c 'shell_environment_policy.inherit=all' \
+  --skip-git-repo-check \
+  "<prompt>"
 ```
 
----
-
-## Suggested Commands
-
-These command snippets are aligned to the current harness and avoid any hidden planning system.
-
-### `new-sprint`
+Standard prompts:
 
 ```text
-Read planner-spec.json, identify the next incomplete sprint, invoke Codex to propose sprint-contract.md, then invoke the evaluator to review that contract. Do not write code until CONTRACT APPROVED exists in sprint-contract.md.
+Read planner-spec.json. Propose sprint-contract.md for Sprint N.
+Follow AGENTS.md Generator rules. Stop after writing the file.
 ```
-
-### `eval`
 
 ```text
-Read sprint-contract.md, eval-trigger.txt, and planner-spec.json verification.mode, then invoke the evaluator to run CHECK and write eval-result-{N}.md.
+sprint-contract.md is approved. Implement Sprint N ONLY.
+After committing, write eval-trigger.txt containing exactly: sprint=N.
+STOP IMMEDIATELY after writing eval-trigger.txt. Follow AGENTS.md.
 ```
-
-### `status`
 
 ```text
-Run: cat claude-progress.txt 2>/dev/null; git log --oneline -10 2>/dev/null; python3 - <<'PY'
-import json, pathlib
-path = pathlib.Path("planner-spec.json")
-if path.exists():
-    spec = json.loads(path.read_text())
-    for sprint in spec.get("sprints", []):
-        print(f"Sprint {sprint['id']}: {sprint['title']}")
-else:
-    print("[no planner-spec.json]")
-PY
+Sprint N failed. Fix ONLY the cited issues from the inlined Evaluator verdict.
+Re-commit and write eval-trigger.txt containing exactly: sprint=N.
+STOP after writing eval-trigger.txt. Follow AGENTS.md.
 ```
 
----
+## Orchestrator Script
 
-## Operating Rules
+Useful commands:
 
-- Re-read file artifacts before every routing decision.
-- Treat `AGENTS.md` as the canonical harness contract.
-- Do not introduce a second planning or task-tracking system.
-- Do not let Claude evaluate by code inspection alone when browser validation is required.
-- Keep generator logic in Codex, not in a Claude subagent.
-- Prefer simple, file-backed state over conversation-memory assumptions.
-- Keep `claude-progress.txt` compressed and rewrite it when it becomes a transcript.
-- When routing retries, favor the latest `eval-result-{N}.md` and current files over historical discussion.
-- Surface architecture drift explicitly instead of letting it accumulate across sprints.
-- In unattended mode, route to `paused` instead of retrying forever once stop conditions are met.
-- Prefer one Git branch per sprint instead of implementing directly on `main`.
+```bash
+python3 scripts/orchestrate.py --project-dir . --json
+python3 scripts/orchestrate.py --project-dir . --check-only --json
+python3 scripts/harness-log.py verify
+python3 scripts/harness-log.py tail -n 30
+bash scripts/install-hooks.sh
+```
 
----
+`--check-only` must be side-effect free: no log writes, no state writes, no
+cleanup, no branch switching, no Codex execution.
 
-## Harness Evolution Rule
+## Branching
 
-Every harness component should justify its existence.
+- One branch per sprint: `codex/sprint-<N>-<slug>`.
+- Implementation and retries stay on the sprint branch.
+- `main` should contain accepted progress only.
+- Merge only after Evaluator writes `SPRINT PASS`.
 
-After model upgrades, re-evaluate:
+## Progress Hygiene
 
-- whether contract negotiation still adds value
-- whether the evaluation rubric still discriminates effectively
-- whether file artifacts are still the right state boundary
-- whether any routing logic can be simplified without reducing quality
+Keep `claude-progress.txt` compact:
 
-Simpler harness plus stronger models beats a complicated harness with stale assumptions.
+- latest project summary
+- latest three sprint entries
+- no stack traces, dumps, or long narratives
+
+Compress before routing if it exceeds 60 lines or contains more than three
+sprint entries.
+
+## Hard Rules
+
+- Claude Planner/Evaluator/Orchestrator never write application code.
+- Codex Generator never evaluates itself.
+- No code before `CONTRACT APPROVED`.
+- No sprint advancement without `SPRINT PASS`.
+- Do not clear `needs_human=true` automatically.
+- Do not rewrite `harness-audit.ndjson`.
+- Prefer pausing with a clear reason over silent autonomous drift.
