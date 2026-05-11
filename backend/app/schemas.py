@@ -243,22 +243,78 @@ class MaterialMatchIn(BaseModel):
 
 
 class ProviderConfigIn(BaseModel):
+    display_name: str | None = None
+    name: str | None = None
     provider: str = "mock"
-    model: str = "mock-material-governance-v1"
-    endpoint: str = ""
+    model: str | None = None
+    model_name: str | None = None
+    endpoint: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     capabilities: list[str] = Field(default_factory=lambda: ["material_add", "material_match"])
-    active: bool = True
+    active: bool | None = None
+    enabled: bool | None = None
+    timeout_seconds: int = 10
+    fallback_model_id: int | None = None
 
 
 class ProviderConfigOut(BaseModel):
     id: int
+    display_name: str
     provider: str
     model: str
+    model_name: str
     endpoint: str
+    base_url: str
+    api_key_masked: str
     capabilities: list[str]
     active: bool
+    enabled: bool
+    timeout_seconds: int
+    fallback_model_id: int | None = None
     connection_status: str
+    last_test_message: str = ""
+    last_test_at: str | None = None
     updated_at: str
+
+
+class CapabilityMappingIn(BaseModel):
+    capability: str
+    primary_model_id: int
+    fallback_model_id: int | None = None
+    enabled: bool = True
+
+
+class CapabilityMappingOut(BaseModel):
+    id: int
+    capability: str
+    primary_model_id: int
+    primary_model_name: str
+    fallback_model_id: int | None = None
+    fallback_model_name: str = ""
+    enabled: bool
+    updated_at: str
+
+
+class GatewayInvokeIn(BaseModel):
+    prompt: str = "Sprint 10 gateway test"
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TraceSummaryOut(BaseModel):
+    trace_id: str
+    operation_name: str
+    capability: str
+    status: str
+    start_time: str
+    duration_ms: int
+    span_count: int
+
+
+class TraceDetailOut(BaseModel):
+    trace_id: str
+    spans: list[dict[str, Any]]
+    storage_table: str = "tracer.spans"
 
 
 class SystemConfigIn(BaseModel):
