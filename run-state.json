@@ -1,12 +1,12 @@
 {
-  "mode": "planning",
-  "current_sprint": 0,
+  "mode": "paused",
+  "current_sprint": 3,
   "retry_count": 0,
   "last_successful_sprint": 0,
-  "last_failure_reason": "",
-  "needs_human": false,
+  "last_failure_reason": "Sprint boundary violation: trigger=3, fence=2",
+  "needs_human": true,
   "active_branch": "",
   "base_branch": "",
-  "last_run_at": "2026-04-20T01:48:17+08:00",
+  "last_run_at": "2026-05-11T20:31:03+08:00",
   "request_kind": ""
 }
