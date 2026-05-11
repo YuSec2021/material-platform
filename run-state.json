@@ -1,12 +1,12 @@
 {
   "mode": "contract",
-  "current_sprint": 7,
+  "current_sprint": 8,
   "retry_count": 0,
-  "last_successful_sprint": 6,
+  "last_successful_sprint": 7,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-7-stop-purchase-stop-use",
+  "active_branch": "codex/sprint-8-user-management-roles",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T01:05:00+08:00",
+  "last_run_at": "2026-05-12T02:25:00+08:00",
   "request_kind": ""
 }

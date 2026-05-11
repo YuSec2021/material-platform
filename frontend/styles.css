@@ -285,6 +285,24 @@ pre {
   margin: 10px 0;
 }
 
+.binding-list {
+  display: grid;
+  gap: 2px;
+  margin: 12px 0;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.permission-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+}
+
+.permission-group label {
+  font-weight: 600;
+}
+
 .empty {
   color: #667085;
   padding: 20px;
@@ -298,6 +316,10 @@ pre {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .permission-grid {
     grid-template-columns: 1fr;
   }
 }
