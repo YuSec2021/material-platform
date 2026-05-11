@@ -166,6 +166,8 @@ class RouteDecision:
     # the file is gone; the next orchestrator round then sees the missing
     # eval-result and correctly routes to invoke_evaluator.
     cleanup_eval_result: bool = False
+    active_branch: str = ""
+    base_branch: str = ""
 
 
 @dataclass(frozen=True)
@@ -364,15 +366,100 @@ class HarnessProject:
         except OSError:
             pass
 
+    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            cwd=str(self.root),
+            check=False,
+        )
+
+    def is_git_repo(self) -> bool:
+        try:
+            result = self._git("rev-parse", "--is-inside-work-tree")
+        except OSError:
+            return False
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def current_branch(self) -> str:
+        try:
+            result = self._git("branch", "--show-current")
+        except OSError:
+            return ""
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def branch_exists(self, branch: str) -> bool:
+        try:
+            result = self._git("rev-parse", "--verify", "--quiet", branch)
+        except OSError:
+            return False
+        return result.returncode == 0
+
+    def sprint_branch_name(self, sprint: int) -> str:
+        title = ""
+        if self.spec_path.exists():
+            spec = self.planner_spec()
+            for item in spec.get("sprints", []):
+                if int(item.get("id", 0)) == sprint:
+                    title = str(item.get("title", ""))
+                    break
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        slug = slug[:40].strip("-")
+        return f"codex/sprint-{sprint}-{slug}" if slug else f"codex/sprint-{sprint}"
+
+    def prepare_sprint_branch(self, sprint: int) -> tuple[bool, str, str, str]:
+        """Create or switch to the sprint branch.
+
+        Returns (ok, active_branch, base_branch, error). Non-git project dirs are
+        treated as ok/no-op so route tests and protocol-only projects still work.
+        """
+        if not self.is_git_repo():
+            return True, "", "", ""
+
+        run_state = self.load_run_state()
+        current = self.current_branch()
+        base = str(run_state.get("base_branch") or current or "main")
+        target = str(run_state.get("active_branch") or "")
+        if not re.match(rf"^codex/sprint-{sprint}($|-)", target):
+            target = self.sprint_branch_name(sprint)
+
+        if current == target:
+            return True, target, base, ""
+
+        try:
+            if self.branch_exists(target):
+                result = self._git("switch", target)
+            else:
+                result = self._git("switch", "-c", target, base)
+        except OSError as exc:
+            return False, target, base, str(exc)
+
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout).strip()
+            return False, target, base, message or "git switch failed"
+        return True, target, base, ""
+
+    def switch_to_active_branch(self) -> tuple[bool, str, str]:
+        if not self.is_git_repo():
+            return True, "", ""
+        active = str(self.load_run_state().get("active_branch") or "")
+        if not active:
+            return True, "", ""
+        if self.current_branch() == active:
+            return True, active, ""
+        try:
+            result = self._git("switch", active)
+        except OSError as exc:
+            return False, active, str(exc)
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout).strip()
+            return False, active, message or "git switch failed"
+        return True, active, ""
+
     def _git_head(self) -> str:
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                cwd=str(self.root),
-                check=False,
-            )
+            result = self._git("rev-parse", "HEAD")
             return result.stdout.strip() if result.returncode == 0 else ""
         except OSError:
             return ""
@@ -482,10 +569,26 @@ class HarnessProject:
         return observed
 
 
-def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
+def decide_route(project: HarnessProject, user_prompt: str, emit_audit: bool = True) -> RouteDecision:
     observed = project.observed_state()
     run_state = project.load_run_state()
     retry_count = int(run_state.get("retry_count", 0) or 0)
+
+    if run_state.get("needs_human"):
+        current_sprint = int(run_state.get("current_sprint", 0) or observed.get("current_sprint", 0) or 0)
+        reason = str(run_state.get("last_failure_reason") or "run-state.json has needs_human=true")
+        return RouteDecision(
+            rule="needs_human_set",
+            action="pause_for_human",
+            rationale=(
+                "run-state.json has needs_human=true; human action is required "
+                "before the orchestrator may route another agent"
+            ),
+            mode="paused",
+            current_sprint=current_sprint,
+            needs_human=True,
+            last_failure_reason=reason,
+        )
 
     # Sprint-history audit runs BEFORE any other rule. It is the system-wide
     # invariant enforcement point: if declared state disagrees with the
@@ -493,13 +596,14 @@ def decide_route(project: HarnessProject, user_prompt: str) -> RouteDecision:
     # needs_human=true here blocks every other rule below.
     if observed["has_spec"]:
         audit_findings = audit_sprint_history(project)
-        for finding in audit_findings:
-            project.append_audit(
-                event="audit_finding",
-                actor="orchestrator",
-                sprint=finding.sprint,
-                payload={"kind": finding.kind, "detail": finding.detail},
-            )
+        if emit_audit:
+            for finding in audit_findings:
+                project.append_audit(
+                    event="audit_finding",
+                    actor="orchestrator",
+                    sprint=finding.sprint,
+                    payload={"kind": finding.kind, "detail": finding.detail},
+                )
         if audit_findings:
             worst = audit_findings[0]
             reason_summary = "; ".join(f.format() for f in audit_findings[:3])
@@ -763,6 +867,10 @@ def update_run_state(project: HarnessProject, decision: RouteDecision) -> None:
     state["needs_human"] = decision.needs_human
     state["last_failure_reason"] = decision.last_failure_reason
     state["last_run_at"] = iso_now()
+    if decision.active_branch:
+        state["active_branch"] = decision.active_branch
+    if decision.base_branch:
+        state["base_branch"] = decision.base_branch
     if decision.action == "invoke_codex_for_retry":
         state["retry_count"] = int(state.get("retry_count", 0) or 0) + 1
     elif decision.action not in {"pause_for_human", "invoke_evaluator"}:
@@ -911,11 +1019,51 @@ def maybe_cleanup_sprint_artifacts(project: HarnessProject, decision: RouteDecis
             stale.unlink()
 
 
+def prepare_branch_for_decision(project: HarnessProject, decision: RouteDecision) -> RouteDecision:
+    if decision.action == "invoke_codex_for_implementation":
+        ok, active, base, error = project.prepare_sprint_branch(decision.current_sprint)
+        if ok:
+            decision.active_branch = active
+            decision.base_branch = base
+            return decision
+        return RouteDecision(
+            rule="sprint_branch_prepare_failed",
+            action="pause_for_human",
+            rationale=f"could not create or switch to sprint branch {active}: {error}",
+            mode="paused",
+            current_sprint=decision.current_sprint,
+            needs_human=True,
+            last_failure_reason=f"Sprint branch prepare failed: {error}",
+        )
+
+    if decision.action == "invoke_codex_for_retry":
+        ok, active, error = project.switch_to_active_branch()
+        if ok:
+            decision.active_branch = active
+            return decision
+        return RouteDecision(
+            rule="sprint_branch_switch_failed",
+            action="pause_for_human",
+            rationale=f"could not switch to active sprint branch {active}: {error}",
+            mode="paused",
+            current_sprint=decision.current_sprint,
+            needs_human=True,
+            last_failure_reason=f"Sprint branch switch failed: {error}",
+        )
+
+    return decision
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-dir", default=".", help="Target project directory.")
     parser.add_argument("--user-prompt", default="", help="Initial prompt for a brand-new product.")
     parser.add_argument("--run-generator", action="store_true", help="Execute Codex CLI automatically.")
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Compute the routing decision without writing logs, state, cleanup files, or switching branches.",
+    )
     parser.add_argument("--json", action="store_true", help="Print decision as JSON.")
     return parser.parse_args(argv)
 
@@ -923,17 +1071,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     project = HarnessProject(Path(args.project_dir))
-    compress_progress(project.progress_path)
-    decision = decide_route(project, args.user_prompt)
-    maybe_cleanup_sprint_artifacts(project, decision)
-    # Write sprint fence before handing off to Codex so the boundary-violation
-    # check in the next orchestrator call has a reference point.
-    if decision.action == "invoke_codex_for_implementation":
-        project.write_sprint_fence(decision.current_sprint)
-    update_run_state(project, decision)
-    log_decision(project, decision)
+    if not args.check_only:
+        compress_progress(project.progress_path)
+    decision = decide_route(project, args.user_prompt, emit_audit=not args.check_only)
+    if not args.check_only:
+        decision = prepare_branch_for_decision(project, decision)
+        maybe_cleanup_sprint_artifacts(project, decision)
+        # Write sprint fence before handing off to Codex so the boundary-violation
+        # check in the next orchestrator call has a reference point.
+        if decision.action == "invoke_codex_for_implementation":
+            project.write_sprint_fence(decision.current_sprint)
+        update_run_state(project, decision)
+        log_decision(project, decision)
 
-    if args.run_generator and decision.command:
+    if args.run_generator and decision.command and not args.check_only:
         return subprocess.run(decision.command, cwd=str(project.root), shell=True).returncode
 
     payload = {
