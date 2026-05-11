@@ -1,102 +1,107 @@
-## Sprint 6: Material Application Workflows - New Category and Code
+## Sprint 7: Material Application Workflows - Stop Purchase and Stop Use
 
 ### Features
-- F10-New Material Category Application workflow
-- F11-New Material Code Application workflow
-- Approval mode configuration for simple approval and multi-node workflow
-- Frontend: workflow form, approval history, status tracking, approver task list
-- Backend: workflow state machine with approval, rejection, return reason, and immutable workflow history
-- Approved category applications auto-create categories in the category library
-- Approved material code applications auto-add materials to the material catalog
+- F12-Material Stop Purchase Application workflow
+- F12-Admin manual stop purchase with exemption reason
+- F13-Material Stop Use Application workflow with `stop_purchased` / `stop_purchase` material precondition
+- Frontend: stop purchase and stop use forms with reason selection
+- State transition UI indicators throughout material lifecycle
+- Backend: workflow state machine integration for stop purchase and stop use, including approval, rejection, precondition checks, and immutable lifecycle history
+- Approved stop purchase applications update material status from `normal` to `stop_purchase`
+- Approved stop use applications update material status from `stop_purchase` to terminal `stop_use`
 
-### Workflow Application Fields
-A workflow application record contains:
+### Stop Workflow Fields
+A stop purchase or stop use workflow application record contains:
 - `id` (integer, primary key)
 - `application_no` (string, auto-generated, stable user-facing number)
-- `type` (string enum: `new_category`, `new_material_code`)
+- `type` (string enum: `stop_purchase`, `stop_use`)
 - `status` (string enum: `draft`, `submitted`, `pending_department_head`, `pending_asset_management`, `pending_approval`, `approved`, `rejected`)
-- `applicant` or applicant identity fields visible in the UI
+- `material_id` and visible material summary fields: material code, material name, material library, category/product-name path, current material status
+- `reason_code` or selected reason option (required)
+- `reason` or business reason text (required)
 - `current_node` (string, current approval step or terminal state)
-- `reason` or `business_reason` (string, required on submit)
 - `approval_history` (ordered list of submit/approve/reject events with actor, node, action, comment, and timestamp)
 - `created_at`, `updated_at` (timestamps)
 
-A new material category application contains:
-- `material_library_id` or target library selection
-- target parent category selection when applicable
-- proposed category name (required)
-- proposed category code or auto-generated category code preview
-- category level/path preview
-- description or business justification
+A stop purchase application contains:
+- target material selection, limited to materials currently in `normal` status
+- selected stop-purchase reason option
+- detailed business justification
+- optional effective date or remark when exposed by the UI
 
-A new material code application contains:
-- `material_library_id` (required)
-- category and product-name binding (required)
-- material name (required)
-- unit (required)
-- brand (optional unless selected product rules require it)
-- attributes object with user-entered attribute values
-- reference mall link (required URL)
-- exactly three or more uploaded reference images, with three images required before submission
-- duplicate/matching warning from existing material catalog when available
+A stop use application contains:
+- target material selection, limited to materials currently in `stop_purchase` status
+- selected stop-use reason option
+- detailed business justification
+- explicit irreversible/terminal-state warning visible before submission or approval
+
+An admin manual stop purchase action contains:
+- target material currently in `normal` status
+- selected or entered exemption reason (required)
+- operator identity or visible action source indicating admin/manual operation
+- lifecycle history entry showing the status changed from `normal` to `stop_purchase`
 
 ### Success criteria (black-box-verifiable)
-- [ ] A material manager can submit a new material category application, complete a multi-node approval flow, and see the approved category created in the category library.
+- [ ] A material manager can submit a stop purchase application for a normal material, complete approval, and see the material status update to `stop_purchase`.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Open the approval configuration area from visible navigation, or open `http://localhost:5173/system/config`, set approval mode to multi-node workflow, and save.
-  3. Open the new category application page from visible navigation, or open `http://localhost:5173/workflows/new-category`.
-  4. Submit a unique category request as a material manager with a target category library, optional parent category, category name such as `测试新增类目-<timestamp>`, description, and business reason.
-  5. Assert the application detail page shows an auto-generated application number, status `pending_department_head`, current node for department-head approval, and a submit event in approval history.
-  6. Open the approver task list from visible navigation, or open `http://localhost:5173/workflows/tasks`, approve the application as the department head, and assert the status changes to `pending_asset_management`.
-  7. Approve the same application as asset management and assert the final status is `approved` with both approval events visible in chronological approval history.
-  8. Open the category management page at `http://localhost:5173/categories`, search for the unique category name, and assert the category exists under the selected library/path with a generated or accepted category code.
+  2. Open the material list at `http://localhost:5173/materials`, create or locate a unique material in `normal` status such as `测试停采物料-<timestamp>`, and assert the list/detail page shows a `normal` lifecycle badge.
+  3. Open the stop purchase application page from visible navigation, from the material row action, or directly at `http://localhost:5173/workflows/stop-purchase`.
+  4. Select the normal material, choose a visible stop-purchase reason option such as `供应商停产` or another configured option, enter a business justification, and submit the application.
+  5. Assert the application detail page shows an auto-generated application number, type `stop_purchase`, the selected material code/name, selected reason, non-terminal pending approval status, and a submit event in approval history.
+  6. Approve the application through the approver task list at `http://localhost:5173/workflows/tasks` using the configured approval flow until the application reaches `approved`.
+  7. Return to `http://localhost:5173/materials`, search for the unique material name, and assert the material row and detail page show status `stop_purchase` with a visible lifecycle indicator or timeline entry for the approved stop purchase application.
 
-- [ ] Category application rejection returns the request to the applicant with a required reason and does not create a category.
+- [ ] Stop purchase application rejection requires a reason, preserves the submitted material and reason evidence, and does not change the material status.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Open `http://localhost:5173/workflows/new-category` and submit a unique category request with a target library, category name such as `测试驳回类目-<timestamp>`, description, and business reason.
-  3. Open `http://localhost:5173/workflows/tasks`, attempt to reject without a comment, and assert the UI blocks the action or displays a validation error requiring a rejection reason.
-  4. Reject the application with a visible reason such as `类目名称不符合标准命名规则`.
-  5. Assert the applicant-facing application list at `http://localhost:5173/workflows/applications` shows the request with status `rejected` and displays the rejection reason in the detail/history view.
-  6. Open `http://localhost:5173/categories`, search for the rejected category name, and assert no category was created.
+  2. Create or locate a unique `normal` material such as `测试停采驳回物料-<timestamp>`.
+  3. Submit a stop purchase application for that material from `http://localhost:5173/workflows/stop-purchase` with a selected reason option and business justification.
+  4. Open `http://localhost:5173/workflows/tasks`, attempt to reject without a comment, and assert the UI blocks the action or displays a validation error requiring a rejection reason.
+  5. Reject the application with a visible reason such as `停采依据不足`.
+  6. Assert the applicant-facing application list at `http://localhost:5173/workflows/applications` shows the request with status `rejected` and displays the rejection reason, original selected stop-purchase reason, and target material evidence in the detail/history view.
+  7. Open `http://localhost:5173/materials`, search for the unique material name, and assert the material still has `normal` status.
 
-- [ ] A material manager can submit a new material code application with a reference mall link and three required images, approve it, and find the new material in the catalog.
+- [ ] An admin can manually stop purchase for a normal material only after providing an exemption reason, and the manual transition is visible in lifecycle history.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Open the new material code application page from visible navigation, or open `http://localhost:5173/workflows/new-material-code`.
-  3. Fill the form with a unique material name such as `测试编码物料-<timestamp>`, material library, category/product-name binding, unit, brand when available, at least two attribute values, reference mall link `https://example.com/material-code-test`, and business reason.
-  4. Attempt to submit with fewer than three uploaded images and assert the UI blocks submission with a visible validation message for the three required reference images.
-  5. Upload three valid image files, submit the application, and assert the application detail shows an auto-generated application number, submitted material fields, uploaded image thumbnails, reference mall link, and pending approval status.
-  6. Approve the application through `http://localhost:5173/workflows/tasks` using the configured approval flow and assert the final application status is `approved`.
-  7. Open the material list at `http://localhost:5173/materials`, search for the unique material name, and assert the material appears with an auto-generated material code in `MAT-XXXXXXXX` format, `normal` status, the submitted unit/attributes, and the reference link or images visible in detail.
+  2. Open `http://localhost:5173/materials`, create or locate a unique material in `normal` status such as `测试管理员停采物料-<timestamp>`.
+  3. From the material row action or detail page, choose the admin/manual stop purchase action.
+  4. Attempt to confirm manual stop purchase without an exemption reason and assert the UI blocks the action or displays a validation error requiring an exemption reason.
+  5. Confirm manual stop purchase with an exemption reason such as `紧急质量风险停采`.
+  6. Assert the material list and detail page show status `stop_purchase` immediately, without requiring a workflow approval task.
+  7. Assert the material detail lifecycle history or status timeline shows a manual/admin source, the exemption reason, and the status transition from `normal` to `stop_purchase`.
 
-- [ ] Material code application rejection returns the request with reason, preserves submitted evidence, and does not add the material to the catalog.
+- [ ] Stop use applications enforce the stop-purchase precondition, approve only eligible materials, and update eligible materials to terminal `stop_use`.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
-  2. Open `http://localhost:5173/workflows/new-material-code` and submit a unique material code application with a reference mall URL, three uploaded images, required category/product/material fields, and attribute values.
-  3. Open `http://localhost:5173/workflows/tasks`, reject the application with a reason such as `商城链接与申请物料不一致`.
-  4. Assert the applicant-facing detail page shows status `rejected`, the rejection reason, the original submitted reference mall link, and the three uploaded image thumbnails.
-  5. Open `http://localhost:5173/materials`, search for the rejected material name, and assert no material was created in the catalog.
+  2. Create or locate one unique material in `normal` status such as `测试停用前置拦截-<timestamp>` and one unique material already in `stop_purchase` status such as `测试停用物料-<timestamp>`.
+  3. Open the stop use application page from visible navigation, from the material row action, or directly at `http://localhost:5173/workflows/stop-use`.
+  4. Attempt to submit a stop use application for the `normal` material and assert the material is unavailable/disabled in the selector or submission fails with a visible error explaining that stop use requires prior stop purchase.
+  5. Select the `stop_purchase` material, choose a visible stop-use reason option such as `长期无库存且无业务需求` or another configured option, enter a business justification, acknowledge any irreversible-state warning when present, and submit.
+  6. Approve the application through `http://localhost:5173/workflows/tasks` using the configured approval flow until the application reaches `approved`.
+  7. Open `http://localhost:5173/materials`, search for the eligible material name, and assert the material row and detail page show terminal status `stop_use` with lifecycle history linking to the approved stop use application.
+  8. Attempt to change the `stop_use` material back to `normal` or `stop_purchase` from any visible lifecycle action and assert the UI blocks the action or displays a non-reversible terminal-state error.
 
-- [ ] Simple approval mode can be configured externally and shortens both application workflows to a single approval step without restarting the system.
+- [ ] Stop workflow forms expose selectable reason options and lifecycle status indicators consistently across application, task, material list, and material detail views.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173/system/config` in a browser.
-  2. Change approval mode from multi-node workflow to simple approval and save; do not restart the backend or rerun `bash init.sh`.
-  3. Submit a new category application from `http://localhost:5173/workflows/new-category` and assert its status is `pending_approval` or an equivalent single approver state, not `pending_department_head`.
-  4. Approve the category application once from `http://localhost:5173/workflows/tasks` and assert it becomes `approved` and the category appears at `http://localhost:5173/categories`.
-  5. Submit a new material code application from `http://localhost:5173/workflows/new-material-code` with a valid reference mall link and three images.
-  6. Approve the material code application once from `http://localhost:5173/workflows/tasks` and assert it becomes `approved` and the material appears at `http://localhost:5173/materials`.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Open `http://localhost:5173/workflows/stop-purchase` and assert the form contains a required reason selection control with at least two visible stop-purchase reason options or an option plus required custom reason entry.
+  3. Open `http://localhost:5173/workflows/stop-use` and assert the form contains a required reason selection control with at least two visible stop-use reason options or an option plus required custom reason entry.
+  4. Submit one stop purchase or stop use application and assert the application detail page, approver task list at `http://localhost:5173/workflows/tasks`, and applicant application list at `http://localhost:5173/workflows/applications` all display the selected reason and current workflow status.
+  5. Open `http://localhost:5173/materials` and assert material lifecycle states are visually distinguishable in the list, including at least `normal`, `stop_purchase`, and `stop_use` badges or equivalent indicators after test data is created.
+  6. Use the material list status filter for `stop_purchase` and `stop_use` and assert each filter returns materials with the matching visible lifecycle indicator and excludes materials in other statuses.
+  7. Open a material detail page for each lifecycle state and assert the current status, available next actions, and blocked invalid actions match the lifecycle order `normal -> stop_purchase -> stop_use`.
 
-- [ ] Workflow APIs are documented and enforce state-machine rules independently of source-code inspection.
+- [ ] Stop purchase and stop use APIs are documented and enforce material lifecycle state-machine rules independently of source-code inspection.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:8000/openapi.json` in a browser.
-  2. Assert the OpenAPI document lists endpoints for workflow application creation, listing/detail, approval, rejection, approval-mode configuration, and task retrieval under paths such as `/api/v1/workflows/applications`, `/api/v1/workflows/tasks`, or `/api/v1/system/config`.
-  3. Send a real HTTP request to create a new category application and assert the JSON response includes `application_no`, `type: "new_category"`, non-terminal pending status, current node, and an approval history entry for submission.
-  4. Send an invalid approval request for the wrong current node or for an already terminal application and assert the API returns a 4xx response with a clear state-transition error instead of mutating the workflow.
-  5. Send valid approval requests for the configured approval mode and assert the terminal response is `approved` and contains the full ordered approval history.
-  6. Verify through a real HTTP request or browser page at `http://localhost:5173/categories` or `http://localhost:8000/openapi.json`-listed category endpoint that the approved category application created a category in the target library.
-  7. Repeat the API flow for a new material code application and assert approval creates a material catalog entry while rejection returns `rejected` and creates no material.
+  2. Assert the OpenAPI document lists endpoints for workflow application creation, listing/detail, approval, rejection, task retrieval, material listing/detail, and an admin/manual stop purchase action under paths such as `/api/v1/workflows/applications`, `/api/v1/workflows/tasks`, `/api/v1/materials`, or `/api/v1/materials/{id}/stop-purchase`.
+  3. Send a real HTTP request to create a stop purchase application for a `normal` material and assert the JSON response includes `application_no`, `type: "stop_purchase"`, target material fields, selected reason, non-terminal pending status, current node, and an approval history entry for submission.
+  4. Send valid approval requests for the configured approval mode and assert the terminal response is `approved`; then verify through a real HTTP request to the material endpoint that the target material status is `stop_purchase`.
+  5. Send a real HTTP request attempting to create a stop use application for a `normal` material and assert the API returns a 4xx response with a clear precondition or state-transition error and does not mutate the material status.
+  6. Send a real HTTP request to create and approve a stop use application for a `stop_purchase` material and assert the material endpoint returns terminal status `stop_use`.
+  7. Send invalid lifecycle requests such as manual stop purchase without an exemption reason, stop purchase for an already `stop_use` material, or reverting a `stop_use` material, and assert each returns a 4xx response with a clear error instead of mutating the material.
 
 ---
 
