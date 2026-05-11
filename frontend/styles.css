@@ -71,6 +71,18 @@ nav a:hover {
   background: #eef3f8;
 }
 
+.session-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.session-bar input {
+  min-width: 160px;
+}
+
 .shell {
   margin: 0 auto;
   max-width: 1240px;
@@ -296,7 +308,7 @@ pre {
 .permission-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
 }
 
 .permission-group label {
@@ -307,6 +319,10 @@ pre {
   color: #667085;
   padding: 20px;
   text-align: center;
+}
+
+.access-denied {
+  max-width: 640px;
 }
 
 @media (max-width: 860px) {

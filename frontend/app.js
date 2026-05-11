@@ -8,14 +8,49 @@ let selectedProductId = null;
 let editingAttributeId = null;
 let editingBrandId = null;
 let editingMaterialId = null;
+let editingMaterialLibraryId = null;
 let editingUserId = null;
 let editingRoleId = null;
 let materialPreviewItems = [];
 let materialGovernanceFile = null;
 let aiMaterialPreview = null;
 let workflowReferenceImages = [];
+let currentUser = null;
 const STOP_PURCHASE_REASONS = ["供应商停产", "质量风险停采", "战略替代物料", "采购目录清理"];
 const STOP_USE_REASONS = ["长期无库存且无业务需求", "安全合规风险", "技术标准淘汰", "资产归档完成"];
+const NAV_ITEMS = [
+  { href: "/materials", label: "Material Management", permission: "directory.material_archives" },
+  { href: "/materials/ai-add", label: "AI Material Add", permission: "directory.material_archives" },
+  { href: "/materials/governance", label: "Material AI Governance", permission: "directory.material_archives" },
+  { href: "/material-libraries", label: "Material Libraries", permission: "directory.material_library" },
+  { href: "/workflows/new-category", label: "New Category Workflow", permission: "directory.workflow" },
+  { href: "/workflows/new-material-code", label: "New Material Code", permission: "directory.workflow" },
+  { href: "/workflows/stop-purchase", label: "Stop Purchase", permission: "directory.workflow" },
+  { href: "/workflows/stop-use", label: "Stop Use", permission: "directory.workflow" },
+  { href: "/workflows/tasks", label: "Workflow Tasks", permission: "directory.workflow" },
+  { href: "/workflows/applications", label: "My Applications", permission: "directory.workflow" },
+  { href: "/system/users", label: "Users", permission: "directory.system_admin" },
+  { href: "/system/roles", label: "Roles", permission: "directory.system_admin" },
+  { href: "/system/config", label: "System Config", permission: "directory.system_admin" },
+  { href: "/categories", label: "Categories", permission: "directory.category_management" },
+  { href: "/ai/providers", label: "AI Providers", permission: "directory.system_admin" },
+  { href: "/standard/product-names", label: "Product Names", permission: "directory.product_name_management" },
+  { href: "/standard/attributes", label: "Attributes", permission: "directory.attribute_management" },
+  { href: "/standard/attributes/ai-governance", label: "AI Governance", permission: "directory.attribute_management" },
+  { href: "/standard/attribute-recommend", label: "Attribute Recommend", permission: "directory.attribute_management" },
+  { href: "/standard/attributes/changes", label: "Changes", permission: "directory.attribute_management" },
+  { href: "/standard/brands", label: "Brands", permission: "directory.brand_management" }
+];
+const ROUTE_PERMISSIONS = [
+  { test: (path) => path.includes("/material-libraries"), permission: "directory.material_library" },
+  { test: (path) => path.includes("/materials"), permission: "directory.material_archives" },
+  { test: (path) => path.includes("/standard/attributes"), permission: "directory.attribute_management" },
+  { test: (path) => path.includes("/workflows"), permission: "directory.workflow" },
+  { test: (path) => path.includes("/system"), permission: "directory.system_admin" },
+  { test: (path) => path.includes("/categories"), permission: "directory.category_management" },
+  { test: (path) => path.includes("/standard/product-names"), permission: "directory.product_name_management" },
+  { test: (path) => path.includes("/standard/brands"), permission: "directory.brand_management" }
+];
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;",
@@ -30,7 +65,7 @@ async function request(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-User-Role": "super_admin",
+      ...authHeaders(),
       ...(options.headers || {})
     }
   });
@@ -38,6 +73,82 @@ async function request(path, options = {}) {
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+function storedSession() {
+  try {
+    return JSON.parse(localStorage.getItem("material_session") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function authHeaders() {
+  const session = storedSession();
+  if (session.user_id) return { "X-User-Id": String(session.user_id) };
+  if (session.username) return { "X-Username": session.username };
+  return { "X-User-Role": "super_admin" };
+}
+
+function can(permissionKey) {
+  return Boolean(currentUser?.is_super_admin || currentUser?.permissions?.includes(permissionKey));
+}
+
+function accessDenied(permissionKey) {
+  app.innerHTML = `
+    <section class="panel access-denied">
+      <h2>Access denied</h2>
+      <p class="muted">Current user ${esc(currentUser?.username || "unknown")} lacks ${esc(permissionKey)}.</p>
+    </section>
+  `;
+}
+
+async function loadCurrentUser() {
+  currentUser = await request("/auth/me");
+  renderNavigation();
+  renderSessionBar();
+}
+
+function renderNavigation() {
+  const nav = document.querySelector("nav");
+  if (!nav) return;
+  nav.innerHTML = NAV_ITEMS
+    .filter((item) => can(item.permission))
+    .map((item) => `<a href="${item.href}">${esc(item.label)}</a>`)
+    .join("");
+}
+
+function renderSessionBar() {
+  let bar = document.getElementById("sessionBar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "sessionBar";
+    bar.className = "session-bar";
+    document.querySelector(".topbar").appendChild(bar);
+  }
+  bar.innerHTML = `
+    <span class="pill">${esc(currentUser?.username || "super_admin")}</span>
+    <input id="sessionUsername" placeholder="Username" />
+    <button id="switchSession" class="secondary">Switch User</button>
+    <button id="adminSession" class="secondary">Use Admin</button>
+  `;
+  document.getElementById("switchSession").addEventListener("click", switchSession);
+  document.getElementById("adminSession").addEventListener("click", useAdminSession);
+}
+
+async function switchSession() {
+  const username = document.getElementById("sessionUsername").value.trim();
+  if (!username) return;
+  const user = await request("/auth/login", { method: "POST", body: JSON.stringify({ username }) });
+  localStorage.setItem("material_session", JSON.stringify({ user_id: user.id, username: user.username }));
+  await loadCurrentUser();
+  route();
+}
+
+async function useAdminSession() {
+  localStorage.setItem("material_session", JSON.stringify({ username: "super_admin" }));
+  await loadCurrentUser();
+  route();
 }
 
 async function loadProducts() {
@@ -100,6 +211,124 @@ function brandSelect(selectedId = "") {
   </label>`;
 }
 
+async function renderMaterialLibraries() {
+  const search = document.getElementById("librarySearch")?.value || "";
+  const libraries = await request("/material-libraries");
+  const filtered = libraries.filter((library) => {
+    const text = `${library.name} ${library.code} ${library.description}`.toLowerCase();
+    return text.includes(search.toLowerCase());
+  });
+  const canCreate = can("button.material_library.create");
+  app.innerHTML = `
+    <h2>Material Library Management</h2>
+    <div class="grid material-grid">
+      ${canCreate ? `<section class="panel">
+        <h3 id="libraryFormTitle">Create material library</h3>
+        <label>Name<input id="libraryName" placeholder="Sprint 9 Scope A" /></label>
+        <label>Description<textarea id="libraryDescription" placeholder="Library purpose and scope"></textarea></label>
+        <label><span><input id="libraryEnabled" type="checkbox" checked /> Enabled</span></label>
+        <button id="saveLibrary">Create Material Library</button>
+        <button id="resetLibraryForm" class="secondary">Reset</button>
+        <div id="libraryStatus" class="status muted"></div>
+      </section>` : `<section class="panel"><h3>Library actions</h3><div class="empty">Create permission is not granted.</div><div id="libraryStatus" class="status muted"></div></section>`}
+      <section>
+        <div class="toolbar">
+          <input id="librarySearch" value="${esc(search)}" placeholder="Search material libraries" />
+          <button id="searchLibraries" class="secondary">Search</button>
+          <button id="clearLibraries" class="secondary">Clear</button>
+          ${can("button.material_library.import") ? `<button class="secondary" disabled>Import</button>` : ""}
+          ${can("button.material_library.export") ? `<button class="secondary" disabled>Export</button>` : ""}
+          ${can("button.material_library.approval") ? `<button class="secondary" disabled>Approval</button>` : ""}
+        </div>
+        <div class="panel">${materialLibraryTable(filtered)}</div>
+      </section>
+    </div>
+  `;
+  if (canCreate) {
+    document.getElementById("saveLibrary").addEventListener("click", saveMaterialLibrary);
+    document.getElementById("resetLibraryForm").addEventListener("click", resetMaterialLibraryForm);
+  }
+  document.getElementById("searchLibraries").addEventListener("click", renderMaterialLibraries);
+  document.getElementById("clearLibraries").addEventListener("click", () => {
+    document.getElementById("librarySearch").value = "";
+    renderMaterialLibraries();
+  });
+  document.querySelectorAll("[data-edit-library]").forEach((button) => button.addEventListener("click", () => editMaterialLibrary(button.dataset.editLibrary)));
+  document.querySelectorAll("[data-delete-library]").forEach((button) => button.addEventListener("click", () => deleteMaterialLibrary(button.dataset.deleteLibrary)));
+  window.currentMaterialLibraries = libraries;
+}
+
+function materialLibraryTable(libraries) {
+  if (!libraries.length) return `<div class="empty">No material libraries found</div>`;
+  return `
+    <table>
+      <thead><tr><th>Library</th><th>Code</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${libraries.map((library) => `
+          <tr>
+            <td>${esc(library.name)}<div class="muted">ID ${library.id}</div></td>
+            <td>${esc(library.code)}</td>
+            <td>${esc(library.description)}</td>
+            <td>${library.enabled ? "enabled" : "disabled"}</td>
+            <td class="actions">
+              ${can("button.material_library.edit") ? `<button class="secondary" data-edit-library="${library.id}">Edit</button>` : ""}
+              ${can("button.material_library.delete") ? `<button class="danger" data-delete-library="${library.id}">Delete</button>` : ""}
+              ${!can("button.material_library.edit") && !can("button.material_library.delete") ? `<span class="muted">Read only</span>` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function saveMaterialLibrary() {
+  const status = document.getElementById("libraryStatus");
+  const payload = {
+    name: document.getElementById("libraryName").value.trim(),
+    description: document.getElementById("libraryDescription").value.trim(),
+    enabled: document.getElementById("libraryEnabled").checked
+  };
+  try {
+    if (editingMaterialLibraryId) {
+      await request(`/material-libraries/${editingMaterialLibraryId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await request("/material-libraries", { method: "POST", body: JSON.stringify(payload) });
+    }
+    editingMaterialLibraryId = null;
+    status.textContent = "Material library saved";
+    renderMaterialLibraries();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function editMaterialLibrary(id) {
+  const library = (window.currentMaterialLibraries || []).find((item) => String(item.id) === String(id));
+  if (!library) return;
+  editingMaterialLibraryId = library.id;
+  document.getElementById("libraryFormTitle").textContent = `Edit ${library.name}`;
+  document.getElementById("saveLibrary").textContent = "Update Material Library";
+  document.getElementById("libraryName").value = library.name;
+  document.getElementById("libraryDescription").value = library.description;
+  document.getElementById("libraryEnabled").checked = library.enabled;
+}
+
+function resetMaterialLibraryForm() {
+  editingMaterialLibraryId = null;
+  document.getElementById("libraryFormTitle").textContent = "Create material library";
+  document.getElementById("saveLibrary").textContent = "Create Material Library";
+  document.getElementById("libraryName").value = "";
+  document.getElementById("libraryDescription").value = "";
+  document.getElementById("libraryEnabled").checked = true;
+}
+
+async function deleteMaterialLibrary(id) {
+  if (!window.confirm("Delete this material library?")) return;
+  await request(`/material-libraries/${id}`, { method: "DELETE" });
+  renderMaterialLibraries();
+}
+
 function parseAttributes(text) {
   return text.split(/\n|;/).reduce((result, line) => {
     const trimmed = line.trim();
@@ -155,10 +384,11 @@ async function renderMaterials() {
   const status = document.getElementById("materialStatusFilter")?.value || "";
   const query = new URLSearchParams({ search, status });
   const materials = await request(`/materials?${query}`);
+  const canCreate = can("button.material_archives.create");
   app.innerHTML = `
     <h2>Material Management</h2>
     <div class="grid material-grid">
-      <section class="panel">
+      ${canCreate ? `<section class="panel">
         <h3 id="materialFormTitle">Create material</h3>
         ${productSelect()}
         ${materialLibrarySelect()}
@@ -172,7 +402,7 @@ async function renderMaterials() {
         <button id="saveMaterial">Create Material</button>
         <button id="resetMaterial" class="secondary">Reset</button>
         <div id="materialStatus" class="status muted"></div>
-      </section>
+      </section>` : `<section class="panel"><h3>Material actions</h3><div class="empty">Create permission is not granted.</div><div id="materialStatus" class="status muted"></div></section>`}
       <section>
         <div class="toolbar">
           <input id="materialSearch" value="${esc(search)}" placeholder="Search materials" />
@@ -192,9 +422,11 @@ async function renderMaterials() {
       </section>
     </div>
   `;
-  bindProductSelect(() => {});
-  document.getElementById("saveMaterial").addEventListener("click", saveMaterial);
-  document.getElementById("resetMaterial").addEventListener("click", resetMaterialForm);
+  if (canCreate) {
+    bindProductSelect(() => {});
+    document.getElementById("saveMaterial").addEventListener("click", saveMaterial);
+    document.getElementById("resetMaterial").addEventListener("click", resetMaterialForm);
+  }
   document.getElementById("searchMaterial").addEventListener("click", renderMaterials);
   document.getElementById("materialStatusFilter").addEventListener("change", renderMaterials);
   document.getElementById("clearMaterialSearch").addEventListener("click", () => {
@@ -231,9 +463,9 @@ function materialTable(materials) {
             <td>${visibleAttributes(material.attributes || {}).map(([key, value]) => `<span class="pill">${esc(key)}: ${esc(value)}</span>`).join("")}</td>
             <td class="actions">
               <button class="secondary" data-detail-material="${material.id}">Detail</button>
-              <button class="secondary" data-edit-material="${material.id}">Edit</button>
+              ${can("button.material_archives.edit") ? `<button class="secondary" data-edit-material="${material.id}">Edit</button>` : ""}
               ${transitionButtons(material)}
-              <button class="danger" data-delete-material="${material.id}">Delete</button>
+              ${can("button.material_archives.delete") ? `<button class="danger" data-delete-material="${material.id}">Delete</button>` : ""}
             </td>
           </tr>
         `).join("")}
@@ -243,6 +475,7 @@ function materialTable(materials) {
 }
 
 function transitionButtons(material) {
+  if (!can("button.material_archives.approval")) return "";
   if (material.status === "normal") {
     return `
       <button class="secondary" data-apply-stop-purchase="${material.id}">Stop Purchase Apply</button>
@@ -480,10 +713,11 @@ async function renderAttributes() {
   const search = document.getElementById("attributeSearch")?.value || "";
   const query = new URLSearchParams({ product_name_id: selectedProductId || "", search });
   const attributes = await request(`/attributes?${query}`);
+  const canCreate = can("button.attribute_management.create");
   app.innerHTML = `
     <h2>Attribute Management</h2>
     <div class="grid">
-      <section class="panel">
+      ${canCreate ? `<section class="panel">
         <h3 id="attributeFormTitle">Create attribute</h3>
         ${productSelect()}
         <label>Name<input id="attrName" placeholder="打印速度" /></label>
@@ -503,7 +737,7 @@ async function renderAttributes() {
         <button id="saveAttr">Create Attribute</button>
         <button id="resetAttr" class="secondary">Reset</button>
         <div id="attrStatus" class="status muted"></div>
-      </section>
+      </section>` : `<section class="panel"><h3>Attribute actions</h3><div class="empty">Create permission is not granted.</div><div id="attrStatus" class="status muted"></div></section>`}
       <section>
         <div class="toolbar">
           <input id="attributeSearch" value="${esc(search)}" placeholder="Search attributes" />
@@ -517,9 +751,11 @@ async function renderAttributes() {
       </section>
     </div>
   `;
-  bindProductSelect(renderAttributes);
-  document.getElementById("saveAttr").addEventListener("click", createAttribute);
-  document.getElementById("resetAttr").addEventListener("click", resetAttributeForm);
+  if (canCreate) {
+    bindProductSelect(renderAttributes);
+    document.getElementById("saveAttr").addEventListener("click", createAttribute);
+    document.getElementById("resetAttr").addEventListener("click", resetAttributeForm);
+  }
   document.getElementById("searchAttr").addEventListener("click", renderAttributes);
   document.getElementById("clearSearch").addEventListener("click", () => {
     document.getElementById("attributeSearch").value = "";
@@ -552,8 +788,8 @@ function attributeTable(attributes) {
             <td>v${item.version}</td>
             <td>
               <button class="secondary" data-detail-attr="${item.id}">Detail</button>
-              <button class="secondary" data-edit-attr="${item.id}">Edit</button>
-              <button class="danger" data-delete-attr="${item.id}">Delete</button>
+              ${can("button.attribute_management.edit") ? `<button class="secondary" data-edit-attr="${item.id}">Edit</button>` : ""}
+              ${can("button.attribute_management.delete") ? `<button class="danger" data-delete-attr="${item.id}">Delete</button>` : ""}
             </td>
           </tr>
         `).join("")}
@@ -1292,10 +1528,10 @@ async function renderRoleBinding(roleId) {
 }
 
 function permissionGroups(catalog, selectedKeys) {
-  const groups = ["directory", "button", "api"];
+  const groups = ["directory", "button", "api", "scope"];
   return groups.map((type) => `
     <section class="panel permission-group">
-      <h3>${type === "directory" ? "Directory/Menu" : type === "button" ? "Button/Action" : "API-level"} permissions</h3>
+      <h3>${type === "directory" ? "Directory/Menu" : type === "button" ? "Button/Action" : type === "api" ? "API-level" : "Material Library Scope"} permissions</h3>
       ${catalog.filter((item) => item.permission_type === type).map((item) => `
         <label><span><input type="checkbox" class="permission-checkbox" value="${esc(item.permission_key)}" ${selectedKeys.has(item.permission_key) ? "checked" : ""} /> ${esc(item.label)} <span class="muted">${esc(item.module)} / ${esc(item.permission_key)}</span></span></label>
       `).join("")}
@@ -1685,11 +1921,15 @@ function bindWorkflowActions(detailId, refresh) {
 
 async function route() {
   try {
+    if (!currentUser) await loadCurrentUser();
     const path = window.location.pathname;
+    const required = ROUTE_PERMISSIONS.find((item) => item.test(path))?.permission;
+    if (required && !can(required)) return accessDenied(required);
     if (path.match(/\/(?:system\/)?roles\/\d+\/permissions/)) return renderRolePermissions();
     if (path.includes("/system/users") || path === "/users") return renderUsers();
     if (path.includes("/system/roles") || path === "/roles") return renderRoles();
     if (path.includes("/system/config")) return renderSystemConfig();
+    if (path.includes("/material-libraries")) return renderMaterialLibraries();
     if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();
     if (path.includes("/workflows/new-material-code")) return renderNewMaterialCodeWorkflow();
     if (path.includes("/workflows/stop-purchase")) return renderStopPurchaseWorkflow();
@@ -1704,11 +1944,18 @@ async function route() {
     if (path.includes("/standard/attribute-recommend")) return renderRecommend();
     if (path.includes("/standard/attributes/changes")) return renderChanges();
     if (path.includes("/standard/brands")) return renderBrands();
-    return renderAttributes();
+    const firstAllowed = NAV_ITEMS.find((item) => can(item.permission));
+    if (firstAllowed) {
+      window.history.replaceState(null, "", firstAllowed.href);
+      return route();
+    }
+    return accessDenied("any directory permission");
   } catch (error) {
     app.innerHTML = `<div class="panel"><h2>Unable to load page</h2><pre>${esc(error.message)}</pre></div>`;
   }
 }
 
 window.addEventListener("popstate", route);
-route();
+loadCurrentUser().then(route).catch((error) => {
+  app.innerHTML = `<div class="panel"><h2>Unable to load session</h2><pre>${esc(error.message)}</pre></div>`;
+});
