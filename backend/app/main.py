@@ -16,8 +16,10 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Attribute, AttributeChange, Brand, Category, Material, MaterialLibrary, ProductName
+from .models import Attribute, AttributeChange, Brand, Category, LLMProviderConfig, Material, MaterialLibrary, ProductName
 from .schemas import (
+    AiMaterialAddConfirmIn,
+    AiMaterialAddPreviewIn,
     AttributeIn,
     AttributeOut,
     AttributeUpdate,
@@ -31,17 +33,20 @@ from .schemas import (
     GovernancePreviewIn,
     MaterialGovernanceImportIn,
     MaterialGovernancePreviewIn,
+    MaterialMatchIn,
     MaterialIn,
     MaterialLibraryOut,
     MaterialOut,
     MaterialTransitionIn,
     MaterialUpdate,
     ProductNameOut,
+    ProviderConfigIn,
+    ProviderConfigOut,
     RecommendIn,
 )
 
 
-app = FastAPI(title="AI Material Management Platform", version="0.3.0")
+app = FastAPI(title="AI Material Management Platform", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -66,6 +71,14 @@ SEED_CATEGORY = {
 }
 MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
 MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
+AI_CAPABILITIES = {"material_add", "material_match"}
+DEFAULT_PROVIDER = {
+    "provider": "mock",
+    "model": "mock-material-governance-v1",
+    "endpoint": "local://deterministic",
+    "capabilities": ["material_add", "material_match"],
+}
+KNOWN_BRANDS = ["华为", "Huawei", "HUAWEI", "联想", "Lenovo", "惠普", "HP", "戴尔", "Dell", "治理测试品牌"]
 
 
 @app.on_event("startup")
@@ -75,6 +88,7 @@ def startup() -> None:
     try:
         ensure_seed_product(db)
         ensure_seed_material_context(db)
+        ensure_provider_configs(db)
     finally:
         db.close()
 
@@ -105,6 +119,65 @@ def ensure_seed_material_context(db: Session) -> tuple[MaterialLibrary, Category
     db.refresh(library)
     db.refresh(category)
     return library, category
+
+
+def normalize_capabilities(capabilities: list[str] | str | None) -> list[str]:
+    if capabilities is None:
+        return []
+    if isinstance(capabilities, str):
+        try:
+            loaded = json.loads(capabilities)
+            if isinstance(loaded, list):
+                capabilities = loaded
+            else:
+                capabilities = capabilities.split(",")
+        except json.JSONDecodeError:
+            capabilities = capabilities.split(",")
+    return [str(item).strip() for item in capabilities if str(item).strip()]
+
+
+def ensure_provider_configs(db: Session) -> LLMProviderConfig:
+    Base.metadata.create_all(bind=engine)
+    provider = db.query(LLMProviderConfig).filter(LLMProviderConfig.active.is_(True)).first()
+    if provider:
+        return provider
+    provider = LLMProviderConfig(
+        provider=DEFAULT_PROVIDER["provider"],
+        model=DEFAULT_PROVIDER["model"],
+        endpoint=DEFAULT_PROVIDER["endpoint"],
+        capabilities=json.dumps(DEFAULT_PROVIDER["capabilities"]),
+        active=True,
+        connection_status="connected",
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+    return provider
+
+
+def provider_for_capability(db: Session, capability: str) -> LLMProviderConfig:
+    ensure_provider_configs(db)
+    providers = db.query(LLMProviderConfig).filter(LLMProviderConfig.active.is_(True)).order_by(LLMProviderConfig.id.desc()).all()
+    for provider in providers:
+        if capability in normalize_capabilities(provider.capabilities):
+            return provider
+    fallback = db.query(LLMProviderConfig).order_by(LLMProviderConfig.id.desc()).first()
+    if fallback:
+        return fallback
+    return ensure_provider_configs(db)
+
+
+def provider_to_out(provider: LLMProviderConfig) -> ProviderConfigOut:
+    return ProviderConfigOut(
+        id=provider.id,
+        provider=provider.provider,
+        model=provider.model,
+        endpoint=provider.endpoint,
+        capabilities=normalize_capabilities(provider.capabilities),
+        active=provider.active,
+        connection_status=provider.connection_status,
+        updated_at=provider.updated_at.isoformat(),
+    )
 
 
 def now() -> datetime:
@@ -345,6 +418,313 @@ def attributes_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return attributes
 
 
+def compact_space(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" ，,。.;；")
+
+
+def infer_product_category(text: str) -> tuple[str, str, str]:
+    lowered = text.lower()
+    if any(token in text for token in ["交换机", "端口", "千兆"]) or "switch" in lowered:
+        return "交换机", "网络设备 / 交换机", "台"
+    if any(token in text for token in ["打印机", "打印", "a4"]) or "printer" in lowered:
+        return SEED_PRODUCT["name"], SEED_CATEGORY["name"], "台"
+    if any(token in text for token in ["电缆", "线缆", "网线"]) or "cable" in lowered:
+        return "线缆", "网络设备 / 线缆", "米"
+    return "通用物料", "未分类 / 通用物料", "件"
+
+
+def get_or_create_category(db: Session, name: str) -> Category:
+    category = db.query(Category).filter(Category.name == name).first()
+    if category:
+        return category
+    category = Category(
+        code=next_unique_code(db, Category, "CAT", name),
+        name=name,
+        description="Created by AI material addition recommendation",
+        enabled=True,
+    )
+    db.add(category)
+    db.flush()
+    return category
+
+
+def get_or_create_product_name(db: Session, name: str, unit: str, category: str) -> ProductName:
+    product = db.query(ProductName).filter(ProductName.name == name).first()
+    if product:
+        return product
+    product = ProductName(name=name, unit=unit, category=category)
+    db.add(product)
+    db.flush()
+    return product
+
+
+def get_or_create_brand(db: Session, brand_name: str) -> Brand | None:
+    if not brand_name:
+        return None
+    brand = db.query(Brand).filter(Brand.name == brand_name).first()
+    if brand:
+        return brand
+    brand = Brand(
+        code=next_unique_code(db, Brand, "BRAND", brand_name),
+        name=brand_name,
+        description="Created by AI material addition",
+        enabled=True,
+    )
+    db.add(brand)
+    db.flush()
+    return brand
+
+
+def extract_after_pattern(text: str, pattern: str) -> str:
+    match = re.search(pattern, text, re.IGNORECASE)
+    return compact_space(match.group(1)) if match else ""
+
+
+def infer_material_name(text: str) -> str:
+    patterns = [
+        r"(?:申请新增|新增|添加|创建)\s*([^，,。；;\n]+)",
+        r"material\s*[:：]\s*([^，,。；;\n]+)",
+    ]
+    for pattern in patterns:
+        value = extract_after_pattern(text, pattern)
+        if value:
+            return value
+    return compact_space(re.split(r"[，,。；;\n]", text.strip(), maxsplit=1)[0])[:80]
+
+
+def infer_unit(text: str, data_type: str = "") -> str:
+    unit = extract_after_pattern(text, r"单位\s*[:：]?\s*([台件个米套只箱包卷A-Za-z]+)")
+    if unit:
+        return unit
+    if data_type == "number" and ("页" in text or "速度" in text):
+        return "页/分钟"
+    return ""
+
+
+def infer_brand_name(text: str) -> str:
+    brand = extract_after_pattern(text, r"品牌\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9_-]+)")
+    if brand:
+        return brand
+    lowered = text.lower()
+    for candidate in KNOWN_BRANDS:
+        if candidate.lower() in lowered:
+            return "华为" if candidate.lower() == "huawei" else candidate
+    return ""
+
+
+def extract_attribute_value(pattern: str, text: str, suffix: str = "") -> str:
+    match = re.search(pattern, text, re.IGNORECASE)
+    if not match:
+        return ""
+    value = compact_space(match.group(1))
+    return f"{value}{suffix}" if suffix and value and suffix not in value else value
+
+
+def extract_material_attributes(text: str) -> tuple[dict[str, Any], dict[str, str]]:
+    attributes: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+
+    port_count = extract_attribute_value(r"(?:端口数|端口|ports?)\s*[:：]?\s*(\d{1,4})", text)
+    if not port_count:
+        port_count = extract_attribute_value(r"(\d{1,4})\s*口", text)
+    if port_count:
+        attributes["端口数"] = port_count
+        sources["端口数"] = "regex:端口数/口"
+
+    speed = extract_attribute_value(r"(?:速率|速度|speed)\s*[:：]?\s*([0-9.]+\s*(?:Mbps|Gbps|MB/s|GB/s|兆|千兆)?)", text)
+    if not speed and "千兆" in text:
+        speed = "1000Mbps"
+    if speed:
+        attributes["速率"] = speed.replace(" ", "")
+        sources["速率"] = "regex:速率/千兆"
+
+    model = extract_attribute_value(r"(?:型号|model)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9._-]{2,})", text)
+    if not model:
+        model_match = re.search(r"\b([A-Z][A-Z0-9]+(?:-[A-Z0-9]+){1,})\b", text)
+        model = model_match.group(1) if model_match else ""
+    if model:
+        attributes["型号"] = model
+        sources["型号"] = "regex:型号/model"
+
+    scenario = extract_after_pattern(text, r"适用(?:于|场景)?\s*([^，,。；;\n]+)")
+    if scenario:
+        attributes["适用场景"] = scenario
+        sources["适用场景"] = "regex:适用场景"
+
+    print_speed = extract_attribute_value(r"打印速度\s*[:：]?\s*([0-9.]+\s*页/分钟)", text)
+    if print_speed:
+        attributes["打印速度"] = print_speed.replace(" ", "")
+        sources["打印速度"] = "regex:打印速度"
+
+    color_mode = extract_attribute_value(r"颜色模式\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z]+)", text)
+    if not color_mode and "彩色" in text:
+        color_mode = "彩色"
+    if color_mode:
+        attributes["颜色模式"] = color_mode
+        sources["颜色模式"] = "regex:颜色模式/彩色"
+
+    paper_size = extract_attribute_value(r"(A[0-9])", text)
+    if paper_size:
+        attributes["纸张尺寸"] = paper_size
+        sources["纸张尺寸"] = "regex:纸张尺寸"
+
+    return attributes, sources
+
+
+def material_search_text(name: str, brand: str, description: str, attributes: dict[str, Any]) -> str:
+    attr_text = " ".join(f"{key} {value}" for key, value in attributes.items())
+    return compact_space(f"{name} {brand} {description} {attr_text}")
+
+
+def token_set(text: str) -> set[str]:
+    lowered = text.lower()
+    tokens = set(re.findall(r"[a-z0-9._-]+", lowered))
+    tokens.update(re.findall(r"\d+\s*(?:口|端口|mbps|gbps|页/分钟|ppm|米|台)", lowered))
+    chinese_phrases = [
+        "交换机",
+        "千兆",
+        "端口",
+        "网络",
+        "接入",
+        "打印机",
+        "打印",
+        "彩色",
+        "黑白",
+        "华为",
+        "联想",
+        "惠普",
+        "办公",
+    ]
+    tokens.update(phrase for phrase in chinese_phrases if phrase in text)
+    synonym_tokens = {
+        "switch": "交换机",
+        "gigabit": "千兆",
+        "huawei": "华为",
+        "printer": "打印机",
+        "color": "彩色",
+        "access": "接入",
+        "network": "网络",
+        "port": "端口",
+        "ports": "端口",
+    }
+    tokens.update(mapped for token, mapped in synonym_tokens.items() if token in lowered)
+    port_match = re.search(r"(\d{1,4})\s*(?:口|端口|ports?|port)", lowered)
+    if port_match:
+        tokens.add(f"端口数:{port_match.group(1)}")
+    return {token.strip() for token in tokens if token.strip()}
+
+
+def ngrams(text: str, size: int = 2) -> set[str]:
+    cleaned = re.sub(r"\s+", "", text.lower())
+    return {cleaned[index : index + size] for index in range(max(len(cleaned) - size + 1, 0))}
+
+
+def jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def semantic_features(text: str, attributes: dict[str, Any]) -> set[str]:
+    lowered = text.lower()
+    features: set[str] = set()
+    if any(token in text for token in ["交换机", "端口", "网络接入"]) or "switch" in lowered:
+        features.add("concept:network_switch")
+    if any(token in text for token in ["千兆", "1000mbps", "1gbps"]) or "gigabit" in lowered:
+        features.add("concept:gigabit")
+    if any(token in text for token in ["打印机", "打印"]) or "printer" in lowered:
+        features.add("concept:printer")
+    if "彩色" in text or "color" in lowered:
+        features.add("concept:color")
+    if "a4" in lowered:
+        features.add("concept:a4")
+    for key, value in attributes.items():
+        key_text = str(key)
+        value_text = str(value)
+        combined = f"{key_text} {value_text}".lower()
+        if "端口" in key_text or "口" in value_text or "port" in combined:
+            number = re.search(r"\d+", value_text)
+            features.add(f"ports:{number.group(0) if number else value_text}")
+        if "速率" in key_text or "speed" in combined or "mbps" in combined or "gbps" in combined:
+            if "1000" in combined or "千兆" in value_text or "1g" in combined:
+                features.add("concept:gigabit")
+            normalized_speed = re.sub(r"\s+", "", value_text.lower())
+            features.add(f"speed:{normalized_speed}")
+        if "型号" in key_text or "model" in combined:
+            features.add(f"model:{value_text.lower()}")
+    return features
+
+
+def text_similarity(left: str, right: str) -> float:
+    token_score = jaccard(token_set(left), token_set(right))
+    ngram_score = jaccard(ngrams(left), ngrams(right))
+    left_clean = re.sub(r"\s+", "", left.lower())
+    right_clean = re.sub(r"\s+", "", right.lower())
+    containment = 0.0
+    if left_clean and right_clean:
+        shorter, longer = sorted([left_clean, right_clean], key=len)
+        containment = len(shorter) / len(longer) if shorter in longer else 0.0
+    return round(max(token_score, ngram_score, containment), 4)
+
+
+def classify_match(score: float) -> str:
+    if score >= 0.90:
+        return "highly_duplicate"
+    if score >= 0.75:
+        return "suspicious"
+    return "normal"
+
+
+def match_score(
+    query_text: str,
+    query_brand: str,
+    query_attributes: dict[str, Any],
+    material: Material,
+) -> dict[str, float | str | dict[str, Any]]:
+    material_brand = material.brand.name if material.brand else ""
+    material_attrs = material_attributes(material.attributes)
+    candidate_text = material_search_text(material.name, material_brand, material.description, material_attrs)
+    semantic_score = jaccard(semantic_features(query_text, query_attributes), semantic_features(candidate_text, material_attrs))
+    text_score = text_similarity(query_text, candidate_text)
+    if query_brand and material_brand:
+        brand_score = 1.0 if query_brand.lower() == material_brand.lower() else 0.0
+    else:
+        brand_score = 0.5 if not query_brand and not material_brand else 0.0
+    total_score = round(min(1.0, semantic_score * 0.4 + text_score * 0.4 + brand_score * 0.2), 4)
+    return {
+        "material": material_to_out(material).model_dump(),
+        "score": total_score,
+        "total_score": total_score,
+        "semantic_score": round(semantic_score, 4),
+        "text_score": round(text_score, 4),
+        "brand_score": round(brand_score, 4),
+        "classification": classify_match(total_score),
+        "evidence": {
+            "hybrid_search": "semantic + BM25 token overlap",
+            "engine": "deterministic local fallback for Qdrant hybrid search",
+        },
+    }
+
+
+def material_matches(
+    db: Session,
+    material_library_id: int,
+    query_text: str,
+    brand: str,
+    attributes: dict[str, Any],
+    top_k: int = 3,
+) -> list[dict[str, Any]]:
+    candidates = (
+        db.query(Material)
+        .filter(Material.material_library_id == material_library_id, Material.enabled.is_(True))
+        .order_by(Material.id.desc())
+        .all()
+    )
+    scored = [match_score(query_text, brand, attributes, material) for material in candidates]
+    scored.sort(key=lambda item: (float(item["total_score"]), item["material"]["id"]), reverse=True)
+    return scored[: max(1, min(top_k, 3))]
+
+
 def decode_uploaded_rows(file_name: str, file_content: str) -> list[dict[str, Any]]:
     if not file_name or not file_content:
         return []
@@ -507,7 +887,10 @@ def normalize_data_type(value: str) -> str:
     return "text"
 
 
-def infer_unit(text: str, data_type: str) -> str:
+def infer_unit(text: str, data_type: str = "") -> str:
+    unit = extract_after_pattern(text, r"单位\s*[:：]?\s*([台件个米套只箱包卷A-Za-z]+)")
+    if unit:
+        return unit
     if data_type == "number" and ("页" in text or "速度" in text):
         return "页/分钟"
     return ""
@@ -602,6 +985,256 @@ def create_material(payload: MaterialIn, db: Session = Depends(get_db)) -> Mater
     db.commit()
     db.refresh(material)
     return material_to_out(material)
+
+
+def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> dict[str, Any]:
+    provider = provider_for_capability(db, "material_add")
+    text = compact_space(payload.input_text)
+    if not text:
+        raise HTTPException(status_code=422, detail="input_text is required")
+    library = db.get(MaterialLibrary, payload.material_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+
+    inferred_product, inferred_category, inferred_unit = infer_product_category(text)
+    unit = payload.unit or infer_unit(text) or inferred_unit
+    product = db.get(ProductName, payload.product_name_id) if payload.product_name_id else None
+    category = db.get(Category, payload.category_id) if payload.category_id else None
+    if payload.product_name_id and not product:
+        raise HTTPException(status_code=404, detail="Product name not found")
+    if payload.category_id and not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    category = category or get_or_create_category(db, inferred_category)
+    product = product or get_or_create_product_name(db, inferred_product, unit, category.name)
+
+    brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
+    if payload.brand_id and not brand:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    brand_name = brand.name if brand else infer_brand_name(text)
+    proposed_brand = brand or get_or_create_brand(db, brand_name)
+
+    attributes, attribute_sources = extract_material_attributes(text)
+    name = infer_material_name(text)
+    description = text
+    field_sources = {
+        "name": "unstructured input phrase after add/new intent" if name else "missing",
+        "unit": "explicit unit hint or inferred category default" if unit else "missing",
+        "brand": "brand hint, brand field, or known brand dictionary" if brand_name else "missing",
+        "product_name": "keyword category inference",
+        "category": "keyword category inference",
+        "attributes": attribute_sources,
+    }
+    errors: list[str] = []
+    if not name:
+        errors.append("Material name is required")
+    if not unit:
+        errors.append("Unit is missing or ambiguous")
+    if len(attributes) < 2:
+        errors.append("At least two material attributes should be extracted before confirmation")
+
+    confidence = round(min(0.98, 0.58 + (0.12 if name else 0) + (0.08 if unit else 0) + (0.08 if brand_name else 0) + min(len(attributes), 4) * 0.06), 2)
+    query_text = material_search_text(name, brand_name, description, attributes)
+    matches = material_matches(db, library.id, query_text, brand_name, attributes, 3)
+    top_classification = matches[0]["classification"] if matches else "normal"
+    trace_id = f"trace-{sha1(f'{provider.id}:{provider.provider}:{provider.model}:{text}'.encode('utf-8')).hexdigest()[:16]}"
+    proposed = {
+        "name": name,
+        "unit": unit,
+        "product_name_id": product.id,
+        "product_name": product.name,
+        "material_library_id": library.id,
+        "material_library": library.name,
+        "category_id": category.id,
+        "category": category.name,
+        "brand_id": proposed_brand.id if proposed_brand else None,
+        "brand": proposed_brand.name if proposed_brand else brand_name,
+        "description": description,
+        "attributes": attributes,
+        "status": "normal",
+    }
+    db.commit()
+    return {
+        "capability": "material_add",
+        "provider": provider.provider,
+        "model": provider.model,
+        "trace_id": trace_id,
+        "preview_token": sha1(json.dumps(proposed, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
+        "confidence": confidence,
+        "validation_errors": errors,
+        "field_sources": field_sources,
+        "name": proposed["name"],
+        "unit": proposed["unit"],
+        "product_name_id": proposed["product_name_id"],
+        "product_name": proposed["product_name"],
+        "material_library_id": proposed["material_library_id"],
+        "material_library": proposed["material_library"],
+        "category_id": proposed["category_id"],
+        "category": proposed["category"],
+        "brand_id": proposed["brand_id"],
+        "brand": proposed["brand"],
+        "description": proposed["description"],
+        "attributes": proposed["attributes"],
+        "proposed_material": proposed,
+        "duplicate_check": {
+            "capability": "material_match",
+            "provider": provider_for_capability(db, "material_match").provider,
+            "model": provider_for_capability(db, "material_match").model,
+            "engine": "qdrant_hybrid_with_local_fallback",
+            "classification": top_classification,
+            "top_matches": matches,
+        },
+    }
+
+
+@app.post(
+    "/api/v1/materials/ai-add/preview",
+    description="AI natural language material addition preview. capability: material_add",
+)
+def preview_ai_material_add(payload: AiMaterialAddPreviewIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return build_ai_material_preview(payload, db)
+
+
+@app.post(
+    "/api/v1/materials/ai-add/confirm",
+    description="AI natural language material addition confirmation. capability: material_add",
+)
+def confirm_ai_material_add(payload: AiMaterialAddConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    preview = payload.preview
+    provider = provider_for_capability(db, "material_add")
+    errors = preview.get("validation_errors") or []
+    if errors:
+        raise HTTPException(status_code=422, detail={"validation_errors": errors})
+    proposed = preview.get("proposed_material") or preview
+    duplicate_check = preview.get("duplicate_check") or {}
+    if not payload.allow_duplicate and duplicate_check.get("classification") == "highly_duplicate":
+        raise HTTPException(status_code=409, detail="Highly duplicate material requires explicit duplicate override")
+    name = str(proposed.get("name", "")).strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Material name is required")
+    product, library, category = material_context_by_payload(
+        db,
+        int(proposed.get("product_name_id") or 0),
+        int(proposed.get("material_library_id") or 0),
+        int(proposed.get("category_id") or 0),
+    )
+    brand_id = proposed.get("brand_id")
+    brand = db.get(Brand, int(brand_id)) if brand_id else get_or_create_brand(db, str(proposed.get("brand", "")).strip())
+    existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Material already exists for this product name")
+    material = Material(
+        code=next_unique_code(db, Material, "MAT", f"{product.id}:{name}:{now().isoformat()}"),
+        name=name,
+        product_name_id=product.id,
+        material_library_id=library.id,
+        category_id=category.id,
+        unit=str(proposed.get("unit") or product.unit),
+        brand_id=brand.id if brand else None,
+        status="normal",
+        description=str(proposed.get("description", "")),
+        attributes=json.dumps(material_attributes(proposed.get("attributes")), ensure_ascii=False),
+        enabled=True,
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+    return {
+        "capability": "material_add",
+        "provider": provider.provider,
+        "model": provider.model,
+        "trace_id": preview.get("trace_id") or f"trace-{sha1(material.code.encode('utf-8')).hexdigest()[:16]}",
+        "material": material_to_out(material).model_dump(),
+    }
+
+
+@app.post(
+    "/api/v1/materials/match",
+    description="AI vector similarity material matching. capability: material_match; hybrid semantic + BM25 evidence with Qdrant-compatible local fallback.",
+)
+def match_materials(payload: MaterialMatchIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    provider = provider_for_capability(db, "material_match")
+    library = db.get(MaterialLibrary, payload.material_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    brand = db.get(Brand, payload.brand_id).name if payload.brand_id and db.get(Brand, payload.brand_id) else (payload.brand or "")
+    query_text = payload.query or material_search_text(payload.name or "", brand, payload.description, payload.attributes)
+    matches = material_matches(db, library.id, query_text, brand, payload.attributes, payload.top_k)
+    return {
+        "capability": "material_match",
+        "provider": provider.provider,
+        "model": provider.model,
+        "embedding_provider": provider.provider,
+        "engine": "qdrant_hybrid_with_local_fallback",
+        "query": query_text,
+        "matches": matches,
+    }
+
+
+@app.post("/api/v1/ai/material-add/preview")
+def preview_ai_material_add_alias(payload: AiMaterialAddPreviewIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return preview_ai_material_add(payload, db)
+
+
+@app.post("/api/v1/ai/material-add/confirm")
+def confirm_ai_material_add_alias(payload: AiMaterialAddConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return confirm_ai_material_add(payload, db)
+
+
+@app.post("/api/v1/ai/material-match")
+def match_materials_alias(payload: MaterialMatchIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return match_materials(payload, db)
+
+
+@app.get("/api/v1/ai/providers", response_model=list[ProviderConfigOut])
+def list_ai_providers(db: Session = Depends(get_db)) -> list[ProviderConfigOut]:
+    ensure_provider_configs(db)
+    providers = db.query(LLMProviderConfig).order_by(LLMProviderConfig.active.desc(), LLMProviderConfig.id.desc()).all()
+    return [provider_to_out(provider) for provider in providers]
+
+
+@app.post("/api/v1/ai/providers", response_model=ProviderConfigOut)
+def save_ai_provider(payload: ProviderConfigIn, db: Session = Depends(get_db)) -> ProviderConfigOut:
+    capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
+    if not capabilities:
+        raise HTTPException(status_code=422, detail="At least one supported capability is required")
+    provider = (
+        db.query(LLMProviderConfig)
+        .filter(LLMProviderConfig.provider == payload.provider, LLMProviderConfig.model == payload.model)
+        .first()
+    )
+    if not provider:
+        provider = LLMProviderConfig(provider=payload.provider, model=payload.model)
+        db.add(provider)
+    provider.endpoint = payload.endpoint
+    provider.capabilities = json.dumps(capabilities)
+    provider.active = payload.active
+    provider.connection_status = "connected" if payload.provider == "mock" or payload.endpoint.startswith(("local://", "http://", "https://")) else "configured"
+    provider.updated_at = now()
+    db.flush()
+    if payload.active:
+        for other in db.query(LLMProviderConfig).filter(LLMProviderConfig.id != provider.id).all():
+            if set(normalize_capabilities(other.capabilities)) & set(capabilities):
+                other.active = False
+                other.updated_at = now()
+    db.commit()
+    db.refresh(provider)
+    return provider_to_out(provider)
+
+
+@app.post("/api/v1/ai/providers/test")
+def test_ai_provider(payload: ProviderConfigIn) -> dict[str, Any]:
+    capabilities = [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES]
+    if not capabilities:
+        raise HTTPException(status_code=422, detail="At least one supported capability is required")
+    ok = payload.provider == "mock" or payload.endpoint.startswith(("local://", "http://", "https://"))
+    return {
+        "ok": ok,
+        "provider": payload.provider,
+        "model": payload.model,
+        "capabilities": capabilities,
+        "status": "connected" if ok else "configured",
+        "message": "Connection test succeeded with test-safe provider configuration" if ok else "Provider saved for offline configuration",
+    }
 
 
 @app.put("/api/v1/materials/{material_id}", response_model=MaterialOut)
