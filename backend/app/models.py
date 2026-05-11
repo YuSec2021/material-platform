@@ -135,3 +135,17 @@ class Material(Base):
     material_library: Mapped[MaterialLibrary] = relationship(back_populates="materials")
     category: Mapped[Category] = relationship(back_populates="materials")
     brand: Mapped[Brand | None] = relationship()
+
+
+class LLMProviderConfig(Base):
+    __tablename__ = "llm_provider_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    model: Mapped[str] = mapped_column(String(160), index=True)
+    endpoint: Mapped[str] = mapped_column(String(240), default="")
+    capabilities: Mapped[str] = mapped_column(Text, default="[]")
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    connection_status: Mapped[str] = mapped_column(String(40), default="untested")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

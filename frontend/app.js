@@ -10,6 +10,7 @@ let editingBrandId = null;
 let editingMaterialId = null;
 let materialPreviewItems = [];
 let materialGovernanceFile = null;
+let aiMaterialPreview = null;
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;",

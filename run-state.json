@@ -1,12 +1,12 @@
 {
   "mode": "contract",
-  "current_sprint": 4,
+  "current_sprint": 5,
   "retry_count": 0,
-  "last_successful_sprint": 2,
+  "last_successful_sprint": 4,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-4-material-management-core",
+  "active_branch": "codex/sprint-5-ai-material-addition-and-vector-matching",
   "base_branch": "main",
-  "last_run_at": "2026-05-11T20:47:10+08:00",
+  "last_run_at": "2026-05-11T21:06:00+08:00",
   "request_kind": ""
 }
