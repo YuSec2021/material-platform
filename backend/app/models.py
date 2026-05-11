@@ -199,3 +199,77 @@ class WorkflowHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     application: Mapped[WorkflowApplication] = relationship(back_populates="history")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(160), index=True)
+    hcm_id: Mapped[str] = mapped_column(String(80), default="", index=True)
+    unit: Mapped[str] = mapped_column(String(160), default="", index=True)
+    department: Mapped[str] = mapped_column(String(160), default="", index=True)
+    team: Mapped[str] = mapped_column(String(160), default="", index=True)
+    email: Mapped[str] = mapped_column(String(240), default="")
+    account_ownership: Mapped[str] = mapped_column(String(40), default="local", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    password_reset_token: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    role_links: Mapped[list["RoleUser"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user_links: Mapped[list["RoleUser"]] = relationship(
+        back_populates="role",
+        cascade="all, delete-orphan",
+    )
+    permissions: Mapped[list["FeaturePermission"]] = relationship(
+        back_populates="role",
+        cascade="all, delete-orphan",
+    )
+
+
+class RoleUser(Base):
+    __tablename__ = "role_users"
+    __table_args__ = (UniqueConstraint("role_id", "user_id", name="uq_role_user_binding"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    role: Mapped[Role] = relationship(back_populates="user_links")
+    user: Mapped[User] = relationship(back_populates="role_links")
+
+
+class FeaturePermission(Base):
+    __tablename__ = "feature_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission_key", name="uq_role_permission_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), index=True)
+    module: Mapped[str] = mapped_column(String(80), index=True)
+    permission_type: Mapped[str] = mapped_column(String(40), index=True)
+    permission_key: Mapped[str] = mapped_column(String(160), index=True)
+    label: Mapped[str] = mapped_column(String(240), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    role: Mapped[Role] = relationship(back_populates="permissions")

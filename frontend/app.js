@@ -8,6 +8,8 @@ let selectedProductId = null;
 let editingAttributeId = null;
 let editingBrandId = null;
 let editingMaterialId = null;
+let editingUserId = null;
+let editingRoleId = null;
 let materialPreviewItems = [];
 let materialGovernanceFile = null;
 let aiMaterialPreview = null;
@@ -946,6 +948,387 @@ async function renderSystemConfig() {
   });
 }
 
+function roleNames(user) {
+  return (user.roles || []).length
+    ? user.roles.map((role) => `<span class="pill">${esc(role.name)}</span>`).join("")
+    : `<span class="muted">No roles</span>`;
+}
+
+function userControls(user) {
+  if (user.account_ownership !== "local") {
+    return `<button class="secondary" data-detail-user="${user.id}">Detail</button><button class="secondary" disabled title="HCM-owned users are read-only">Edit</button><button class="secondary" disabled title="HCM-owned users cannot be reset locally">Reset Password</button><button class="danger" disabled title="HCM-owned users cannot be deleted locally">Delete</button>`;
+  }
+  return `<button class="secondary" data-detail-user="${user.id}">Detail</button><button class="secondary" data-edit-user="${user.id}">Edit</button><button class="secondary" data-reset-user="${user.id}">Reset Password</button><button class="danger" data-delete-user="${user.id}">Delete</button>`;
+}
+
+function ownershipBadge(owner) {
+  return `<span class="status-badge ${owner === "HCM" ? "status-workflow-pending_approval" : "status-normal"}">${esc(owner)}</span>`;
+}
+
+function userTable(users) {
+  if (!users.length) return `<div class="empty">No users found</div>`;
+  return `
+    <table>
+      <thead><tr><th>User</th><th>Ownership</th><th>Organization</th><th>Contact</th><th>Status</th><th>Roles</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${users.map((user) => `
+          <tr>
+            <td>${esc(user.username)}<div class="muted">ID ${esc(user.id)} / ${esc(user.display_name)} ${user.hcm_id ? `/ ${esc(user.hcm_id)}` : ""}</div></td>
+            <td>${ownershipBadge(user.account_ownership || user.account_owner)}</td>
+            <td>${esc(user.unit)}<div class="muted">${esc(user.department)} / ${esc(user.team)}</div></td>
+            <td>${esc(user.email)}</td>
+            <td>${esc(user.status)}</td>
+            <td>${roleNames(user)}</td>
+            <td class="actions">${userControls(user)}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function renderUsers() {
+  const current = {
+    search: document.getElementById("userSearch")?.value || "",
+    unit: document.getElementById("userUnitFilter")?.value || "",
+    department: document.getElementById("userDepartmentFilter")?.value || "",
+    team: document.getElementById("userTeamFilter")?.value || ""
+  };
+  const users = await request(`/users?${new URLSearchParams(current)}`);
+  const allUsers = await request("/users");
+  const units = [...new Set(allUsers.map((user) => user.unit).filter(Boolean))];
+  const departments = [...new Set(allUsers.map((user) => user.department).filter(Boolean))];
+  const teams = [...new Set(allUsers.map((user) => user.team).filter(Boolean))];
+  app.innerHTML = `
+    <h2>User Management</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <h3 id="userFormTitle">Add local user</h3>
+        <label>Username<input id="userUsername" placeholder="s8_local_user" /></label>
+        <label>Display name<input id="userDisplayName" placeholder="Sprint 8 Local User" /></label>
+        <label>Unit<input id="userUnit" placeholder="测试单位A" /></label>
+        <label>Department<input id="userDepartment" placeholder="测试部门A" /></label>
+        <label>Team<input id="userTeam" placeholder="测试班组A" /></label>
+        <label>Email<input id="userEmail" placeholder="local.user@example.com" /></label>
+        <label>Status
+          <select id="userStatus"><option value="active">active</option><option value="disabled">disabled</option></select>
+        </label>
+        <button id="saveUser">Create Local User</button>
+        <button id="resetUserForm" class="secondary">Reset</button>
+        <div id="userStatusMessage" class="status muted"></div>
+      </section>
+      <section>
+        <div class="toolbar">
+          <input id="userSearch" value="${esc(current.search)}" placeholder="Search users" />
+          <select id="userUnitFilter" aria-label="Unit filter"><option value="">All units</option>${units.map((value) => `<option value="${esc(value)}" ${current.unit === value ? "selected" : ""}>${esc(value)}</option>`).join("")}</select>
+          <select id="userDepartmentFilter" aria-label="Department filter"><option value="">All departments</option>${departments.map((value) => `<option value="${esc(value)}" ${current.department === value ? "selected" : ""}>${esc(value)}</option>`).join("")}</select>
+          <select id="userTeamFilter" aria-label="Team filter"><option value="">All teams</option>${teams.map((value) => `<option value="${esc(value)}" ${current.team === value ? "selected" : ""}>${esc(value)}</option>`).join("")}</select>
+          <button id="searchUsers" class="secondary">Search</button>
+          <button id="clearUsers" class="secondary">Clear</button>
+        </div>
+        <div class="panel">
+          ${userTable(users)}
+          <div id="userDetail" class="card detail-card"></div>
+        </div>
+      </section>
+    </div>
+  `;
+  document.getElementById("saveUser").addEventListener("click", saveUser);
+  document.getElementById("resetUserForm").addEventListener("click", resetUserForm);
+  document.getElementById("searchUsers").addEventListener("click", renderUsers);
+  ["userUnitFilter", "userDepartmentFilter", "userTeamFilter"].forEach((id) => document.getElementById(id).addEventListener("change", renderUsers));
+  document.getElementById("clearUsers").addEventListener("click", () => {
+    ["userSearch", "userUnitFilter", "userDepartmentFilter", "userTeamFilter"].forEach((id) => {
+      document.getElementById(id).value = "";
+    });
+    renderUsers();
+  });
+  document.querySelectorAll("[data-detail-user]").forEach((button) => button.addEventListener("click", () => showUserDetail(button.dataset.detailUser)));
+  document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => editUser(button.dataset.editUser)));
+  document.querySelectorAll("[data-reset-user]").forEach((button) => button.addEventListener("click", () => resetPassword(button.dataset.resetUser)));
+  document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(button.dataset.deleteUser)));
+  window.currentUsers = users;
+}
+
+function userPayload() {
+  return {
+    username: document.getElementById("userUsername").value.trim(),
+    display_name: document.getElementById("userDisplayName").value.trim(),
+    unit: document.getElementById("userUnit").value.trim(),
+    department: document.getElementById("userDepartment").value.trim(),
+    team: document.getElementById("userTeam").value.trim(),
+    email: document.getElementById("userEmail").value.trim(),
+    status: document.getElementById("userStatus").value
+  };
+}
+
+async function saveUser() {
+  const status = document.getElementById("userStatusMessage");
+  try {
+    const payload = userPayload();
+    if (editingUserId) {
+      delete payload.username;
+      await request(`/users/${editingUserId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await request("/users", { method: "POST", body: JSON.stringify(payload) });
+    }
+    editingUserId = null;
+    status.textContent = "Local user saved";
+    renderUsers();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function editUser(id) {
+  const user = (window.currentUsers || []).find((item) => String(item.id) === String(id));
+  if (!user || user.account_ownership !== "local") return;
+  editingUserId = user.id;
+  document.getElementById("userFormTitle").textContent = `Edit local user ${user.username}`;
+  document.getElementById("saveUser").textContent = "Update Local User";
+  document.getElementById("userUsername").value = user.username;
+  document.getElementById("userUsername").disabled = true;
+  document.getElementById("userDisplayName").value = user.display_name;
+  document.getElementById("userUnit").value = user.unit;
+  document.getElementById("userDepartment").value = user.department;
+  document.getElementById("userTeam").value = user.team;
+  document.getElementById("userEmail").value = user.email;
+  document.getElementById("userStatus").value = user.status;
+  showUserDetail(id);
+}
+
+function resetUserForm() {
+  editingUserId = null;
+  document.getElementById("userFormTitle").textContent = "Add local user";
+  document.getElementById("saveUser").textContent = "Create Local User";
+  ["userUsername", "userDisplayName", "userUnit", "userDepartment", "userTeam", "userEmail"].forEach((id) => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("userUsername").disabled = false;
+  document.getElementById("userStatus").value = "active";
+}
+
+async function showUserDetail(id) {
+  const user = await request(`/users/${id}`);
+  document.getElementById("userDetail").innerHTML = `
+    <h3>User detail: ${esc(user.username)}</h3>
+    <p><strong>Display name:</strong> ${esc(user.display_name)} ${ownershipBadge(user.account_ownership)}</p>
+    <p><strong>Organization:</strong> ${esc(user.unit)} / ${esc(user.department)} / ${esc(user.team)}</p>
+    <p><strong>HCM ID:</strong> ${esc(user.hcm_id || "not HCM synced")}</p>
+    <p><strong>Local action policy:</strong> ${user.account_ownership === "HCM" ? "HCM-managed users are read-only and cannot be locally edited, reset, or deleted." : "Local user supports edit, password reset, and delete."}</p>
+    <p><strong>Roles:</strong> ${roleNames(user)}</p>
+    <pre>${esc(JSON.stringify(user, null, 2))}</pre>
+  `;
+}
+
+async function resetPassword(id) {
+  const status = document.getElementById("userStatusMessage");
+  try {
+    const result = await request(`/users/${id}/password-reset`, { method: "POST", body: "{}" });
+    status.textContent = `${result.message}: ${result.temporary_password}`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function deleteUser(id) {
+  if (!window.confirm("Delete this local user?")) return;
+  await request(`/users/${id}`, { method: "DELETE" });
+  renderUsers();
+}
+
+function roleTable(roles) {
+  if (!roles.length) return `<div class="empty">No roles found</div>`;
+  return `
+    <table>
+      <thead><tr><th>Role</th><th>Description</th><th>Status</th><th>Users</th><th>Permissions</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${roles.map((role) => `
+          <tr>
+            <td>${esc(role.name)}<div class="muted">${esc(role.code)} / ID ${role.id}</div></td>
+            <td>${esc(role.description)}</td>
+            <td>${role.enabled ? `<span class="status-badge status-normal">enabled</span>` : `<span class="status-badge status-stop_use">disabled</span>`}</td>
+            <td>${role.user_count} bound<div class="muted">${(role.users || []).map((user) => esc(user.username)).join(", ")}</div></td>
+            <td>${(role.permissions || []).slice(0, 3).map((permission) => `<span class="pill">${esc(permission.permission_type)}: ${esc(permission.label)}</span>`).join("")}</td>
+            <td class="actions">
+              <button class="secondary" data-edit-role="${role.id}">Edit</button>
+              <button class="secondary" data-bind-role="${role.id}">Bind Users</button>
+              <button class="secondary" data-permissions-role="${role.id}">Permissions</button>
+              <button class="secondary" data-toggle-role="${role.id}" data-enabled="${role.enabled}">${role.enabled ? "Disable" : "Enable"}</button>
+              <button class="danger" data-delete-role="${role.id}">Delete</button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function renderRoles() {
+  const search = document.getElementById("roleSearch")?.value || "";
+  const roles = await request(`/roles?${new URLSearchParams({ search })}`);
+  app.innerHTML = `
+    <h2>Role Management</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <h3 id="roleFormTitle">Create role</h3>
+        <label>Name<input id="roleName" placeholder="Sprint 8 Role" /></label>
+        <label>Code<input id="roleCode" placeholder="S8_ROLE" /></label>
+        <label>Description<textarea id="roleDescription" placeholder="Role scope and responsibility"></textarea></label>
+        <label><span><input id="roleEnabled" type="checkbox" checked /> Enabled</span></label>
+        <button id="saveRole">Create Role</button>
+        <button id="resetRoleForm" class="secondary">Reset</button>
+        <div id="roleStatus" class="status muted"></div>
+      </section>
+      <section>
+        <div class="toolbar">
+          <input id="roleSearch" value="${esc(search)}" placeholder="Search roles" />
+          <button id="searchRoles" class="secondary">Search</button>
+          <button id="clearRoles" class="secondary">Clear</button>
+        </div>
+        <div class="panel">
+          ${roleTable(roles)}
+          <div id="roleDetail" class="card detail-card"></div>
+        </div>
+      </section>
+    </div>
+  `;
+  document.getElementById("saveRole").addEventListener("click", saveRole);
+  document.getElementById("resetRoleForm").addEventListener("click", resetRoleForm);
+  document.getElementById("searchRoles").addEventListener("click", renderRoles);
+  document.getElementById("clearRoles").addEventListener("click", () => {
+    document.getElementById("roleSearch").value = "";
+    renderRoles();
+  });
+  document.querySelectorAll("[data-edit-role]").forEach((button) => button.addEventListener("click", () => editRole(button.dataset.editRole)));
+  document.querySelectorAll("[data-bind-role]").forEach((button) => button.addEventListener("click", () => renderRoleBinding(button.dataset.bindRole)));
+  document.querySelectorAll("[data-permissions-role]").forEach((button) => button.addEventListener("click", () => {
+    window.history.pushState(null, "", `/system/roles/${button.dataset.permissionsRole}/permissions`);
+    route();
+  }));
+  document.querySelectorAll("[data-toggle-role]").forEach((button) => button.addEventListener("click", () => toggleRole(button.dataset.toggleRole, button.dataset.enabled === "true")));
+  document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
+  window.currentRoles = roles;
+}
+
+async function saveRole() {
+  const status = document.getElementById("roleStatus");
+  const payload = {
+    name: document.getElementById("roleName").value.trim(),
+    code: document.getElementById("roleCode").value.trim(),
+    description: document.getElementById("roleDescription").value.trim(),
+    enabled: document.getElementById("roleEnabled").checked
+  };
+  try {
+    if (editingRoleId) {
+      await request(`/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await request("/roles", { method: "POST", body: JSON.stringify(payload) });
+    }
+    editingRoleId = null;
+    status.textContent = "Role saved";
+    renderRoles();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function editRole(id) {
+  const role = (window.currentRoles || []).find((item) => String(item.id) === String(id));
+  if (!role) return;
+  editingRoleId = role.id;
+  document.getElementById("roleFormTitle").textContent = `Edit role ${role.name}`;
+  document.getElementById("saveRole").textContent = "Update Role";
+  document.getElementById("roleName").value = role.name;
+  document.getElementById("roleCode").value = role.code;
+  document.getElementById("roleDescription").value = role.description;
+  document.getElementById("roleEnabled").checked = role.enabled;
+}
+
+function resetRoleForm() {
+  editingRoleId = null;
+  document.getElementById("roleFormTitle").textContent = "Create role";
+  document.getElementById("saveRole").textContent = "Create Role";
+  ["roleName", "roleCode", "roleDescription"].forEach((id) => {
+    document.getElementById(id).value = "";
+  });
+  document.getElementById("roleEnabled").checked = true;
+}
+
+async function toggleRole(id, enabled) {
+  await request(`/roles/${id}/${enabled ? "disable" : "enable"}`, { method: "PATCH", body: "{}" });
+  renderRoles();
+}
+
+async function deleteRole(id) {
+  if (!window.confirm("Delete this role?")) return;
+  await request(`/roles/${id}`, { method: "DELETE" });
+  renderRoles();
+}
+
+async function renderRoleBinding(roleId) {
+  const [role, users] = await Promise.all([request(`/roles/${roleId}`), request("/users")]);
+  const selected = new Set((role.users || []).map((user) => String(user.id)));
+  document.getElementById("roleDetail").innerHTML = `
+    <h3>Role-user binding: ${esc(role.name)}</h3>
+    <div class="toolbar">
+      <span class="pill">${esc(role.enabled ? "enabled" : "disabled")}</span>
+      <span class="muted">Disabled roles cannot be bound through the API.</span>
+    </div>
+    <div class="binding-list">
+      ${users.map((user) => `
+        <label><span><input type="checkbox" value="${user.id}" class="role-user-checkbox" ${selected.has(String(user.id)) ? "checked" : ""} ${role.enabled ? "" : "disabled"} /> ${esc(user.username)} / ${esc(user.display_name)} / ${esc(user.account_ownership)}</span></label>
+      `).join("")}
+    </div>
+    <button id="saveRoleUsers" ${role.enabled ? "" : "disabled"}>Save User Binding</button>
+    <div id="roleBindingStatus" class="status muted"></div>
+  `;
+  document.getElementById("saveRoleUsers")?.addEventListener("click", async () => {
+    const user_ids = Array.from(document.querySelectorAll(".role-user-checkbox:checked")).map((item) => Number(item.value));
+    const updated = await request(`/roles/${roleId}/users`, { method: "PUT", body: JSON.stringify({ user_ids }) });
+    document.getElementById("roleBindingStatus").textContent = `${updated.user_count} users bound`;
+    renderRoles();
+  });
+}
+
+function permissionGroups(catalog, selectedKeys) {
+  const groups = ["directory", "button", "api"];
+  return groups.map((type) => `
+    <section class="panel permission-group">
+      <h3>${type === "directory" ? "Directory/Menu" : type === "button" ? "Button/Action" : "API-level"} permissions</h3>
+      ${catalog.filter((item) => item.permission_type === type).map((item) => `
+        <label><span><input type="checkbox" class="permission-checkbox" value="${esc(item.permission_key)}" ${selectedKeys.has(item.permission_key) ? "checked" : ""} /> ${esc(item.label)} <span class="muted">${esc(item.module)} / ${esc(item.permission_key)}</span></span></label>
+      `).join("")}
+    </section>
+  `).join("");
+}
+
+async function renderRolePermissions() {
+  const match = window.location.pathname.match(/\/roles\/(\d+)\/permissions/);
+  const roleId = match ? match[1] : "";
+  if (!roleId) return renderRoles();
+  const detail = await request(`/roles/${roleId}/permissions`);
+  const selectedKeys = new Set((detail.permissions || []).map((item) => item.permission_key));
+  app.innerHTML = `
+    <h2>Permission Configuration: ${esc(detail.role_name)}</h2>
+    <div class="toolbar">
+      <button class="secondary" id="backToRoles">Back to Roles</button>
+      <button id="savePermissions">Save Permissions</button>
+      <div id="permissionStatus" class="status muted"></div>
+    </div>
+    <div class="permission-grid">${permissionGroups(detail.catalog, selectedKeys)}</div>
+  `;
+  document.getElementById("backToRoles").addEventListener("click", () => {
+    window.history.pushState(null, "", "/system/roles");
+    route();
+  });
+  document.getElementById("savePermissions").addEventListener("click", async () => {
+    const permission_keys = Array.from(document.querySelectorAll(".permission-checkbox:checked")).map((item) => item.value);
+    const saved = await request(`/roles/${roleId}/permissions`, { method: "PUT", body: JSON.stringify({ permission_keys }) });
+    document.getElementById("permissionStatus").textContent = `${saved.permissions.length} permissions saved`;
+  });
+}
+
 async function renderCategories() {
   await loadMaterialContext();
   const search = document.getElementById("categorySearch")?.value || "";
@@ -1303,6 +1686,9 @@ function bindWorkflowActions(detailId, refresh) {
 async function route() {
   try {
     const path = window.location.pathname;
+    if (path.match(/\/(?:system\/)?roles\/\d+\/permissions/)) return renderRolePermissions();
+    if (path.includes("/system/users") || path === "/users") return renderUsers();
+    if (path.includes("/system/roles") || path === "/roles") return renderRoles();
     if (path.includes("/system/config")) return renderSystemConfig();
     if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();
     if (path.includes("/workflows/new-material-code")) return renderNewMaterialCodeWorkflow();
