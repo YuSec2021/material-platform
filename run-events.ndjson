@@ -3,3 +3,5 @@
 {"ts": "2026-05-11T20:32:22+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 3}
 {"ts": "2026-05-11T20:33:36+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 2}
 {"ts": "2026-05-11T20:33:53+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 2}
+{"ts": "2026-05-11T20:46:45+08:00", "event": "eval_trigger_cleaned", "mode": "contract", "current_sprint": 4}
+{"ts": "2026-05-11T20:47:10+08:00", "event": "contract_requested", "mode": "contract", "current_sprint": 4}

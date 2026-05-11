@@ -109,3 +109,90 @@ class BrandOut(BaseModel):
     description: str
     logo: BrandLogo
     enabled: bool
+
+
+class MaterialLibraryOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str
+    enabled: bool
+
+
+class CategoryOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str
+    enabled: bool
+
+
+class MaterialIn(BaseModel):
+    name: str
+    product_name_id: int
+    material_library_id: int
+    category_id: int
+    unit: str = ""
+    brand_id: int | None = None
+    status: str = "normal"
+    description: str = ""
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class MaterialUpdate(BaseModel):
+    name: str | None = None
+    product_name_id: int | None = None
+    material_library_id: int | None = None
+    category_id: int | None = None
+    unit: str | None = None
+    brand_id: int | None = None
+    status: str | None = None
+    transition_reason: str | None = None
+    description: str | None = None
+    attributes: dict[str, Any] | None = None
+    enabled: bool | None = None
+
+
+class MaterialTransitionIn(BaseModel):
+    target_status: str
+    reason: str
+
+
+class MaterialOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    product_name_id: int
+    product_name: str
+    material_library_id: int
+    material_library: str
+    category_id: int
+    category: str
+    unit: str
+    brand_id: int | None
+    brand: str
+    status: str
+    description: str
+    attributes: dict[str, Any]
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class MaterialGovernancePreviewIn(BaseModel):
+    product_name_id: int | None = None
+    product_name: str | None = None
+    material_library_id: int | None = None
+    category_id: int | None = None
+    rows: str | list[str] | list[dict[str, Any]] | None = None
+    file_name: str = ""
+    file_content: str = ""
+
+
+class MaterialGovernanceImportIn(BaseModel):
+    product_name_id: int | None = None
+    product_name: str | None = None
+    material_library_id: int | None = None
+    category_id: int | None = None
+    items: list[dict[str, Any]]

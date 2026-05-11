@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -82,3 +82,56 @@ class Brand(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialLibrary(Base):
+    __tablename__ = "material_libraries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    materials: Mapped[list["Material"]] = relationship(back_populates="material_library")
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    materials: Mapped[list["Material"]] = relationship(back_populates="category")
+
+
+class Material(Base):
+    __tablename__ = "materials"
+    __table_args__ = (UniqueConstraint("product_name_id", "name", name="uq_material_product_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    product_name_id: Mapped[int] = mapped_column(ForeignKey("product_names.id"), index=True)
+    material_library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
+    unit: Mapped[str] = mapped_column(String(40), default="")
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(40), default="normal", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    attributes: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    product_name: Mapped[ProductName] = relationship()
+    material_library: Mapped[MaterialLibrary] = relationship(back_populates="materials")
+    category: Mapped[Category] = relationship(back_populates="materials")
+    brand: Mapped[Brand | None] = relationship()

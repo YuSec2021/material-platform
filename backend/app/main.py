@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import base64
+import binascii
+import csv
+from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any
@@ -12,7 +16,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
-from .models import Attribute, AttributeChange, Brand, ProductName
+from .models import Attribute, AttributeChange, Brand, Category, Material, MaterialLibrary, ProductName
 from .schemas import (
     AttributeIn,
     AttributeOut,
@@ -21,9 +25,17 @@ from .schemas import (
     BrandLogo,
     BrandOut,
     BrandUpdate,
+    CategoryOut,
     ChangeOut,
     GovernanceImportIn,
     GovernancePreviewIn,
+    MaterialGovernanceImportIn,
+    MaterialGovernancePreviewIn,
+    MaterialIn,
+    MaterialLibraryOut,
+    MaterialOut,
+    MaterialTransitionIn,
+    MaterialUpdate,
     ProductNameOut,
     RecommendIn,
 )
@@ -42,6 +54,18 @@ SEED_PRODUCT = {
     "unit": "台",
     "category": "办公设备 / 打印机",
 }
+SEED_LIBRARY = {
+    "code": "MLIB-DEFAULT",
+    "name": "Default Material Library",
+    "description": "Default library for sprint verification materials",
+}
+SEED_CATEGORY = {
+    "code": "CAT-PRINTER",
+    "name": "办公设备 / 打印机",
+    "description": "Default category bound to the seed product name",
+}
+MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
+MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
 
 
 @app.on_event("startup")
@@ -50,6 +74,7 @@ def startup() -> None:
     db = next(get_db())
     try:
         ensure_seed_product(db)
+        ensure_seed_material_context(db)
     finally:
         db.close()
 
@@ -64,6 +89,22 @@ def ensure_seed_product(db: Session) -> ProductName:
     db.commit()
     db.refresh(product)
     return product
+
+
+def ensure_seed_material_context(db: Session) -> tuple[MaterialLibrary, Category]:
+    Base.metadata.create_all(bind=engine)
+    library = db.query(MaterialLibrary).filter(MaterialLibrary.code == SEED_LIBRARY["code"]).first()
+    if not library:
+        library = MaterialLibrary(**SEED_LIBRARY)
+        db.add(library)
+    category = db.query(Category).filter(Category.code == SEED_CATEGORY["code"]).first()
+    if not category:
+        category = Category(**SEED_CATEGORY)
+        db.add(category)
+    db.commit()
+    db.refresh(library)
+    db.refresh(category)
+    return library, category
 
 
 def now() -> datetime:
@@ -83,7 +124,7 @@ def code_for(prefix: str, seed: str) -> str:
     return f"{prefix}-{digest}"
 
 
-def next_unique_code(db: Session, model: type[Attribute] | type[Brand], prefix: str, seed: str) -> str:
+def next_unique_code(db: Session, model: type[Any], prefix: str, seed: str) -> str:
     base = code_for(prefix, seed)
     code = base
     suffix = 2
@@ -160,6 +201,258 @@ def brand_to_out(brand: Brand) -> BrandOut:
     )
 
 
+def library_to_out(library: MaterialLibrary) -> MaterialLibraryOut:
+    return MaterialLibraryOut(
+        id=library.id,
+        code=library.code,
+        name=library.name,
+        description=library.description,
+        enabled=library.enabled,
+    )
+
+
+def category_to_out(category: Category) -> CategoryOut:
+    return CategoryOut(
+        id=category.id,
+        code=category.code,
+        name=category.name,
+        description=category.description,
+        enabled=category.enabled,
+    )
+
+
+def material_attributes(value: str | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def material_to_out(material: Material) -> MaterialOut:
+    return MaterialOut(
+        id=material.id,
+        code=material.code,
+        name=material.name,
+        product_name_id=material.product_name_id,
+        product_name=material.product_name.name,
+        material_library_id=material.material_library_id,
+        material_library=material.material_library.name,
+        category_id=material.category_id,
+        category=material.category.name,
+        unit=material.unit,
+        brand_id=material.brand_id,
+        brand=material.brand.name if material.brand else "",
+        status=material.status,
+        description=material.description,
+        attributes=material_attributes(material.attributes),
+        enabled=material.enabled,
+        created_at=material.created_at.isoformat(),
+        updated_at=material.updated_at.isoformat(),
+    )
+
+
+def validate_material_status(status: str) -> str:
+    if status not in MATERIAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Unsupported material status: {status}")
+    return status
+
+
+def enforce_material_transition(current: str, target: str, reason: str | None = None) -> None:
+    validate_material_status(target)
+    if current == target:
+        return
+    if (current, target) not in MATERIAL_TRANSITIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Material status is non-reversible and must follow normal -> stop_purchase -> stop_use",
+        )
+    if not reason or not reason.strip():
+        raise HTTPException(status_code=422, detail="A transition or exemption reason is required")
+
+
+def material_context_by_payload(
+    db: Session,
+    product_name_id: int | None,
+    material_library_id: int | None,
+    category_id: int | None,
+) -> tuple[ProductName, MaterialLibrary, Category]:
+    product = product_by_payload(db, product_name_id, None)
+    library, category = ensure_seed_material_context(db)
+    if material_library_id:
+        library = db.get(MaterialLibrary, material_library_id)
+    if category_id:
+        category = db.get(Category, category_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return product, library, category
+
+
+def material_row_value(row: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def attributes_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    known = {
+        "name",
+        "material_name",
+        "物料名称",
+        "unit",
+        "单位",
+        "brand",
+        "品牌",
+        "description",
+        "描述",
+        "attributes",
+        "属性",
+        "product_name",
+        "product",
+        "产品名称",
+    }
+    attributes: dict[str, Any] = {}
+    raw = material_row_value(row, ["attributes", "属性"])
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                attributes.update({str(key): value for key, value in loaded.items()})
+        except json.JSONDecodeError:
+            for part in re.split(r"[;；|]+", raw):
+                if not part.strip():
+                    continue
+                key, _, value = re.split(r"[:：=]", part, maxsplit=1)[0].strip(), "", ""
+                if ":" in part:
+                    key, value = part.split(":", 1)
+                elif "：" in part:
+                    key, value = part.split("：", 1)
+                elif "=" in part:
+                    key, value = part.split("=", 1)
+                if key.strip() and value.strip():
+                    attributes[key.strip()] = value.strip()
+    for key, value in row.items():
+        if key not in known and value is not None and str(value).strip():
+            attributes[str(key).strip()] = str(value).strip()
+    return attributes
+
+
+def decode_uploaded_rows(file_name: str, file_content: str) -> list[dict[str, Any]]:
+    if not file_name or not file_content:
+        return []
+    encoded = file_content.split(",", 1)[1] if "," in file_content[:80] else file_content
+    try:
+        data = base64.b64decode(encoded)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Unable to decode uploaded material file") from exc
+    if file_name.lower().endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise HTTPException(status_code=500, detail="Excel parser is unavailable") from exc
+        workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        sheet = workbook.active
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            return []
+        headers = [str(cell or "").strip() for cell in rows[0]]
+        return [
+            {headers[index] or f"column_{index + 1}": value for index, value in enumerate(row)}
+            for row in rows[1:]
+            if any(cell is not None and str(cell).strip() for cell in row)
+        ]
+    text = data.decode("utf-8-sig")
+    return list(csv.DictReader(StringIO(text)))
+
+
+def parse_material_rows(rows: str | list[str] | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
+        return [dict(row) for row in rows]
+    if isinstance(rows, str):
+        text = rows.strip()
+        if not text:
+            return []
+        first_line = text.splitlines()[0]
+        if "," in first_line and any(header in first_line for header in ["name", "物料名称", "unit", "单位"]):
+            return list(csv.DictReader(StringIO(text)))
+        raw_rows = text.splitlines()
+    else:
+        raw_rows = [str(row) for row in rows]
+    parsed: list[dict[str, Any]] = []
+    for row in raw_rows:
+        parts = [part.strip() for part in re.split(r"[,，\t|]+", str(row)) if part.strip()]
+        if not parts:
+            continue
+        parsed.append(
+            {
+                "name": parts[0],
+                "unit": parts[1] if len(parts) > 1 else "",
+                "brand": parts[2] if len(parts) > 2 else "",
+                "description": parts[3] if len(parts) > 3 else "",
+                "attributes": parts[4] if len(parts) > 4 else "",
+            }
+        )
+    return parsed
+
+
+def material_governance_items(
+    payload: MaterialGovernancePreviewIn,
+    db: Session,
+) -> list[dict[str, Any]]:
+    product = product_by_payload(db, payload.product_name_id, payload.product_name) if payload.product_name_id or payload.product_name else ensure_seed_product(db)
+    library, category = ensure_seed_material_context(db)
+    if payload.material_library_id:
+        library = db.get(MaterialLibrary, payload.material_library_id) or library
+    if payload.category_id:
+        category = db.get(Category, payload.category_id) or category
+    rows = decode_uploaded_rows(payload.file_name, payload.file_content) or parse_material_rows(payload.rows)
+    items: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        name = material_row_value(row, ["name", "material_name", "物料名称"])
+        unit = material_row_value(row, ["unit", "单位"]) or product.unit
+        brand_name = material_row_value(row, ["brand", "品牌"])
+        description = material_row_value(row, ["description", "描述"])
+        attributes = attributes_from_row(row)
+        errors: list[str] = []
+        if not name:
+            errors.append("Material name is required")
+        validation_status = "valid" if not errors else "invalid"
+        confidence = 0.93 if validation_status == "valid" and attributes else 0.86 if validation_status == "valid" else 0.42
+        items.append(
+            {
+                "source_row": index,
+                "name": name,
+                "code": code_for("MAT", f"{product.id}:{name}:{index}"),
+                "product_name_id": product.id,
+                "product_name": product.name,
+                "material_library_id": library.id,
+                "material_library": library.name,
+                "category_id": category.id,
+                "category": category.name,
+                "unit": unit,
+                "brand_name": brand_name,
+                "description": description,
+                "attributes": attributes,
+                "status": "normal",
+                "validation_status": validation_status,
+                "errors": errors,
+                "selectable": validation_status == "valid",
+                "confidence": confidence,
+            }
+        )
+    return items
+
+
 def governance_items(rows: str | list[str]) -> list[dict[str, Any]]:
     raw_rows = rows.splitlines() if isinstance(rows, str) else rows
     items: list[dict[str, Any]] = []
@@ -230,6 +523,245 @@ def list_product_names(db: Session = Depends(get_db)) -> list[ProductNameOut]:
     ensure_seed_product(db)
     products = db.query(ProductName).order_by(ProductName.id).all()
     return [ProductNameOut(id=p.id, name=p.name, unit=p.unit, category=p.category) for p in products]
+
+
+@app.get("/api/v1/material-libraries", response_model=list[MaterialLibraryOut])
+def list_material_libraries(db: Session = Depends(get_db)) -> list[MaterialLibraryOut]:
+    ensure_seed_material_context(db)
+    libraries = db.query(MaterialLibrary).order_by(MaterialLibrary.id).all()
+    return [library_to_out(library) for library in libraries]
+
+
+@app.get("/api/v1/categories", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)) -> list[CategoryOut]:
+    ensure_seed_material_context(db)
+    categories = db.query(Category).order_by(Category.id).all()
+    return [category_to_out(category) for category in categories]
+
+
+@app.get("/api/v1/materials", response_model=list[MaterialOut])
+def list_materials(
+    search: str = "",
+    status: str = "",
+    product_name_id: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[MaterialOut]:
+    ensure_seed_material_context(db)
+    query = db.query(Material).join(ProductName).join(MaterialLibrary).join(Category)
+    if product_name_id:
+        query = query.filter(Material.product_name_id == product_name_id)
+    if status:
+        validate_material_status(status)
+        query = query.filter(Material.status == status)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                Material.name.like(like),
+                Material.code.like(like),
+                Material.description.like(like),
+                Material.attributes.like(like),
+                ProductName.name.like(like),
+            )
+        )
+    materials = query.order_by(Material.id.desc()).all()
+    return [material_to_out(material) for material in materials]
+
+
+@app.post("/api/v1/materials", response_model=MaterialOut)
+def create_material(payload: MaterialIn, db: Session = Depends(get_db)) -> MaterialOut:
+    status = validate_material_status(payload.status)
+    if status != "normal":
+        raise HTTPException(status_code=400, detail="New materials must start in normal status")
+    product, library, category = material_context_by_payload(
+        db,
+        payload.product_name_id,
+        payload.material_library_id,
+        payload.category_id,
+    )
+    existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == payload.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Material already exists for this product name")
+    brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
+    if payload.brand_id and not brand:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    material = Material(
+        code=next_unique_code(db, Material, "MAT", f"{product.id}:{payload.name}:{now().isoformat()}"),
+        name=payload.name,
+        product_name_id=product.id,
+        material_library_id=library.id,
+        category_id=category.id,
+        unit=payload.unit or product.unit,
+        brand_id=brand.id if brand else None,
+        status=status,
+        description=payload.description,
+        attributes=json.dumps(payload.attributes, ensure_ascii=False),
+        enabled=payload.enabled,
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+    return material_to_out(material)
+
+
+@app.put("/api/v1/materials/{material_id}", response_model=MaterialOut)
+def update_material(material_id: int, payload: MaterialUpdate, db: Session = Depends(get_db)) -> MaterialOut:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    if payload.product_name_id or payload.material_library_id or payload.category_id:
+        product, library, category = material_context_by_payload(
+            db,
+            payload.product_name_id or material.product_name_id,
+            payload.material_library_id or material.material_library_id,
+            payload.category_id or material.category_id,
+        )
+        material.product_name_id = product.id
+        material.material_library_id = library.id
+        material.category_id = category.id
+    if payload.name is not None and payload.name != material.name:
+        exists = (
+            db.query(Material)
+            .filter(Material.product_name_id == material.product_name_id, Material.name == payload.name, Material.id != material.id)
+            .first()
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="Material already exists for this product name")
+        material.name = payload.name
+    for field in ["unit", "description", "enabled"]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(material, field, value)
+    if payload.brand_id is not None:
+        brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
+        if payload.brand_id and not brand:
+            raise HTTPException(status_code=404, detail="Brand not found")
+        material.brand_id = brand.id if brand else None
+    if payload.attributes is not None:
+        material.attributes = json.dumps(payload.attributes, ensure_ascii=False)
+    if payload.status is not None:
+        enforce_material_transition(material.status, payload.status, payload.transition_reason)
+        material.status = payload.status
+    material.updated_at = now()
+    db.commit()
+    db.refresh(material)
+    return material_to_out(material)
+
+
+@app.post("/api/v1/materials/{material_id}/transition", response_model=MaterialOut)
+def transition_material(
+    material_id: int,
+    payload: MaterialTransitionIn,
+    db: Session = Depends(get_db),
+) -> MaterialOut:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    enforce_material_transition(material.status, payload.target_status, payload.reason)
+    material.status = payload.target_status
+    material.updated_at = now()
+    db.commit()
+    db.refresh(material)
+    return material_to_out(material)
+
+
+@app.delete("/api/v1/materials/{material_id}")
+def delete_material(material_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    db.delete(material)
+    db.commit()
+    return {"deleted": True, "id": material_id}
+
+
+@app.post(
+    "/api/v1/materials/governance/preview",
+    description="AI material governance preview. capability: material_governance",
+)
+def preview_material_governance(
+    payload: MaterialGovernancePreviewIn,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    items = material_governance_items(payload, db)
+    return {"capability": "material_governance", "items": items, "count": len(items)}
+
+
+@app.post(
+    "/api/v1/materials/governance/import",
+    response_model=list[MaterialOut],
+    description="AI material governance batch confirmation import. capability: material_governance",
+)
+def import_material_governance(
+    payload: MaterialGovernanceImportIn,
+    db: Session = Depends(get_db),
+) -> list[MaterialOut]:
+    product = product_by_payload(db, payload.product_name_id, payload.product_name) if payload.product_name_id or payload.product_name else ensure_seed_product(db)
+    default_library, default_category = ensure_seed_material_context(db)
+    imported: list[Material] = []
+    for item in payload.items:
+        if item.get("validation_status") == "invalid" or item.get("errors"):
+            raise HTTPException(status_code=422, detail="Invalid preview rows cannot be imported")
+        name = str(item.get("name", "")).strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Material name is required")
+        item_product = db.get(ProductName, int(item.get("product_name_id") or product.id)) or product
+        library = db.get(MaterialLibrary, int(item.get("material_library_id") or payload.material_library_id or default_library.id)) or default_library
+        category = db.get(Category, int(item.get("category_id") or payload.category_id or default_category.id)) or default_category
+        brand_id = item.get("brand_id")
+        brand_name = str(item.get("brand_name", "")).strip()
+        brand = db.get(Brand, int(brand_id)) if brand_id else None
+        if not brand and brand_name:
+            brand = db.query(Brand).filter(Brand.name == brand_name).first()
+            if not brand:
+                brand = Brand(
+                    code=next_unique_code(db, Brand, "BRAND", brand_name),
+                    name=brand_name,
+                    description="Created during material governance import",
+                    enabled=True,
+                )
+                db.add(brand)
+                db.flush()
+        existing = db.query(Material).filter(Material.product_name_id == item_product.id, Material.name == name).first()
+        if existing:
+            imported.append(existing)
+            continue
+        material = Material(
+            code=next_unique_code(db, Material, "MAT", f"{item_product.id}:{name}:{item.get('source_row')}:{now().isoformat()}"),
+            name=name,
+            product_name_id=item_product.id,
+            material_library_id=library.id,
+            category_id=category.id,
+            unit=str(item.get("unit") or item_product.unit),
+            brand_id=brand.id if brand else None,
+            status="normal",
+            description=str(item.get("description", "")),
+            attributes=json.dumps(material_attributes(item.get("attributes")), ensure_ascii=False),
+            enabled=True,
+        )
+        db.add(material)
+        db.flush()
+        imported.append(material)
+    db.commit()
+    for material in imported:
+        db.refresh(material)
+    return [material_to_out(material) for material in imported]
+
+
+@app.post("/api/v1/ai/material-governance/preview")
+def preview_ai_material_governance(
+    payload: MaterialGovernancePreviewIn,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return preview_material_governance(payload, db)
+
+
+@app.post("/api/v1/ai/material-governance/import", response_model=list[MaterialOut])
+def import_ai_material_governance(
+    payload: MaterialGovernanceImportIn,
+    db: Session = Depends(get_db),
+) -> list[MaterialOut]:
+    return import_material_governance(payload, db)
 
 
 @app.get("/api/v1/attributes/changes", response_model=list[ChangeOut])
