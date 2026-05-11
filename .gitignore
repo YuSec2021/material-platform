@@ -1,1 +1,9 @@
 .DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backend/.venv/
+backend/material_retrieval.db
+logs/
+frontend/node_modules/
+frontend/dist/
