@@ -12,7 +12,7 @@
 |-------|------|------|
 | Planner | Claude Code | Turns user prompt into `planner-spec.json`. Runs once per project. |
 | Generator | **Codex CLI** | Reads spec + approved contract, implements one sprint, commits. |
-| Evaluator | Claude Code | Contract review + live browser CHECK via Playwright MCP. |
+| Evaluator | Claude Code | Contract review + independent black-box CHECK via browser, API, CLI, job, or library verification. |
 | Orchestrator | Claude Code | Routes between agents. Never writes code or evaluates. |
 
 ---
@@ -33,7 +33,7 @@ User prompt (1–4 sentences)
                                    │         └─────┬─────┘               │
                                    │               │ code + commit        │
                                    │         ┌─────▼──────┐              │
-                                   │         │  Evaluator │ ◀── Playwright│
+                                   │         │  Evaluator │ ◀── verify   │
                                    │         │  (Claude)  │               │
                                    │         └─────┬──────┘              │
                                    │               │ PASS / FAIL+critique │
@@ -242,8 +242,14 @@ When branch-per-sprint mode is used, `run-state.json` should also track:
    - Color palette (3–5 tokens with hex values)
    - Typography: display font, body font, mono font
    - Spacing unit, border radius, mood adjective
-6. Identify opportunities for AI-native features.
-7. Write `init.sh` — starts the full dev stack (frontend + backend).
+6. Choose a `verification.mode` for the project:
+   - `browser` for UI/web flows, verified with Playwright MCP
+   - `api` for HTTP services, verified with real requests and response assertions
+   - `cli` for command-line tools, verified with commands, exit codes, and output
+   - `job` for queue/worker systems, verified by enqueueing work and checking side effects
+   - `library` for packages, verified from an external consumer harness
+7. Identify opportunities for AI-native features.
+8. Write `init.sh` — starts the full dev stack (frontend + backend).
    `init.sh` must satisfy the following contract:
    - **Idempotent**: safe to run twice in a row without side effects (kill existing
      processes before starting, skip already-installed dependencies, etc.).
@@ -253,13 +259,18 @@ When branch-per-sprint mode is used, `run-state.json` should also track:
      `timeout 60 <command> || { echo "step timed out"; exit 1; }`
    - **No silent swallowing**: do not use `|| true` unless the failure is provably
      non-blocking.
-8. Write `planner-spec.json`:
+9. Write `planner-spec.json`:
 
 ```json
 {
   "product": "string",
   "design_language": "full VDL description",
   "tech_stack": { "frontend": "...", "backend": "...", "db": "..." },
+  "verification": {
+    "mode": "browser | api | cli | job | library",
+    "base_url": "http://localhost:3000",
+    "command": "pytest -q"
+  },
   "features": ["..."],
   "sprints": [
     { "id": 1, "title": "string", "features": ["..."] }
@@ -324,24 +335,24 @@ these constraints during contract review and will reject a contract that violate
 ### Features
 - <feature from spec>
 
-### Success criteria (browser-verifiable)
+### Success criteria (black-box-verifiable)
 - [ ] <observable user-facing behavior — must be testable without reading source code>
   Evaluator steps:
-  1. Navigate to <exact URL, e.g. http://localhost:3000/path>
-  2. Perform <specific action, e.g. click "Submit" button>
-  3. Assert <exact expected state, e.g. toast "Saved!" is visible>
+  1. Start the system, e.g. `bash init.sh`
+  2. Exercise the external surface for the configured verification mode
+  3. Assert the exact expected observable result
 ```
 
 **Schema constraints (Evaluator will reject on violation):**
 
-- Every success criterion must be written as an observable end-user action or
-  visible state, not an implementation detail (e.g. "User sees a confirmation
-  toast after submit" ✓ — "handleSubmit sets state.ok = true" ✗).
+- Every success criterion must be written as an observable client/user action or
+  externally visible state, not an implementation detail (e.g. "POST /users returns
+  201 with an id" ✓ — "UserService.create inserts a row" ✗).
 - Every success criterion must include its own `Evaluator steps:` block directly beneath it.
 - Every success criterion must have **at least 2 Evaluator test steps** in that block.
-- Every test step that requires navigation must include a full URL path
-  (e.g. `http://localhost:3000/settings` — not just "go to settings").
-- A test step must be executable without reading source code or inspecting the DOM.
+- Every test step that requires navigation or an HTTP request must include a full
+  URL path (e.g. `http://localhost:3000/settings` or `http://localhost:8000/users`).
+- A test step must be executable without reading source code or inspecting internals.
 - The contract must have **at least 1** success criterion.
 - Total test steps across all criteria must be **≥ 3**.
 
@@ -450,13 +461,13 @@ When invoked after a SPRINT FAIL:
 
 ## Agent 3 — Evaluator (Claude Code)
 
-**Runs**: twice per sprint — contract review before coding, live CHECK after commit.
+**Runs**: twice per sprint — contract review before coding, black-box CHECK after commit.
 
 **Output**: "CONTRACT APPROVED" in `sprint-contract.md` (Mode 1), or `eval-result-{N}.md` (Mode 2).
 
 ### Mode 1 — Contract Review
 
-Check each success criterion: is it observable in a live browser? Specific enough to test? Mapped to a concrete test step?
+Read `planner-spec.json` and its `verification.mode`. Check each success criterion: is it externally observable through the configured mode? Specific enough to test? Mapped to concrete test steps?
 
 **If approved**, append to `sprint-contract.md`:
 ```
@@ -467,7 +478,7 @@ Approved criteria: <count>
 
 **If changes needed**, return required changes and do not proceed to Mode 2.
 
-### Mode 2 — Live CHECK
+### Mode 2 — CHECK
 
 ```bash
 cat sprint-contract.md
@@ -475,9 +486,9 @@ cat eval-trigger.txt
 bash init.sh
 ```
 
-If `init.sh` fails → write SPRINT FAIL: "Dev server failed to start". Do not evaluate.
+If `init.sh` fails → write SPRINT FAIL: "Dev environment failed to start". Do not evaluate.
 
-**Scope verification** (before browser evaluation):
+**Scope verification** (before functional evaluation):
 
 ```bash
 git diff "$(git merge-base HEAD main)"..HEAD --stat
@@ -488,7 +499,13 @@ or behaviour outside the contracted scope as a Craft defect in
 `eval-result-{N}.md`. Scope violations do not auto-fail a sprint but reduce the
 Craft score.
 
-Navigate the live app with Playwright MCP. Execute each test step. Screenshot evidence.
+Execute each test step through the configured verification surface:
+
+- `browser`: use Playwright MCP and capture screenshot/visible-state evidence.
+- `api`: send real HTTP requests with `curl`, `httpx`, or an equivalent client; capture status codes, response bodies, and externally visible state.
+- `cli`: run the real commands; capture exit codes, stdout/stderr, and generated files.
+- `job`: enqueue or trigger work; poll status and verify side effects.
+- `library`: create or use an external consumer harness; install/import the package and verify public API output.
 
 **Scoring rubric**:
 
@@ -521,7 +538,7 @@ Date: <ISO timestamp>
 ## Evidence
 ### Criterion: <text>
 Result: PASS/FAIL
-Observation: <what you saw in the browser>
+Observation: <what you observed through the configured verification surface>
 
 ## Required fixes (if SPRINT FAIL)
 1. <concrete fix>
@@ -552,7 +569,7 @@ Recommended action: <re-plan sprint / revise contract / escalate to human>
 ### Hard rules
 
 - Never write application code.
-- Never approve without running live Playwright test steps.
+- Never approve without running the configured black-box verification steps.
 - Never approve where any Functionality criterion failed.
 - When failing a sprint, cite generic scaffolding, duplicate logic, fake interactivity, or patch-on-patch code smell if they materially hurt craft or functionality.
 - In unattended mode, prefer a clear `SPRINT FAIL` plus escalation signal over vague partial approval.
@@ -576,7 +593,7 @@ Every sprint must pass through all four phases in order.  No phase may be skippe
 │  3. IMPLEMENT   Codex implements Sprint N ONLY          │
 │       │         Writes eval-trigger.txt  → STOPS        │
 │       ▼                                                 │
-│  4. EVALUATE    Evaluator runs live Playwright CHECK    │
+│  4. EVALUATE    Evaluator runs black-box CHECK          │
 │       │         Writes eval-result-N.md                 │
 │       ▼                                                 │
 │  SPRINT PASS?  ──Yes──▶  Orchestrator deletes           │
@@ -727,7 +744,7 @@ codex exec --full-auto \
 
 - Never skip contract negotiation — code does not begin before CONTRACT APPROVED.
 - Never self-evaluate — Codex never writes eval-result. Evaluator never writes code.
-- Never mark a sprint complete without live Playwright verification.
+- Never mark a sprint complete without independent black-box verification.
 - Never remove or modify existing tests.
 - State lives in files — read artifacts at session start, not conversation history.
 
@@ -770,12 +787,12 @@ These may be required by Generator or Evaluator, but must not be enforced by
 |-------------|----------------|---------|
 | Codex CLI (`@openai/codex`) | latest stable | Generator runtime |
 | Codex authenticated session or OpenAI API key | — | Generator authentication; in desktop or already-authenticated Codex environments, `OPENAI_API_KEY` is not required |
-| Playwright MCP (`@playwright/mcp`) | pinned (see CLAUDE.md) | Evaluator live CHECK |
+| Playwright MCP (`@playwright/mcp`) | pinned (see CLAUDE.md) | Evaluator browser CHECK only |
 
 ## Tech Stack
 
 ```
-Testing   : Playwright MCP (E2E), pytest (unit)
+Testing   : verification.mode-specific black-box checks, pytest (unit)
 VCS       : Git — one clean commit per sprint
 ```
 
@@ -789,7 +806,7 @@ prevents misattributing failures.
 | Layer | Owner | Runner | Scope | Characteristics |
 |-------|-------|--------|-------|----------------|
 | Unit tests | Generator | `pytest -q` | Functions, components, logic | Fast, deterministic, no browser |
-| E2E tests | Evaluator | Playwright MCP | Full user flows in live browser | Slower, may be flaky on env issues |
+| Black-box checks | Evaluator | verification.mode-specific tools | Full external behavior through browser/API/CLI/job/library surface | Slower, may be flaky on env issues |
 
 **Failure attribution rules:**
 
@@ -801,7 +818,7 @@ prevents misattributing failures.
   → Treat as architecture drift candidate; check the criteria above.
 
 Generator must never skip unit tests to pass Evaluator faster. Evaluator must
-never accept passing unit tests as a substitute for live browser verification.
+never accept passing unit tests as a substitute for independent black-box verification.
 
 ## Build & Test Commands
 

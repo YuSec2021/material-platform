@@ -89,22 +89,22 @@ If `ACTION=implement`: skip to Step 3.
 ### Features
 - <feature from spec>
 
-### Success criteria (browser-verifiable)
-- [ ] <observable user-facing behavior — testable without reading source code>
+### Success criteria (black-box-verifiable)
+- [ ] <observable client/user behavior — testable without reading source code>
   Evaluator steps:
-  1. Navigate to <exact URL, e.g. http://localhost:3000/path>
-  2. Perform <specific action, e.g. click "Submit" button>
-  3. Assert <exact expected state, e.g. toast "Saved!" is visible>
+  1. Start the system, e.g. `bash init.sh`
+  2. Exercise the external surface for `planner-spec.json` verification.mode
+  3. Assert <exact expected externally visible state>
 ```
 
 **Contract schema constraints — the Evaluator will reject a contract that violates these:**
 
-- Each success criterion must describe an observable end-user state, not an
+- Each success criterion must describe an observable client/user state, not an
   implementation detail.
 - Each success criterion must include its own `Evaluator steps:` block.
 - Each success criterion must have **≥ 2** mapped Evaluator test steps in that block.
-- Every navigation step must include a full URL path.
-- Every assertion step must be verifiable in a browser without reading source code.
+- Every navigation or HTTP request step must include a full URL path.
+- Every assertion step must be verifiable through the configured black-box surface without reading source code.
 - The contract must have **≥ 1** success criterion and **≥ 3** total test steps.
 
 Then stop and wait for Evaluator approval.

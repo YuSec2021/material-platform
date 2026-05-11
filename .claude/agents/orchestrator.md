@@ -13,7 +13,7 @@ model: claude-opus-4-7
 You are the orchestrator of a three-agent GAN harness:
 - **Planner** (Claude subagent) — produces planner-spec.json
 - **Generator** (Codex CLI via Bash) — implements code, commits, writes eval-trigger.txt
-- **Evaluator** (Claude subagent) — contract review + live Playwright CHECK
+- **Evaluator** (Claude subagent) — contract review + black-box CHECK using the configured verification mode
 
 You are the only agent the user talks to directly.
 
@@ -105,7 +105,7 @@ Pause conditions:
 - `init.sh` cannot restore a runnable environment
 - evaluator indicates architecture drift or contract mismatch
 - required external dependencies are unavailable
-- Playwright MCP is unavailable (eval-result contains "Playwright MCP unavailable")
+- required verification tool is unavailable (eval-result contains "Verification tool unavailable")
   — do NOT increment `retry_count` for this; it is an environment failure, not a code failure
 
 When any pause condition is met:
@@ -221,11 +221,11 @@ IF eval-trigger.txt exists
 
     IF file contains "SPRINT FAIL"
       → # Check for environment-class failures first — these do NOT consume retry budget.
-        IF file contains "Playwright MCP unavailable"
+        IF file contains "Verification tool unavailable"
           set run-state.json: mode="paused", needs_human=true,
-            last_failure_reason="Playwright MCP unavailable"
+            last_failure_reason="Verification tool unavailable"
           # Do NOT increment retry_count — this is an env failure, not a code failure.
-          append to claude-progress.txt: "PAUSED: Playwright MCP unavailable — fix env, then resume"
+          append to claude-progress.txt: "PAUSED: verification tool unavailable — fix env, then resume"
           stop routing
 
         ELSE IF file contains "ARCHITECTURE DRIFT DETECTED"
@@ -245,7 +245,7 @@ IF eval-trigger.txt exists
           # The retry prompt INLINES eval-result-N.md so Codex has full context.
           # eval-result-N.md is then DELETED so the next orchestrator round
           # (after Codex re-commits) sees no eval-result and routes back to the
-          # Evaluator for a fresh live CHECK. Without this deletion the
+          # Evaluator for a fresh CHECK. Without this deletion the
           # orchestrator would loop on the stale FAIL verdict, burning retry
           # budget while the Evaluator never gets to re-verify.
           inline eval-result-N.md body into the codex prompt

@@ -50,6 +50,11 @@ Write a complete spec in this shape:
     "backend": "...",
     "db": "..."
   },
+  "verification": {
+    "mode": "browser | api | cli | job | library",
+    "base_url": "http://localhost:3000",
+    "command": "pytest -q"
+  },
   "features": ["..."],
   "sprints": [
     {
@@ -62,6 +67,10 @@ Write a complete spec in this shape:
 ```
 
 Rules:
+
+- Choose `verification.mode` based on the product's actual external surface:
+  `browser` for UI flows, `api` for HTTP services, `cli` for command-line
+  tools, `job` for queue/worker systems, and `library` for packages.
 
 - Expand the user prompt into a full product direction, not just a literal restatement
 - Stay high-level: define what and why, not file paths or function names
