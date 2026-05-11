@@ -11,11 +11,13 @@ let editingMaterialId = null;
 let editingMaterialLibraryId = null;
 let editingUserId = null;
 let editingRoleId = null;
+let editingProviderId = null;
 let materialPreviewItems = [];
 let materialGovernanceFile = null;
 let aiMaterialPreview = null;
 let workflowReferenceImages = [];
 let currentUser = null;
+const AI_CAPABILITIES = ["material_add", "material_match", "category_match", "material_analysis", "attr_recommend", "material_governance"];
 const STOP_PURCHASE_REASONS = ["供应商停产", "质量风险停采", "战略替代物料", "采购目录清理"];
 const STOP_USE_REASONS = ["长期无库存且无业务需求", "安全合规风险", "技术标准淘汰", "资产归档完成"];
 const NAV_ITEMS = [
@@ -34,6 +36,7 @@ const NAV_ITEMS = [
   { href: "/system/config", label: "System Config", permission: "directory.system_admin" },
   { href: "/categories", label: "Categories", permission: "directory.category_management" },
   { href: "/ai/providers", label: "AI Providers", permission: "directory.system_admin" },
+  { href: "/debug/trace", label: "AI Trace Debug", permission: "directory.system_admin" },
   { href: "/standard/product-names", label: "Product Names", permission: "directory.product_name_management" },
   { href: "/standard/attributes", label: "Attributes", permission: "directory.attribute_management" },
   { href: "/standard/attributes/ai-governance", label: "AI Governance", permission: "directory.attribute_management" },
@@ -47,6 +50,7 @@ const ROUTE_PERMISSIONS = [
   { test: (path) => path.includes("/standard/attributes"), permission: "directory.attribute_management" },
   { test: (path) => path.includes("/workflows"), permission: "directory.workflow" },
   { test: (path) => path.includes("/system"), permission: "directory.system_admin" },
+  { test: (path) => path.includes("/ai/providers") || path.includes("/debug/trace"), permission: "directory.system_admin" },
   { test: (path) => path.includes("/categories"), permission: "directory.category_management" },
   { test: (path) => path.includes("/standard/product-names"), permission: "directory.product_name_management" },
   { test: (path) => path.includes("/standard/brands"), permission: "directory.brand_management" }
@@ -1919,6 +1923,296 @@ function bindWorkflowActions(detailId, refresh) {
   });
 }
 
+function capabilityOptions(selected = []) {
+  const selectedSet = new Set(selected);
+  return AI_CAPABILITIES.map((capability) => `
+    <label><span><input type="checkbox" class="providerCapability" value="${esc(capability)}" ${selectedSet.has(capability) ? "checked" : ""} /> ${esc(capability)}</span></label>
+  `).join("");
+}
+
+function providerOptionList(providers, selectedId = "", includeBlank = true) {
+  const rows = providers.filter((provider) => provider.enabled);
+  return `${includeBlank ? `<option value="">No fallback</option>` : ""}${rows.map((provider) => `
+    <option value="${provider.id}" ${String(provider.id) === String(selectedId || "") ? "selected" : ""}>${esc(provider.display_name)} / ${esc(provider.model_name)}</option>
+  `).join("")}`;
+}
+
+async function renderAIProviders() {
+  const [providers, mappings] = await Promise.all([
+    request("/ai/providers"),
+    request("/ai/capability-mappings")
+  ]);
+  const editing = providers.find((provider) => String(provider.id) === String(editingProviderId));
+  app.innerHTML = `
+    <h2>LLM Gateway Model Management</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <h3>${editing ? "Edit model configuration" : "Create model configuration"}</h3>
+        <label>Display name<input id="providerDisplayName" value="${esc(editing?.display_name || "")}" placeholder="Sprint 10 Primary" /></label>
+        <label>Provider
+          <select id="providerType">
+            ${["mock", "DashScope", "Azure OpenAI", "vLLM", "Ollama"].map((name) => `<option value="${esc(name)}" ${editing?.provider === name ? "selected" : ""}>${esc(name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Base URL<input id="providerBaseUrl" value="${esc(editing?.base_url || "")}" placeholder="http://127.0.0.1:18080" /></label>
+        <label>Model name<input id="providerModelName" value="${esc(editing?.model_name || "")}" placeholder="primary-model" /></label>
+        <label>API key<input id="providerApiKey" type="password" placeholder="${esc(editing?.api_key_masked || "optional")}" /></label>
+        <label>Timeout seconds<input id="providerTimeout" type="number" min="1" max="120" value="${esc(editing?.timeout_seconds || 10)}" /></label>
+        <label>Fallback model
+          <select id="providerFallback">${providerOptionList(providers.filter((provider) => !editing || provider.id !== editing.id), editing?.fallback_model_id || "")}</select>
+        </label>
+        <label><span><input id="providerEnabled" type="checkbox" ${editing?.enabled === false ? "" : "checked"} /> Enabled</span></label>
+        <div class="binding-list">${capabilityOptions(editing?.capabilities || ["material_add", "material_match"])}</div>
+        <div class="toolbar">
+          <button id="saveProvider">${editing ? "Save Model" : "Create Model"}</button>
+          <button id="testProviderDraft" class="secondary">Test Draft</button>
+          <button id="resetProvider" class="secondary">Reset</button>
+        </div>
+        <div id="providerStatus" class="status muted"></div>
+      </section>
+      <section>
+        <div class="panel">
+          <h3>Configured models</h3>
+          ${providerTable(providers)}
+        </div>
+        <div class="panel trace-panel">
+          <h3>Capability hot-switch mappings</h3>
+          ${mappingEditor(providers, mappings)}
+        </div>
+        <div class="panel">
+          <h3>Gateway invocation test</h3>
+          <div class="toolbar">
+            <select id="invokeCapability">${AI_CAPABILITIES.map((capability) => `<option value="${esc(capability)}">${esc(capability)}</option>`).join("")}</select>
+            <input id="invokePrompt" value="Sprint 10 hot switch test" />
+            <button id="invokeGateway">Invoke</button>
+          </div>
+          <pre id="invokeResult">No invocation yet</pre>
+        </div>
+      </section>
+    </div>
+  `;
+  document.getElementById("saveProvider").addEventListener("click", saveProvider);
+  document.getElementById("testProviderDraft").addEventListener("click", testProviderDraft);
+  document.getElementById("resetProvider").addEventListener("click", () => {
+    editingProviderId = null;
+    renderAIProviders();
+  });
+  document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => {
+    editingProviderId = button.dataset.editProvider;
+    renderAIProviders();
+  }));
+  document.querySelectorAll("[data-disable-provider]").forEach((button) => button.addEventListener("click", () => disableProvider(button.dataset.disableProvider)));
+  document.querySelectorAll("[data-test-provider]").forEach((button) => button.addEventListener("click", () => testSavedProvider(button.dataset.testProvider)));
+  document.querySelectorAll("[data-save-mapping]").forEach((button) => button.addEventListener("click", () => saveMapping(button.dataset.saveMapping)));
+  document.getElementById("invokeGateway").addEventListener("click", invokeGateway);
+}
+
+function providerTable(providers) {
+  return `
+    <table>
+      <thead><tr><th>Name</th><th>Provider</th><th>Endpoint</th><th>Capabilities</th><th>Status</th><th>API key</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${providers.map((provider) => `
+          <tr>
+            <td>${esc(provider.display_name)}<div class="muted">${esc(provider.model_name)} / ${provider.timeout_seconds}s</div></td>
+            <td>${esc(provider.provider)}</td>
+            <td>${esc(provider.base_url || "local")}</td>
+            <td>${(provider.capabilities || []).map((capability) => `<span class="pill">${esc(capability)}</span>`).join("")}</td>
+            <td>${provider.enabled ? `<span class="valid">enabled</span>` : `<span class="invalid">disabled</span>`}<div class="muted">${esc(provider.connection_status)} ${esc(provider.last_test_message || "")}</div></td>
+            <td>${esc(provider.api_key_masked || "not set")}</td>
+            <td class="actions">
+              <button class="secondary" data-edit-provider="${provider.id}">Edit</button>
+              <button class="secondary" data-test-provider="${provider.id}">Test</button>
+              <button class="danger" data-disable-provider="${provider.id}" ${provider.enabled ? "" : "disabled"}>Disable</button>
+            </td>
+          </tr>
+        `).join("") || `<tr><td colspan="7"><div class="empty">No model configurations found</div></td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+
+function mappingEditor(providers, mappings) {
+  const byCapability = new Map((mappings || []).map((mapping) => [mapping.capability, mapping]));
+  const enabledProviders = providers.filter((provider) => provider.enabled);
+  return `
+    <table>
+      <thead><tr><th>Capability</th><th>Primary model</th><th>Fallback model</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+        ${AI_CAPABILITIES.map((capability) => {
+          const mapping = byCapability.get(capability) || {};
+          return `
+            <tr>
+              <td>${esc(capability)}</td>
+              <td><select id="mapPrimary-${esc(capability)}">${providerOptionList(enabledProviders, mapping.primary_model_id, false)}</select></td>
+              <td><select id="mapFallback-${esc(capability)}">${providerOptionList(enabledProviders, mapping.fallback_model_id, true)}</select></td>
+              <td><label><span><input id="mapEnabled-${esc(capability)}" type="checkbox" ${mapping.enabled === false ? "" : "checked"} /> Enabled</span></label></td>
+              <td><button data-save-mapping="${esc(capability)}" ${enabledProviders.length ? "" : "disabled"}>Save Mapping</button></td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+    <div id="mappingStatus" class="status muted"></div>
+  `;
+}
+
+function providerPayload() {
+  return {
+    display_name: document.getElementById("providerDisplayName").value.trim(),
+    provider: document.getElementById("providerType").value,
+    base_url: document.getElementById("providerBaseUrl").value.trim(),
+    model_name: document.getElementById("providerModelName").value.trim(),
+    api_key: document.getElementById("providerApiKey").value,
+    timeout_seconds: Number(document.getElementById("providerTimeout").value || 10),
+    fallback_model_id: document.getElementById("providerFallback").value ? Number(document.getElementById("providerFallback").value) : null,
+    enabled: document.getElementById("providerEnabled").checked,
+    capabilities: Array.from(document.querySelectorAll(".providerCapability:checked")).map((item) => item.value)
+  };
+}
+
+async function saveProvider() {
+  const status = document.getElementById("providerStatus");
+  try {
+    const payload = providerPayload();
+    const path = editingProviderId ? `/ai/providers/${editingProviderId}` : "/ai/providers";
+    const saved = await request(path, { method: editingProviderId ? "PUT" : "POST", body: JSON.stringify(payload) });
+    status.textContent = `${saved.display_name} saved; connection ${saved.connection_status}: ${saved.last_test_message}`;
+    editingProviderId = saved.id;
+    renderAIProviders();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function testProviderDraft() {
+  const status = document.getElementById("providerStatus");
+  try {
+    const result = await request("/ai/providers/test", { method: "POST", body: JSON.stringify(providerPayload()) });
+    status.textContent = `${result.status}: ${result.message}`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function testSavedProvider(id) {
+  const result = await request(`/ai/providers/${id}/test`, { method: "POST" });
+  window.alert(`${result.status}: ${result.message}`);
+  renderAIProviders();
+}
+
+async function disableProvider(id) {
+  await request(`/ai/providers/${id}/disable`, { method: "PATCH" });
+  if (String(editingProviderId) === String(id)) editingProviderId = null;
+  renderAIProviders();
+}
+
+async function saveMapping(capability) {
+  const primary = document.getElementById(`mapPrimary-${capability}`).value;
+  const payload = {
+    capability,
+    primary_model_id: Number(primary),
+    fallback_model_id: document.getElementById(`mapFallback-${capability}`).value ? Number(document.getElementById(`mapFallback-${capability}`).value) : null,
+    enabled: document.getElementById(`mapEnabled-${capability}`).checked
+  };
+  const saved = await request(`/ai/capability-mappings/${capability}`, { method: "PUT", body: JSON.stringify(payload) });
+  document.getElementById("mappingStatus").textContent = `${saved.capability} now uses ${saved.primary_model_name}${saved.fallback_model_name ? ` with fallback ${saved.fallback_model_name}` : ""}`;
+  renderAIProviders();
+}
+
+async function invokeGateway() {
+  const capability = document.getElementById("invokeCapability").value;
+  const prompt = document.getElementById("invokePrompt").value;
+  const result = await request(`/ai/capabilities/${capability}/invoke`, {
+    method: "POST",
+    body: JSON.stringify({ prompt })
+  });
+  document.getElementById("invokeResult").textContent = JSON.stringify(result, null, 2);
+}
+
+async function renderTraceDebug() {
+  app.innerHTML = `
+    <h2>AI Trace Debug</h2>
+    <section class="panel">
+      <div class="toolbar">
+        <select id="traceStatus">
+          <option value="">Any status</option>
+          <option value="ok">ok</option>
+          <option value="error">error</option>
+        </select>
+        <input id="traceOperation" placeholder="Operation or capability" />
+        <select id="traceCapability">
+          <option value="">Any capability</option>
+          ${AI_CAPABILITIES.map((capability) => `<option value="${esc(capability)}">${esc(capability)}</option>`).join("")}
+        </select>
+        <button id="loadTraces">Filter</button>
+      </div>
+      <div id="traceList"><div class="empty">Loading traces</div></div>
+    </section>
+    <section id="traceDetail" class="panel detail-card"></section>
+  `;
+  document.getElementById("loadTraces").addEventListener("click", loadTraces);
+  await loadTraces();
+}
+
+async function loadTraces() {
+  const params = new URLSearchParams();
+  const status = document.getElementById("traceStatus")?.value || "";
+  const operation = document.getElementById("traceOperation")?.value || "";
+  const capability = document.getElementById("traceCapability")?.value || "";
+  if (status) params.set("status", status);
+  if (operation) params.set("operation", operation);
+  if (capability) params.set("capability", capability);
+  try {
+    const traces = await request(`/debug/trace${params.toString() ? `?${params}` : ""}`);
+    document.getElementById("traceList").innerHTML = traceTable(traces);
+    document.querySelectorAll("[data-trace-id]").forEach((button) => button.addEventListener("click", () => loadTraceDetail(button.dataset.traceId)));
+  } catch (error) {
+    document.getElementById("traceList").innerHTML = `<div class="empty">Trace debug unavailable: ${esc(error.message)}</div>`;
+  }
+}
+
+function traceTable(traces) {
+  return `
+    <table>
+      <thead><tr><th>Trace ID</th><th>Operation</th><th>Capability</th><th>Status</th><th>Duration</th><th>Started</th><th>Action</th></tr></thead>
+      <tbody>
+        ${traces.map((trace) => `
+          <tr>
+            <td><code>${esc(trace.trace_id)}</code></td>
+            <td>${esc(trace.operation_name)}</td>
+            <td>${esc(trace.capability)}</td>
+            <td>${trace.status === "error" ? `<span class="invalid">error</span>` : `<span class="valid">${esc(trace.status)}</span>`}</td>
+            <td>${esc(trace.duration_ms)} ms / ${esc(trace.span_count)} spans</td>
+            <td>${esc(trace.start_time)}</td>
+            <td><button class="secondary" data-trace-id="${esc(trace.trace_id)}">Detail</button></td>
+          </tr>
+        `).join("") || `<tr><td colspan="7"><div class="empty">No traces found</div></td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadTraceDetail(traceId) {
+  const detail = await request(`/debug/trace/${traceId}`);
+  document.getElementById("traceDetail").innerHTML = `
+    <h3>Trace ${esc(detail.trace_id)}</h3>
+    <div class="muted">Persisted in ${esc(detail.storage_table)}</div>
+    <div class="span-tree">
+      ${detail.spans.map((span) => `
+        <div class="span-row ${span.parent_span_id ? "span-child" : ""}">
+          <strong>${esc(span.operation_name)}</strong>
+          <span class="pill">${esc(span.span_type)}</span>
+          <span class="${span.status === "error" ? "invalid" : "valid"}">${esc(span.status)}</span>
+          <div class="muted">${esc(span.provider)} ${esc(span.model)} ${esc(span.duration_ms)} ms</div>
+          ${span.error ? `<div class="invalid">${esc(span.error)}</div>` : ""}
+          <pre>${esc(JSON.stringify(span.metadata || {}, null, 2))}</pre>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 async function route() {
   try {
     if (!currentUser) await loadCurrentUser();
@@ -1928,6 +2222,8 @@ async function route() {
     if (path.match(/\/(?:system\/)?roles\/\d+\/permissions/)) return renderRolePermissions();
     if (path.includes("/system/users") || path === "/users") return renderUsers();
     if (path.includes("/system/roles") || path === "/roles") return renderRoles();
+    if (path.includes("/ai/providers") || path.includes("/system/models")) return renderAIProviders();
+    if (path.includes("/debug/trace")) return renderTraceDebug();
     if (path.includes("/system/config")) return renderSystemConfig();
     if (path.includes("/material-libraries")) return renderMaterialLibraries();
     if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();

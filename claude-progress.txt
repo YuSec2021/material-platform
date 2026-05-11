@@ -1,15 +1,16 @@
-Project summary: Sprint 8 implements user management, HCM-synced read-only users, local user CRUD/password reset, role management, role-user binding, and role permission configuration.
-
-Sprint 6: Material application workflows
-Status: SPRINT PASS before Sprint 7 work.
-Notes: New category and new material code workflows remain covered by regression tests.
-
-Sprint 7: Material stop purchase and stop use workflows
-Status: implemented; git commit blocked by sandbox .git write denial.
-Notes: Added stop_purchase/stop_use application types, approvals/rejections, admin manual stop purchase, lifecycle history, UI forms, and API tests.
-Verification: unittest discover passed; frontend JS syntax passed; pytest unavailable in global shell and venv.
+Project summary: Sprint 10 implements the LLM gateway model configuration surface, capability hot-switch mappings, AES-256 API key storage, provider connection testing, fallback invocation, and persisted AITracer debug traces.
 
 Sprint 8: User management and role management
-Status: implemented; git commit blocked by sandbox .git write denial.
+Status: SPRINT PASS before Sprint 9 work.
 Notes: Added User/Role/RoleUser/FeaturePermission models, HCM seed users, local user operations, role binding, permission catalog/config APIs, and UI pages.
 Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; pytest unavailable in venv.
+
+Sprint 9: Permission system implementation
+Status: SPRINT PASS before Sprint 10 work.
+Notes: RBAC enforcement and permission-based UI remained intact through Sprint 10 regression testing.
+Verification: Existing Sprint 9 tests included in unittest discovery.
+
+Sprint 10: LLM Gateway and AI Infrastructure
+Status: implemented; git commit blocked by sandbox .git index.lock write denial.
+Notes: Added model_config CRUD-compatible provider API, capability_model_mapping hot-switch, AES-256 encrypted keys, connection tests, fallback gateway invocation, tracer spans, /ai/providers UI, and /debug/trace UI.
+Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; backend/.venv/bin/python -m pytest -q unavailable because pytest is not installed.

@@ -257,6 +257,26 @@ th {
   display: none;
 }
 
+.trace-panel {
+  margin-top: 16px;
+}
+
+.span-tree {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.span-row {
+  border: 1px solid #d8dee8;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.span-child {
+  margin-left: 24px;
+}
+
 .valid {
   color: #237804;
   font-weight: 800;

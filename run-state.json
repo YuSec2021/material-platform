@@ -1,12 +1,12 @@
 {
   "mode": "contract",
-  "current_sprint": 9,
+  "current_sprint": 10,
   "retry_count": 0,
-  "last_successful_sprint": 8,
+  "last_successful_sprint": 9,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-9-permission-system",
+  "active_branch": "codex/sprint-10-llm-gateway",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T03:00:00+08:00",
+  "last_run_at": "2026-05-12T04:10:00+08:00",
   "request_kind": ""
 }
