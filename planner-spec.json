@@ -1,0 +1,367 @@
+{
+  "product": "AI Material Management Platform (AI物料中台)",
+  "product_description": "Enterprise-grade material standardization management and approval platform. Manages a five-level standard hierarchy (Category Library -> Category -> Product Name -> Attribute -> Brand) with full lifecycle control for materials through application workflows (new material -> stop purchase -> stop use). Features AI-powered governance, semantic matching via vector retrieval, and a unified LLM gateway supporting multi-provider deployment (DashScope/Azure OpenAI/vLLM/Ollama). Supports both SaaS cloud and private化部署.",
+  "design_language": {
+    "name": "Enterprise Professional",
+    "mood": "authoritative, efficient, trustworthy",
+    "color_palette": {
+      "primary": {
+        "name": "Tech Blue",
+        "hex": "#1677FF",
+        "usage": "Primary actions, links, active states"
+      },
+      "secondary": {
+        "name": "Slate Gray",
+        "hex": "#475569",
+        "usage": "Secondary text, borders, disabled states"
+      },
+      "accent": {
+        "name": "Success Green",
+        "hex": "#52C41A",
+        "usage": "Success states, confirmations, approved status"
+      },
+      "warning": {
+        "name": "Warning Amber",
+        "hex": "#FAAD14",
+        "usage": "Warnings, pending review, AI low confidence"
+      },
+      "error": {
+        "name": "Error Red",
+        "hex": "#FF4D4F",
+        "usage": "Errors, rejections, high-risk alerts"
+      },
+      "background": {
+        "name": "Cool White",
+        "hex": "#F8FAFC",
+        "usage": "Page backgrounds, cards"
+      },
+      "surface": {
+        "name": "Pure White",
+        "hex": "#FFFFFF",
+        "usage": "Modal backgrounds, table rows"
+      }
+    },
+    "typography": {
+      "display_font": "PingFang SC, Microsoft YaHei, -apple-system, sans-serif",
+      "body_font": "PingFang SC, Microsoft YaHei, -apple-system, sans-serif",
+      "mono_font": "JetBrains Mono, SF Mono, Consolas, monospace",
+      "scale": {
+        "h1": "28px / 700 weight",
+        "h2": "22px / 600 weight",
+        "h3": "16px / 600 weight",
+        "body": "14px / 400 weight",
+        "small": "12px / 400 weight",
+        "mono": "13px / 400 weight"
+      }
+    },
+    "spacing": {
+      "unit": "4px",
+      "scale": ["4px", "8px", "12px", "16px", "24px", "32px", "48px"],
+      "component_padding": "16px",
+      "card_margin": "16px",
+      "section_gap": "24px"
+    },
+    "border_radius": {
+      "small": "4px",
+      "medium": "6px",
+      "large": "8px",
+      "card": "8px",
+      "modal": "12px"
+    },
+    "shadows": {
+      "card": "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)",
+      "modal": "0 20px 40px rgba(0,0,0,0.15)",
+      "dropdown": "0 4px 12px rgba(0,0,0,0.10)"
+    }
+  },
+  "tech_stack": {
+    "frontend": "React 18 + TypeScript 5 + Ant Design 5 + Vite 5 + Zustand 4 + TanStack Query 5 + React Router 6",
+    "backend": "FastAPI 0.128+ (Python 3.11+, asyncio原生) + Pydantic v2 + SQLAlchemy 2.0",
+    "db": "PostgreSQL 15+ (业务schema + tracer独立schema) + Qdrant向量数据库 (混合检索: Dense+Sparse BM25)",
+    "llm": "统一模型网关 - DashScope(Qwen3-Max) / Azure OpenAI / 本地vLLM / Ollama, OpenAI兼容格式",
+    "embedding": "text-embedding-3-small (OpenAI) 或本地 BGE 模型, 维度 256/768 可选",
+    "deployment": "Docker Compose (私有化) / 阿里云 OSS (SaaS) + Nginx负载均衡",
+    "observability": "AITracer自研链路追踪框架 (tracer.spans表) + structlog JSON日志 -> ELK"
+  },
+  "verification": {
+    "mode": "browser",
+    "base_url": "http://localhost:5173",
+    "command": "npx playwright test",
+    "tools_required": ["Playwright MCP or npx playwright"],
+    "test_scope": "E2E browser tests covering CRUD flows, AI trigger points, and approval workflows"
+  },
+  "features": [
+    {
+      "id": "F01",
+      "name": "Category Library Management",
+      "module": "standard_management",
+      "description": "CRUD operations for category library (top-level container). Only super admin can operate. Fields: name, auto-generated code, description, optional library admin assignment.",
+      "priority": "P0"
+    },
+    {
+      "id": "F02",
+      "name": "Category Management with AI Governance",
+      "module": "standard_management",
+      "description": "Hierarchical category CRUD (up to 3 levels). AI governance: import Excel -> AI analyze -> standardize categories (name/code/level mapping). AI category matching: input product name -> output full-level category path with confidence score.",
+      "priority": "P0"
+    },
+    {
+      "id": "F03",
+      "name": "Product Name Management",
+      "module": "standard_management",
+      "description": "CRUD for product names with auto-generated codes. Fields: name, unit, aliases, definition, description examples, up to 3 example images. Strongly bound to category and attributes.",
+      "priority": "P0"
+    },
+    {
+      "id": "F04",
+      "name": "Attribute Management with AI Governance",
+      "module": "standard_management",
+      "description": "Attribute CRUD per product name. AI attribute governance: import Excel -> AI analyze -> standardize attributes (name/type/options/defaults). AI attribute recommendation: select product name -> auto-recommend attributes with sources (category common attrs, historical data, GB standards). Version control with change logs.",
+      "priority": "P0"
+    },
+    {
+      "id": "F05",
+      "name": "Brand Management",
+      "module": "standard_management",
+      "description": "Brand CRUD with auto-generated codes. Supports logo upload. Fields: name, code (immutable), description, logo.",
+      "priority": "P1"
+    },
+    {
+      "id": "F06",
+      "name": "Material Library Management",
+      "module": "material_management",
+      "description": "Top-level material container CRUD (super admin only). Fields: name, auto-generated code, description, optional library admin. Deletion only allowed when empty.",
+      "priority": "P0"
+    },
+    {
+      "id": "F07",
+      "name": "Material Management with AI Governance",
+      "module": "material_management",
+      "description": "Material CRUD within category system. AI material governance: import Excel -> AI clean/structure/attribute-extract -> preview -> batch write with rollback within 24h. Auto-generated material codes.",
+      "priority": "P0"
+    },
+    {
+      "id": "F08",
+      "name": "AI Natural Language Material Addition",
+      "module": "material_management",
+      "description": "Input natural language material description -> AI analyze -> auto-link category/product name -> recommend attribute values -> preview -> create material. Includes image understanding for supplementary input.",
+      "priority": "P0"
+    },
+    {
+      "id": "F09",
+      "name": "AI Vector Similarity Material Matching",
+      "module": "material_management",
+      "description": "On material creation, perform hybrid vector search (dense semantic + sparse BM25) against existing materials. Score综合: text Jaccard 40% + semantic 40% + brand 20%. Thresholds: >=0.90 highly duplicate, >=0.75 suspicious, <0.75 normal. Cold start: disable matching when <100 materials in library.",
+      "priority": "P0"
+    },
+    {
+      "id": "F10",
+      "name": "New Material Category Application Workflow",
+      "module": "application_workflow",
+      "description": "Material manager submits -> department head approval -> asset management approval. Supports simple approval vs multi-node workflow (configurable). Approved -> auto-create category in library. Reject -> return to applicant with reason.",
+      "priority": "P0"
+    },
+    {
+      "id": "F11",
+      "name": "New Material Code Application Workflow",
+      "module": "application_workflow",
+      "description": "Material manager submits -> approval -> material auto-added to catalog. Reject -> return with reason. Includes reference mall link, 3 required images.",
+      "priority": "P0"
+    },
+    {
+      "id": "F12",
+      "name": "Material Stop Purchase Application",
+      "module": "application_workflow",
+      "description": "After approval, material status -> stop_purchase (not selectable in purchase orders). Also supports admin manual override with exemption reason. Displays status badge in material list.",
+      "priority": "P0"
+    },
+    {
+      "id": "F13",
+      "name": "Material Stop Use Application",
+      "module": "application_workflow",
+      "description": "Precondition: material must be stop_purchased and archived. Approval flow similar to stop purchase. After approval -> material status -> stopped. Cannot be reverted.",
+      "priority": "P0"
+    },
+    {
+      "id": "F14",
+      "name": "User Management (HCM Sync)",
+      "module": "system_admin",
+      "description": "User list synced from HCM, view-only. Displays: ID, username, unit, department, team, account ownership. Supports add/edit/reset password/delete local users.",
+      "priority": "P0"
+    },
+    {
+      "id": "F15",
+      "name": "Role and Permission Management",
+      "module": "system_admin",
+      "description": "Role CRUD with enable/disable. Role-user binding. Feature permission configuration: directory/button/API-level access control covering material archives, attribute management, material library modules.",
+      "priority": "P0"
+    },
+    {
+      "id": "F16",
+      "name": "System Configuration",
+      "module": "system_admin",
+      "description": "System info (name, icon). Reason options maintenance (stop purchase/stop use reason lists). Approval mode switch: simple approval vs multi-node workflow.",
+      "priority": "P1"
+    },
+    {
+      "id": "F17",
+      "name": "LLM Gateway (Model Management)",
+      "module": "ai_infrastructure",
+      "description": "Admin UI for model configuration: add/edit/disable models (DashScope/Azure/vLLM/Ollama). AES-256 encrypted API key storage. Per-capability model mapping with hot-switch (no restart). Fallback model auto-switch on timeout/5xx. Connection test on save.",
+      "priority": "P0"
+    },
+    {
+      "id": "F18",
+      "name": "AI Tracing Infrastructure (AITracer)",
+      "module": "ai_infrastructure",
+      "description": "Self-developed AI链路追踪: @trace decorator -> Span tree (trace_id root, chain/llm/tool/retriever/embedding spans). Async批量写入 tracer.spans. Prompt version registry. Debug UI at /debug/trace (dev only). Production blocked unless AI_DEBUG=true.",
+      "priority": "P1"
+    },
+    {
+      "id": "F19",
+      "name": "Material State Machine",
+      "module": "material_management",
+      "description": "Enforced state transitions: normal -> stop_purchase -> stop_use (no backward skipping). State change only via approved workflow or super admin with exemption reason logged.",
+      "priority": "P0"
+    },
+    {
+      "id": "F20",
+      "name": "Operational Audit Log",
+      "module": "system_admin",
+      "description": "All write operations logged: user/resource/action/before_value/after_value/timestamp/source (human/AI/system). Log list with filters (time range, type, resource, user). Change detail with before/after diff. Role-based visibility. Export to Excel for compliance.",
+      "priority": "P0"
+    }
+  ],
+  "sprints": [
+    {
+      "id": 1,
+      "title": "Foundation: Project Scaffolding, Database Schema, and Backend Core APIs",
+      "features": [
+        "F01-Category Library Management (backend CRUD)",
+        "F06-Material Library Management (backend CRUD)",
+        "Database schema: PostgreSQL tables for category_library, category, product_name, attribute, brand, material, material_library",
+        "Backend project structure with FastAPI + Pydantic v2 + SQLAlchemy 2.0",
+        "Authentication middleware skeleton",
+        "Basic audit_log table structure"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Standard Management - Category and Product Name Modules",
+      "features": [
+        "F02-Category Management with AI Governance (backend + frontend)",
+        "F02-AI category matching endpoint (capability: category_match)",
+        "F03-Product Name Management (backend + frontend)",
+        "Frontend: Ant Design Tree component for category hierarchy",
+        "Frontend: Product name CRUD with image upload"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Standard Management - Attribute and Brand Modules",
+      "features": [
+        "F04-Attribute Management with AI Governance (backend + frontend)",
+        "F04-AI attribute recommendation (capability: attr_recommend)",
+        "F04-Attribute version control and change logs",
+        "F05-Brand Management (backend + frontend with logo upload)"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Material Management Core",
+      "features": [
+        "F07-Material CRUD (backend + frontend)",
+        "F07-AI material governance pipeline (capability: material_governance)",
+        "F19-Material state machine enforcement",
+        "Frontend: material list with status badges, search/filter",
+        "Excel import preview and batch confirmation UI"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "AI Material Addition and Vector Matching",
+      "features": [
+        "F08-AI natural language material addition (capability: material_add)",
+        "F08-Frontend: multi-step AI add material wizard",
+        "F09-AI vector similarity matching (capability: material_match)",
+        "Qdrant vector DB integration with hybrid search",
+        "Frontend: duplicate detection UI with Top-3 matches and confidence scores"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Material Application Workflows - New Category and Code",
+      "features": [
+        "F10-New Material Category Application workflow",
+        "F11-New Material Code Application workflow",
+        "Approval mode configuration (simple vs multi-node)",
+        "Frontend: workflow form, approval history, status tracking",
+        "Backend: workflow state machine with rejection/return logic"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Material Application Workflows - Stop Purchase and Stop Use",
+      "features": [
+        "F12-Material Stop Purchase Application workflow",
+        "F12-Admin manual stop purchase with exemption reason",
+        "F13-Material Stop Use Application workflow (precondition: stop_purchased)",
+        "Frontend: stop purchase/stop use forms with reason selection",
+        "State transition UI indicators throughout material lifecycle"
+      ]
+    },
+    {
+      "id": 8,
+      "title": "User Management and HCM Synchronization",
+      "features": [
+        "F14-User management (HCM sync view + local user CRUD)",
+        "F14-Frontend: user list with department/unit filtering",
+        "Password reset functionality",
+        "F15-Role management (CRUD, enable/disable, user binding)"
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Permission System Implementation",
+      "features": [
+        "F15-Feature permission configuration (directory/button/API-level)",
+        "Backend: RBAC enforcement on all endpoints",
+        "Frontend: permission-based UI element show/hide",
+        "Permission template for material library scoped access"
+      ]
+    },
+    {
+      "id": 10,
+      "title": "LLM Gateway and AI Infrastructure",
+      "features": [
+        "F17-LLM Gateway: model_config and capability_model_mapping tables",
+        "F17-Model management UI: add/edit/disable, AES-256 key storage",
+        "F17-Hot-switch implementation via Redis Pub/Sub",
+        "F17-Connection test functionality",
+        "F18-AITracer framework: @trace decorator, SpanCollector, tracer schema"
+      ]
+    },
+    {
+      "id": 11,
+      "title": "System Configuration and Audit Logging",
+      "features": [
+        "F16-System configuration (system info, reason options, approval mode)",
+        "F20-Operational audit log (backend + frontend list view)",
+        "F20-Before/after value diff view",
+        "Excel export for compliance audit",
+        "Frontend: audit log filters and pagination"
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Deployment, Integration Testing, and Polish",
+      "features": [
+        "Docker Compose setup for private化 deployment",
+        "Nginx configuration for production",
+        "Playwright E2E test suite (smoke tests for all major flows)",
+        "OSS file storage integration (SaaS)",
+        "Final bug fixes and UX polish"
+      ]
+    }
+  ]
+}
