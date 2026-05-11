@@ -1,10 +1,14 @@
-Project summary: Sprint 3 implements standard management for attributes and brands with a FastAPI backend, persistent SQLite store, and browser UI started by init.sh at localhost:5173.
+Project summary: Sprint 7 implements material stop purchase and stop use workflows on the existing FastAPI backend and vanilla browser UI.
 
-Sprint 3: Standard Management - Attribute and Brand Modules
-Implemented attribute CRUD, AI governance preview/import, attr_recommend recommendations, versioned change logs, and brand CRUD with logo thumbnails.
-Backend starts at localhost:8000 and exposes Sprint 3 OpenAPI paths, including compatibility AI governance aliases.
-Verification: init.sh startup passed; unittest API suite passed; JS syntax checks passed. Bare pytest unavailable because pytest is not installed and package index access is blocked.
+Sprint 5: AI material addition and vector matching
+Status: SPRINT PASS before Sprint 7 work.
+Notes: AI preview/confirm and local similarity matching remain covered by regression tests.
 
-## Sprint 3 — 2026-05-11 19:XX
-Status: committed, pending Evaluator CHECK
-Notes: Attribute/Brand CRUD, AI governance, attribute recommendation, version control
+Sprint 6: Material application workflows
+Status: SPRINT PASS before Sprint 7 work.
+Notes: New category and new material code workflows remain covered by regression tests.
+
+Sprint 7: Material stop purchase and stop use workflows
+Status: implemented; git commit blocked by sandbox .git write denial.
+Notes: Added stop_purchase/stop_use application types, approvals/rejections, admin manual stop purchase, lifecycle history, UI forms, and API tests.
+Verification: unittest discover passed; frontend JS syntax passed; pytest unavailable in global shell and venv.
