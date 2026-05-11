@@ -1,58 +1,60 @@
-## Sprint 3: Standard Management - Attribute and Brand Modules
+## Sprint 4: Material Management Core
 
 ### Features
-- F04-Attribute Management with AI Governance (backend + frontend)
-- F04-AI attribute recommendation (capability: attr_recommend)
-- F04-Attribute version control and change logs
-- F05-Brand Management (backend + frontend with logo upload)
+- F07-Material CRUD (backend + frontend)
+- F07-AI material governance pipeline (capability: material_governance)
+- F19-Material state machine enforcement
+- Frontend: material list with status badges, search/filter
+- Excel import preview and batch confirmation UI
+
+### Material Model Fields
+A Material record contains:
+- `id` (integer, primary key)
+- `code` (string, auto-generated, e.g. `MAT-ABC12345`)
+- `name` (string, required, unique within a product-name scope)
+- `product_name_id` (integer, FK to product_name)
+- `material_library_id` (integer, FK to material_library)
+- `category_id` (integer, FK to category)
+- `unit` (string, e.g. "台", "个")
+- `brand_id` (integer, FK to brand, optional)
+- `status` (string, enum: `normal` (initial), `stop_purchase`, `stop_use`)
+- `description` (string, optional)
+- `attributes` (JSON object mapping attribute names to values, e.g. `{"打印速度": "30", "颜色模式": "彩色"}`)
+- `enabled` (boolean, default true)
+- `created_at`, `updated_at` (timestamps)
 
 ### Success criteria (black-box-verifiable)
-- [ ] Attributes can be created, displayed, searched, edited, and deleted for a selected product name from the browser UI.
+- [ ] A user can create, view, edit, search, filter, and delete materials from the browser UI, with status badges visible in the material list.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173/standard/product-names` in a browser and ensure a product name `Sprint 3 A4 彩色激光打印机` exists with unit `台` and a visible category binding.
-  2. Open `http://localhost:5173/standard/attributes`, select product name `Sprint 3 A4 彩色激光打印机`, and create attributes `打印速度` with type `number`, unit `页/分钟`, required enabled, and `颜色模式` with type `enum`, options `黑白, 彩色`, default `彩色`.
-  3. Assert the attribute list shows both attributes under `Sprint 3 A4 彩色激光打印机`, with generated immutable attribute codes, data types, required/default values, options, and product-name binding.
-  4. Search for `颜色` and assert `颜色模式` remains visible; search for `不存在的属性` and assert the created attributes are not shown.
-  5. Edit `打印速度` default value to `30`, refresh `http://localhost:5173/standard/attributes`, and assert the updated value persists.
-  6. Delete `颜色模式` and assert it no longer appears while `打印速度` remains visible.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Navigate to the material management area (a "Material" or "物料管理" nav link must be present). Create a material with: name (unique), material library selection, category/product-name binding, unit, brand (optional), and at least one attribute name-value pair.
+  3. Assert the created material appears in the list with an auto-generated material code (format `MAT-XXXXXXXX`) and a `normal` status badge.
+  4. Search by the unique material name and assert only the matching material remains visible.
+  5. Filter the list by `normal` status using a status filter control (dropdown or toggle) and assert the created material is still visible with the same status badge.
+  6. Edit the material description or attribute value, save, reopen the material detail, and assert the updated value is displayed.
+  7. Delete the material from the UI and assert it no longer appears when searching for the unique name.
 
-- [ ] Attribute AI governance import preview standardizes pasted or uploaded attribute rows without requiring external model credentials.
+- [ ] Material state transitions are enforced through externally visible workflow controls and invalid transitions are blocked.
   Evaluator steps:
-  1. Open `http://localhost:5173/standard/attributes/ai-governance` in a browser and enter or upload rows for product `Sprint 3 A4 彩色激光打印机` containing `速度/每分钟页数/数值`, `打印颜色/黑白彩色/枚举`, and `纸张尺寸/A4 A5/枚举`.
-  2. Run the AI governance analysis and assert the preview table shows standardized attribute names, normalized data types, generated attribute codes, option lists where applicable, source row references, and confidence values for each row.
-  3. Confirm the preview import, open `http://localhost:5173/standard/attributes`, select `Sprint 3 A4 彩色激光打印机`, and assert the imported attributes appear with their standardized types and options.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Create a new material through the material management UI and assert it is listed with `normal` status.
+  3. Attempt to move the `normal` material directly to `stop_use` from the UI and assert the action is disabled or an error message explains that stop use requires stop purchase first.
+  4. Move the material from `normal` to `stop_purchase`, providing an exemption or transition reason when prompted, and assert the list status badge changes to `stop_purchase`.
+  5. Move the same material from `stop_purchase` to `stop_use`, providing a reason when prompted, and assert the list status badge changes to `stop_use`.
+  6. Attempt to return the `stop_use` material to `normal` or `stop_purchase` and assert the UI blocks the action or displays a non-reversible state error.
 
-- [ ] AI attribute recommendation returns suggested attributes with sources and confidence through the product-facing UI.
+- [ ] Excel material governance import provides an AI preview, validates rows before write, and batch-confirms accepted materials.
   Evaluator steps:
-  1. Open `http://localhost:5173/standard/attribute-recommend` in a browser and select product name `Sprint 3 A4 彩色激光打印机`.
-  2. Run attribute recommendation and assert the result displays capability label `attr_recommend`, at least three recommended attributes, numeric confidence values, and source labels such as category common attributes, historical data, or standard references.
-  3. Accept at least one recommended attribute, open `http://localhost:5173/standard/attributes`, and assert the accepted attribute is persisted under `Sprint 3 A4 彩色激光打印机` with its recommendation source visible in the detail view or change log.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser.
+  2. Navigate to the material import or AI governance area at `http://localhost:5173` and upload an Excel file (.xlsx) or CSV file containing at least two materials: one valid row and one row with a missing required field.
+  3. Trigger AI material governance preview and assert the preview table shows proposed structured material fields, extracted attribute values, and row-level validation status.
+  4. Assert the invalid row is marked with a visible error and cannot be selected for batch confirmation.
+  5. Select the valid preview row, confirm batch import, and assert a success message reports one imported material.
+  6. Search the material list for the imported material name and assert it appears with an auto-generated material code, extracted attributes, and `normal` status.
 
-- [ ] Attribute version control records observable change history for every attribute update.
+- [ ] Material creation and AI governance actions are available through documented HTTP surfaces used by the browser, while the browser remains the primary verification surface.
   Evaluator steps:
-  1. Open `http://localhost:5173/standard/attributes`, select `Sprint 3 A4 彩色激光打印机`, open the detail view for attribute `打印速度`, and record the displayed current version.
-  2. Change `打印速度` type-compatible metadata by updating unit to `ppm`, default value to `35`, and description to `每分钟输出页数`, then save.
-  3. Open `http://localhost:5173/standard/attributes/changes` and assert a new change-log entry appears for `打印速度` with incremented version, operator, timestamp, changed fields, before values, and after values.
-  4. Refresh `http://localhost:5173/standard/attributes/changes` and assert the same version history remains visible.
-
-- [ ] Brands can be created, edited, searched, displayed with logo thumbnails, and deleted from the browser UI.
-  Evaluator steps:
-  1. Open `http://localhost:5173/standard/brands` in a browser and create a brand named `Sprint 3 联想` with description `办公设备品牌` and a logo image upload.
-  2. Assert the brand list displays `Sprint 3 联想`, an auto-generated immutable brand code, description, enabled status, and a visible logo thumbnail.
-  3. Search for `联想` and assert the created brand remains visible; search for `不存在的品牌` and assert the created brand is not shown.
-  4. Edit the description to `办公电脑与打印设备品牌`, upload a replacement logo image, refresh `http://localhost:5173/standard/brands`, and assert the description and logo thumbnail update while the brand code remains unchanged.
-  5. Delete `Sprint 3 联想` and assert it no longer appears in the brand list.
-
-- [ ] Sprint 3 backend contracts are observable through browser-executed HTTP requests.
-  Evaluator steps:
-  1. From a browser automation context, request `http://localhost:8000/openapi.json` and assert it includes paths for attribute CRUD, attribute governance preview/import, attribute recommendation, attribute version/change-log retrieval, and brand CRUD.
-  2. From the same context, send authenticated requests with `X-User-Role: super_admin` to create an attribute at `http://localhost:8000/api/v1/attributes`, update it at `http://localhost:8000/api/v1/attributes/{attribute_id}`, retrieve its changes at `http://localhost:8000/api/v1/attributes/{attribute_id}/changes`, and call `http://localhost:8000/api/v1/ai/attribute-recommend`.
-  3. Assert the API responses include generated immutable attribute codes, persisted product-name bindings, incremented version numbers, before/after change-log values, recommendation results with `capability` equal to `attr_recommend`, confidence scores, and source labels.
-  4. From the same context, create a brand at `http://localhost:8000/api/v1/brands`, update its logo metadata at `http://localhost:8000/api/v1/brands/{brand_id}`, and assert the responses include generated immutable brand code, name, description, logo metadata, and enabled status.
-
----
-CONTRACT APPROVED
-
-Sprint: 3
-Approved criteria: 6
-Notes: All criteria observable through browser verification mode. All have >= 4 test steps with full URLs. Scope matches Sprint 3 from planner-spec.json (F04 attribute management + AI governance, F04 attribute recommendation with attr_recommend capability, F04 version control, F05 brand management with logo upload).
+  1. Start the system with `bash init.sh`, then open `http://localhost:8000/openapi.json` in a browser.
+  2. Assert the OpenAPI document lists material CRUD endpoints under `/api/v1/materials`.
+  3. Assert the OpenAPI document lists an AI material governance preview or import endpoint (e.g., `/api/v1/materials/governance/preview` or `/api/v1/ai/material-governance/preview`) that exposes the `material_governance` capability in the response body.
+  4. Open `http://localhost:5173` in a browser and assert the material management UI can complete the same create and import preview flows without direct source-code access.
