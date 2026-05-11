@@ -149,3 +149,53 @@ class LLMProviderConfig(Base):
     connection_status: Mapped[str] = mapped_column(String(40), default="untested")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str] = mapped_column(String(80), default="system")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkflowApplication(Base):
+    __tablename__ = "workflow_applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    type: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(64), index=True)
+    applicant: Mapped[str] = mapped_column(String(120), default="material_manager", index=True)
+    current_node: Mapped[str] = mapped_column(String(80), default="")
+    business_reason: Mapped[str] = mapped_column(Text, default="")
+    rejection_reason: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    created_resource_type: Mapped[str] = mapped_column(String(40), default="")
+    created_resource_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    history: Mapped[list["WorkflowHistory"]] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="WorkflowHistory.id",
+    )
+
+
+class WorkflowHistory(Base):
+    __tablename__ = "workflow_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("workflow_applications.id"), index=True)
+    actor: Mapped[str] = mapped_column(String(120), default="")
+    node: Mapped[str] = mapped_column(String(80), default="")
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    from_status: Mapped[str] = mapped_column(String(64), default="")
+    to_status: Mapped[str] = mapped_column(String(64), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    application: Mapped[WorkflowApplication] = relationship(back_populates="history")
