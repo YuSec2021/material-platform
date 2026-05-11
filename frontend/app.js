@@ -12,6 +12,8 @@ let materialPreviewItems = [];
 let materialGovernanceFile = null;
 let aiMaterialPreview = null;
 let workflowReferenceImages = [];
+const STOP_PURCHASE_REASONS = ["供应商停产", "质量风险停采", "战略替代物料", "采购目录清理"];
+const STOP_USE_REASONS = ["长期无库存且无业务需求", "安全合规风险", "技术标准淘汰", "资产归档完成"];
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;",
@@ -120,6 +122,31 @@ function statusBadge(status) {
   return `<span class="status-badge status-${esc(status)}">${labels[status] || esc(status)}</span>`;
 }
 
+function visibleAttributes(attributes = {}) {
+  return Object.entries(attributes).filter(([key]) => !String(key).startsWith("_"));
+}
+
+function materialLifecycleHistory(material) {
+  const history = material.lifecycle_history || material.attributes?._lifecycle_history || [];
+  if (!history.length) return `<div class="empty">No lifecycle history yet</div>`;
+  return `
+    <table>
+      <thead><tr><th>Time</th><th>Transition</th><th>Source</th><th>Reason</th><th>Application</th></tr></thead>
+      <tbody>
+        ${history.map((event) => `
+          <tr>
+            <td>${esc(event.created_at || "")}</td>
+            <td>${esc(event.from_status)} -> ${esc(event.to_status)}</td>
+            <td>${esc(event.source || "")}</td>
+            <td>${esc(event.reason || "")}</td>
+            <td>${esc(event.application_no || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 async function renderMaterials() {
   await loadMaterialContext();
   const search = document.getElementById("materialSearch")?.value || "";
@@ -176,7 +203,13 @@ async function renderMaterials() {
   document.querySelectorAll("[data-detail-material]").forEach((button) => button.addEventListener("click", () => showMaterialDetail(button.dataset.detailMaterial)));
   document.querySelectorAll("[data-edit-material]").forEach((button) => button.addEventListener("click", () => editMaterial(button.dataset.editMaterial)));
   document.querySelectorAll("[data-delete-material]").forEach((button) => button.addEventListener("click", () => deleteMaterial(button.dataset.deleteMaterial)));
-  document.querySelectorAll("[data-transition-material]").forEach((button) => button.addEventListener("click", () => transitionMaterial(button.dataset.transitionMaterial, button.dataset.targetStatus)));
+  document.querySelectorAll("[data-apply-stop-purchase]").forEach((button) => button.addEventListener("click", () => {
+    window.location.href = `/workflows/stop-purchase?material_id=${button.dataset.applyStopPurchase}`;
+  }));
+  document.querySelectorAll("[data-apply-stop-use]").forEach((button) => button.addEventListener("click", () => {
+    window.location.href = `/workflows/stop-use?material_id=${button.dataset.applyStopUse}`;
+  }));
+  document.querySelectorAll("[data-manual-stop-purchase]").forEach((button) => button.addEventListener("click", () => manualStopPurchase(button.dataset.manualStopPurchase)));
   window.currentMaterials = materials;
 }
 
@@ -193,7 +226,7 @@ function materialTable(materials) {
             <td>${esc(material.material_library)}<div class="muted">${esc(material.category)} / ${esc(material.product_name)}</div></td>
             <td>${esc(material.brand || "No brand")}</td>
             <td>${statusBadge(material.status)}</td>
-            <td>${Object.entries(material.attributes || {}).map(([key, value]) => `<span class="pill">${esc(key)}: ${esc(value)}</span>`).join("")}</td>
+            <td>${visibleAttributes(material.attributes || {}).map(([key, value]) => `<span class="pill">${esc(key)}: ${esc(value)}</span>`).join("")}</td>
             <td class="actions">
               <button class="secondary" data-detail-material="${material.id}">Detail</button>
               <button class="secondary" data-edit-material="${material.id}">Edit</button>
@@ -210,12 +243,13 @@ function materialTable(materials) {
 function transitionButtons(material) {
   if (material.status === "normal") {
     return `
-      <button class="secondary" data-transition-material="${material.id}" data-target-status="stop_purchase">Stop Purchase</button>
+      <button class="secondary" data-apply-stop-purchase="${material.id}">Stop Purchase Apply</button>
+      <button class="secondary" data-manual-stop-purchase="${material.id}">Admin Stop Purchase</button>
       <button class="secondary" disabled title="stop_use requires stop_purchase first">Stop Use</button>
     `;
   }
   if (material.status === "stop_purchase") {
-    return `<button class="secondary" data-transition-material="${material.id}" data-target-status="stop_use">Stop Use</button><button class="secondary" disabled title="Status is non-reversible">Return Normal</button>`;
+    return `<button class="secondary" data-apply-stop-use="${material.id}">Stop Use Apply</button><button class="secondary" disabled title="Status is non-reversible">Return Normal</button>`;
   }
   return `<button class="secondary" disabled title="stop_use is final and non-reversible">Final</button><button class="secondary" disabled title="Status is non-reversible">Return Normal</button>`;
 }
@@ -271,27 +305,42 @@ function resetMaterialForm() {
   document.getElementById("materialEnabled").checked = true;
 }
 
-function showMaterialDetail(id) {
-  const material = (window.currentMaterials || []).find((item) => String(item.id) === String(id));
+async function showMaterialDetail(id) {
+  let material = (window.currentMaterials || []).find((item) => String(item.id) === String(id));
+  material = await request(`/materials/${id}`).catch(() => material);
   if (!material) return;
+  const applications = await request(`/workflows/applications?material_id=${id}`).catch(() => []);
   document.getElementById("materialDetail").innerHTML = `
     <h3>Material detail: ${esc(material.name)}</h3>
     <p><strong>Code:</strong> ${esc(material.code)} ${statusBadge(material.status)}</p>
     <p><strong>Binding:</strong> ${esc(material.material_library)} / ${esc(material.category)} / ${esc(material.product_name)}</p>
     <p><strong>Description:</strong> ${esc(material.description)}</p>
-    <pre>${esc(JSON.stringify(material.attributes, null, 2))}</pre>
+    <div class="toolbar">${transitionButtons(material)}</div>
+    <h3>Lifecycle history</h3>
+    ${materialLifecycleHistory(material)}
+    <h3>Linked stop applications</h3>
+    ${applications.length ? workflowTable(applications, false) : `<div class="empty">No linked stop applications</div>`}
+    <pre>${esc(JSON.stringify(Object.fromEntries(visibleAttributes(material.attributes || {})), null, 2))}</pre>
   `;
+  document.querySelectorAll("#materialDetail [data-apply-stop-purchase]").forEach((button) => button.addEventListener("click", () => {
+    window.location.href = `/workflows/stop-purchase?material_id=${button.dataset.applyStopPurchase}`;
+  }));
+  document.querySelectorAll("#materialDetail [data-apply-stop-use]").forEach((button) => button.addEventListener("click", () => {
+    window.location.href = `/workflows/stop-use?material_id=${button.dataset.applyStopUse}`;
+  }));
+  document.querySelectorAll("#materialDetail [data-manual-stop-purchase]").forEach((button) => button.addEventListener("click", () => manualStopPurchase(button.dataset.manualStopPurchase)));
+  bindWorkflowActions("materialDetail", () => showMaterialDetail(id));
 }
 
-async function transitionMaterial(id, targetStatus) {
-  const reason = window.prompt(`Reason for ${targetStatus}`) || "";
+async function manualStopPurchase(id) {
+  const reason = window.prompt("Exemption reason for admin manual stop purchase") || "";
   if (!reason.trim()) {
-    document.getElementById("materialStatus").textContent = "Transition reason is required";
+    document.getElementById("materialStatus").textContent = "Exemption reason is required";
     return;
   }
   try {
-    await request(`/materials/${id}/transition`, { method: "POST", body: JSON.stringify({ target_status: targetStatus, reason }) });
-    document.getElementById("materialStatus").textContent = `Material moved to ${targetStatus}`;
+    await request(`/materials/${id}/stop-purchase`, { method: "PATCH", body: JSON.stringify({ reason, actor: "super_admin" }) });
+    document.getElementById("materialStatus").textContent = "Material moved to stop_purchase by admin manual override";
     renderMaterials();
   } catch (error) {
     document.getElementById("materialStatus").textContent = error.message;
@@ -1053,22 +1102,134 @@ async function submitMaterialCodeWorkflow() {
   }
 }
 
+function reasonSelect(id, reasons, label) {
+  return `<label>${label}
+    <select id="${id}" required>
+      ${reasons.map((reason) => `<option value="${esc(reason)}">${esc(reason)}</option>`).join("")}
+    </select>
+  </label>`;
+}
+
+function stopMaterialOptions(materials, eligibleStatus, selectedId) {
+  return materials.map((material) => {
+    const eligible = material.status === eligibleStatus;
+    const selected = String(material.id) === String(selectedId);
+    const label = `${material.name} / ${material.code} / ${material.status}`;
+    return `<option value="${material.id}" ${selected && eligible ? "selected" : ""} ${eligible ? "" : "disabled"}>${esc(label)}</option>`;
+  }).join("");
+}
+
+async function renderStopPurchaseWorkflow() {
+  await loadMaterialContext();
+  const selectedId = new URLSearchParams(window.location.search).get("material_id") || "";
+  const materials = await request("/materials");
+  app.innerHTML = `
+    <h2>Stop Purchase Application</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <label>Target normal material
+          <select id="stopPurchaseMaterial">${stopMaterialOptions(materials, "normal", selectedId)}</select>
+        </label>
+        ${reasonSelect("stopPurchaseReason", STOP_PURCHASE_REASONS, "Stop-purchase reason")}
+        <label>Business justification<textarea id="stopPurchaseBusinessReason" placeholder="Describe the evidence and business impact"></textarea></label>
+        <button id="submitStopPurchaseWorkflow">Submit stop purchase application</button>
+        <div id="stopPurchaseWorkflowStatus" class="status muted"></div>
+      </section>
+      <section id="stopPurchaseWorkflowDetail"><div class="empty">Submitted workflow status will appear here</div></section>
+    </div>
+  `;
+  document.getElementById("submitStopPurchaseWorkflow").addEventListener("click", submitStopPurchaseWorkflow);
+}
+
+async function submitStopPurchaseWorkflow() {
+  const status = document.getElementById("stopPurchaseWorkflowStatus");
+  const reason = document.getElementById("stopPurchaseReason").value;
+  const payload = {
+    type: "stop_purchase",
+    applicant: "material_manager",
+    material_id: Number(document.getElementById("stopPurchaseMaterial").value),
+    reason_code: reason,
+    reason,
+    business_reason: document.getElementById("stopPurchaseBusinessReason").value.trim()
+  };
+  try {
+    const application = await request("/workflows/applications", { method: "POST", body: JSON.stringify(payload) });
+    status.textContent = `Submitted ${application.application_no}`;
+    document.getElementById("stopPurchaseWorkflowDetail").innerHTML = workflowDetail(application);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function renderStopUseWorkflow() {
+  await loadMaterialContext();
+  const selectedId = new URLSearchParams(window.location.search).get("material_id") || "";
+  const materials = await request("/materials");
+  app.innerHTML = `
+    <h2>Stop Use Application</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <label>Target stop_purchase material
+          <select id="stopUseMaterial">${stopMaterialOptions(materials, "stop_purchase", selectedId)}</select>
+        </label>
+        ${reasonSelect("stopUseReason", STOP_USE_REASONS, "Stop-use reason")}
+        <label>Business justification<textarea id="stopUseBusinessReason" placeholder="Stop use requires prior stop_purchase and cannot be reverted"></textarea></label>
+        <label><span><input id="stopUseAcknowledge" type="checkbox" /> I acknowledge stop_use is terminal and non-reversible</span></label>
+        <button id="submitStopUseWorkflow">Submit stop use application</button>
+        <div id="stopUseWorkflowStatus" class="status muted">Normal materials are disabled because stop use requires prior stop_purchase.</div>
+      </section>
+      <section id="stopUseWorkflowDetail"><div class="empty">Submitted workflow status will appear here</div></section>
+    </div>
+  `;
+  document.getElementById("submitStopUseWorkflow").addEventListener("click", submitStopUseWorkflow);
+}
+
+async function submitStopUseWorkflow() {
+  const status = document.getElementById("stopUseWorkflowStatus");
+  if (!document.getElementById("stopUseAcknowledge").checked) {
+    status.textContent = "Acknowledge that stop_use is terminal before submitting";
+    return;
+  }
+  const reason = document.getElementById("stopUseReason").value;
+  const payload = {
+    type: "stop_use",
+    applicant: "material_manager",
+    material_id: Number(document.getElementById("stopUseMaterial").value),
+    reason_code: reason,
+    reason,
+    acknowledge_terminal: true,
+    business_reason: document.getElementById("stopUseBusinessReason").value.trim()
+  };
+  try {
+    const application = await request("/workflows/applications", { method: "POST", body: JSON.stringify(payload) });
+    status.textContent = `Submitted ${application.application_no}`;
+    document.getElementById("stopUseWorkflowDetail").innerHTML = workflowDetail(application);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
 function workflowTable(applications, taskMode = false) {
   if (!applications.length) return `<div class="empty">No workflow applications found</div>`;
   return `
     <table>
-      <thead><tr><th>Application</th><th>Type</th><th>Status</th><th>Current node</th><th>Submitted data</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Application</th><th>Type</th><th>Status</th><th>Current node</th><th>Material / reason</th><th>Actions</th></tr></thead>
       <tbody>
         ${applications.map((application) => {
           const data = application.data || {};
           const title = data.proposed_category_name || data.material_name || application.application_no;
+          const submitted = data.material_name
+            ? `${data.material_name} / ${data.reason || data.category_path_preview || ""}`
+            : data.reference_mall_link
+              ? "reference mall link"
+              : data.category_path_preview || "";
           return `
             <tr>
               <td>${esc(application.application_no)}<div class="muted">${esc(title)}</div></td>
               <td>${esc(application.type)}</td>
               <td>${workflowStatusBadge(application.status)}${application.rejection_reason ? `<div class="invalid">${esc(application.rejection_reason)}</div>` : ""}</td>
               <td>${esc(application.current_node)}</td>
-              <td>${data.reference_mall_link ? `<a href="${esc(data.reference_mall_link)}" target="_blank" rel="noreferrer">reference mall link</a>` : esc(data.category_path_preview || "")}</td>
+              <td>${data.reference_mall_link ? `<a href="${esc(data.reference_mall_link)}" target="_blank" rel="noreferrer">${esc(submitted)}</a>` : esc(submitted)}</td>
               <td class="actions">
                 <button class="secondary" data-workflow-detail="${application.id}">Detail</button>
                 ${taskMode ? `<button data-workflow-approve="${application.id}" data-node="${esc(application.current_node)}">Approve</button><button class="danger" data-workflow-reject="${application.id}" data-node="${esc(application.current_node)}">Reject</button>` : ""}
@@ -1145,6 +1306,8 @@ async function route() {
     if (path.includes("/system/config")) return renderSystemConfig();
     if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();
     if (path.includes("/workflows/new-material-code")) return renderNewMaterialCodeWorkflow();
+    if (path.includes("/workflows/stop-purchase")) return renderStopPurchaseWorkflow();
+    if (path.includes("/workflows/stop-use")) return renderStopUseWorkflow();
     if (path.includes("/workflows/tasks")) return renderWorkflowTasks();
     if (path.includes("/workflows/applications")) return renderWorkflowApplications();
     if (path.includes("/categories")) return renderCategories();

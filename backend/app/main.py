@@ -51,6 +51,7 @@ from .schemas import (
     MaterialOut,
     MaterialTransitionIn,
     MaterialUpdate,
+    ManualStopPurchaseIn,
     ProductNameOut,
     ProviderConfigIn,
     ProviderConfigOut,
@@ -91,7 +92,7 @@ MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
 MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
 AI_CAPABILITIES = {"material_add", "material_match"}
 APPROVAL_MODES = {"simple", "multi_node"}
-APPLICATION_TYPES = {"new_category", "new_material_code"}
+APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop_use"}
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
 DEFAULT_PROVIDER = {
     "provider": "mock",
@@ -354,6 +355,10 @@ def material_attributes(value: str | dict[str, Any] | None) -> dict[str, Any]:
 
 
 def material_to_out(material: Material) -> MaterialOut:
+    attributes = material_attributes(material.attributes)
+    lifecycle_history = attributes.get("_lifecycle_history", [])
+    if not isinstance(lifecycle_history, list):
+        lifecycle_history = []
     return MaterialOut(
         id=material.id,
         code=material.code,
@@ -369,7 +374,8 @@ def material_to_out(material: Material) -> MaterialOut:
         brand=material.brand.name if material.brand else "",
         status=material.status,
         description=material.description,
-        attributes=material_attributes(material.attributes),
+        attributes=attributes,
+        lifecycle_history=lifecycle_history,
         enabled=material.enabled,
         created_at=material.created_at.isoformat(),
         updated_at=material.updated_at.isoformat(),
@@ -486,16 +492,99 @@ def normalize_reference_images(images: list[dict[str, Any] | str]) -> list[dict[
     return normalized
 
 
+def material_summary(material: Material) -> dict[str, Any]:
+    return {
+        "material_id": material.id,
+        "material_code": material.code,
+        "material_name": material.name,
+        "material_library_id": material.material_library_id,
+        "material_library": material.material_library.name,
+        "category_id": material.category_id,
+        "category": material.category.name,
+        "product_name_id": material.product_name_id,
+        "product_name": material.product_name.name,
+        "current_material_status": material.status,
+    }
+
+
+def required_stop_reason(payload: WorkflowApplicationIn) -> tuple[str, str]:
+    reason = (payload.reason or payload.reason_code or "").strip()
+    reason_code = (payload.reason_code or reason).strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A stop workflow reason option is required")
+    return reason_code, reason
+
+
+def record_material_lifecycle(
+    material: Material,
+    from_status: str,
+    to_status: str,
+    reason: str,
+    source: str,
+    actor: str,
+    application_no: str = "",
+) -> None:
+    attrs = material_attributes(material.attributes)
+    history = attrs.get("_lifecycle_history")
+    if not isinstance(history, list):
+        history = []
+    history.append(
+        {
+            "from_status": from_status,
+            "to_status": to_status,
+            "reason": reason,
+            "source": source,
+            "actor": actor,
+            "application_no": application_no,
+            "created_at": now().isoformat(),
+        }
+    )
+    attrs["_lifecycle_history"] = history
+    material.attributes = json.dumps(attrs, ensure_ascii=False)
+
+
+def build_stop_workflow_payload(payload: WorkflowApplicationIn, db: Session) -> dict[str, Any]:
+    if payload.material_id is None:
+        raise HTTPException(status_code=422, detail="Target material is required")
+    material = db.get(Material, payload.material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    reason_code, reason = required_stop_reason(payload)
+    if payload.type == "stop_purchase":
+        if material.status != "normal":
+            raise HTTPException(status_code=409, detail="Stop purchase requires a material in normal status")
+        target_status = "stop_purchase"
+    elif payload.type == "stop_use":
+        if material.status != "stop_purchase":
+            raise HTTPException(status_code=409, detail="Stop use requires prior stop_purchase status")
+        target_status = "stop_use"
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported stop workflow application type")
+    data = material_summary(material)
+    data.update(
+        {
+            "reason_code": reason_code,
+            "reason": reason,
+            "business_reason": payload.business_reason,
+            "from_status": material.status,
+            "target_status": target_status,
+            "irreversible": payload.type == "stop_use",
+            "acknowledge_terminal": payload.acknowledge_terminal,
+        }
+    )
+    return data
+
+
 def build_workflow_payload(payload: WorkflowApplicationIn, db: Session) -> dict[str, Any]:
     if payload.type not in APPLICATION_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported workflow application type")
     if not payload.business_reason.strip():
         raise HTTPException(status_code=422, detail="Business reason is required")
-    library = db.get(MaterialLibrary, payload.material_library_id) if payload.material_library_id else None
-    if not library:
-        raise HTTPException(status_code=404, detail="Material library not found")
 
     if payload.type == "new_category":
+        library = db.get(MaterialLibrary, payload.material_library_id) if payload.material_library_id else None
+        if not library:
+            raise HTTPException(status_code=404, detail="Material library not found")
         name = (payload.proposed_category_name or "").strip()
         if not name:
             raise HTTPException(status_code=422, detail="Proposed category name is required")
@@ -514,6 +603,9 @@ def build_workflow_payload(payload: WorkflowApplicationIn, db: Session) -> dict[
             "description": payload.description,
             "business_reason": payload.business_reason,
         }
+
+    if payload.type in {"stop_purchase", "stop_use"}:
+        return build_stop_workflow_payload(payload, db)
 
     product, material_library, category = material_context_by_payload(
         db,
@@ -579,6 +671,37 @@ def complete_workflow_application(application: WorkflowApplication, db: Session)
             db.flush()
         application.created_resource_type = "category"
         application.created_resource_id = category.id
+        return
+
+    if application.type in {"stop_purchase", "stop_use"}:
+        material = db.get(Material, int(data.get("material_id") or 0))
+        if not material:
+            raise HTTPException(status_code=404, detail="Material not found")
+        expected_from = "normal" if application.type == "stop_purchase" else "stop_purchase"
+        target_status = "stop_purchase" if application.type == "stop_purchase" else "stop_use"
+        if material.status != expected_from:
+            detail = (
+                "Stop purchase requires a material in normal status"
+                if application.type == "stop_purchase"
+                else "Stop use requires prior stop_purchase status"
+            )
+            raise HTTPException(status_code=409, detail=detail)
+        material.status = target_status
+        material.updated_at = now()
+        record_material_lifecycle(
+            material,
+            expected_from,
+            target_status,
+            str(data.get("reason") or data.get("business_reason") or ""),
+            "workflow",
+            application.current_node,
+            application.application_no,
+        )
+        data["current_material_status"] = target_status
+        data["approved_at"] = material.updated_at.isoformat()
+        application.payload = json.dumps(data, ensure_ascii=False)
+        application.created_resource_type = "material"
+        application.created_resource_id = material.id
         return
 
     product, library, category = material_context_by_payload(
@@ -1235,6 +1358,7 @@ def list_workflow_applications(
     applicant: str = "",
     status: str = "",
     type: str = "",
+    material_id: int | None = None,
     db: Session = Depends(get_db),
 ) -> list[WorkflowApplicationOut]:
     query = db.query(WorkflowApplication)
@@ -1245,6 +1369,12 @@ def list_workflow_applications(
     if type:
         query = query.filter(WorkflowApplication.type == type)
     applications = query.order_by(WorkflowApplication.id.desc()).all()
+    if material_id is not None:
+        applications = [
+            application
+            for application in applications
+            if int(workflow_payload(application.payload).get("material_id") or 0) == material_id
+        ]
     return [workflow_to_out(application) for application in applications]
 
 
@@ -1288,6 +1418,18 @@ def submit_new_category_application(payload: WorkflowApplicationIn, db: Session 
 @app.post("/api/v1/workflows/applications/new-material-code", response_model=WorkflowApplicationOut)
 def submit_new_material_code_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
     payload.type = "new_material_code"
+    return submit_workflow_application(payload, db)
+
+
+@app.post("/api/v1/workflows/applications/stop-purchase", response_model=WorkflowApplicationOut)
+def submit_stop_purchase_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    payload.type = "stop_purchase"
+    return submit_workflow_application(payload, db)
+
+
+@app.post("/api/v1/workflows/applications/stop-use", response_model=WorkflowApplicationOut)
+def submit_stop_use_application(payload: WorkflowApplicationIn, db: Session = Depends(get_db)) -> WorkflowApplicationOut:
+    payload.type = "stop_use"
     return submit_workflow_application(payload, db)
 
 
@@ -1728,11 +1870,85 @@ def update_material(material_id: int, payload: MaterialUpdate, db: Session = Dep
             raise HTTPException(status_code=404, detail="Brand not found")
         material.brand_id = brand.id if brand else None
     if payload.attributes is not None:
-        material.attributes = json.dumps(payload.attributes, ensure_ascii=False)
+        existing_history = material_attributes(material.attributes).get("_lifecycle_history")
+        attributes = dict(payload.attributes)
+        if existing_history and "_lifecycle_history" not in attributes:
+            attributes["_lifecycle_history"] = existing_history
+        material.attributes = json.dumps(attributes, ensure_ascii=False)
     if payload.status is not None:
         enforce_material_transition(material.status, payload.status, payload.transition_reason)
+        if material.status != payload.status:
+            record_material_lifecycle(
+                material,
+                material.status,
+                payload.status,
+                payload.transition_reason or "",
+                "manual",
+                "super_admin",
+            )
         material.status = payload.status
     material.updated_at = now()
+    db.commit()
+    db.refresh(material)
+    return material_to_out(material)
+
+
+@app.get("/api/v1/materials/{material_id}", response_model=MaterialOut)
+def get_material(material_id: int, db: Session = Depends(get_db)) -> MaterialOut:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    return material_to_out(material)
+
+
+@app.patch("/api/v1/materials/{material_id}/stop-purchase", response_model=MaterialOut)
+def admin_stop_purchase_material(
+    material_id: int,
+    payload: ManualStopPurchaseIn,
+    db: Session = Depends(get_db),
+) -> MaterialOut:
+    material = db.get(Material, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="An exemption reason is required for manual stop purchase")
+    if material.status != "normal":
+        raise HTTPException(status_code=409, detail="Manual stop purchase requires a material in normal status")
+    actor = payload.actor.strip() or "super_admin"
+    application = WorkflowApplication(
+        application_no=application_no(f"manual-stop-purchase:{material.id}:{actor}:{now().isoformat()}"),
+        type="stop_purchase",
+        status="approved",
+        applicant=actor,
+        current_node="approved",
+        business_reason=reason,
+        payload=json.dumps(
+            {
+                **material_summary(material),
+                "reason_code": reason,
+                "reason": reason,
+                "business_reason": reason,
+                "from_status": "normal",
+                "target_status": "stop_purchase",
+                "source": "admin_manual",
+                "exemption_reason": reason,
+            },
+            ensure_ascii=False,
+        ),
+        created_resource_type="material",
+        created_resource_id=material.id,
+    )
+    db.add(application)
+    db.flush()
+    add_workflow_history(application, "manual_stop_purchase", actor, "super_admin", "normal", "stop_purchase", reason)
+    material.status = "stop_purchase"
+    material.updated_at = now()
+    record_material_lifecycle(material, "normal", "stop_purchase", reason, "admin_manual", actor, application.application_no)
+    data = workflow_payload(application.payload)
+    data["current_material_status"] = "stop_purchase"
+    data["approved_at"] = material.updated_at.isoformat()
+    application.payload = json.dumps(data, ensure_ascii=False)
     db.commit()
     db.refresh(material)
     return material_to_out(material)
@@ -1748,6 +1964,8 @@ def transition_material(
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
     enforce_material_transition(material.status, payload.target_status, payload.reason)
+    if material.status != payload.target_status:
+        record_material_lifecycle(material, material.status, payload.target_status, payload.reason, "manual", "super_admin")
     material.status = payload.target_status
     material.updated_at = now()
     db.commit()
