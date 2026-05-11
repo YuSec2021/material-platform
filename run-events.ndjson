@@ -1,3 +1,4 @@
 {"ts": "2026-04-20T01:48:17+08:00", "event": "planner_requested", "mode": "planning", "current_sprint": 0}
 {"ts": "2026-05-11T20:31:03+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 3}
 {"ts": "2026-05-11T20:32:22+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 3}
+{"ts": "2026-05-11T20:33:36+08:00", "event": "orchestrator_paused", "mode": "paused", "current_sprint": 2}
