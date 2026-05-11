@@ -50,7 +50,7 @@ fi
 #             eval-result for the sprint being "advanced past".
 if echo "$COMMIT_SUBJECT" | grep -qiE 'sprint[[:space:]-]*[0-9]+[[:space:]]+complete|advance to sprint|mark(ed)? .* pass'; then
     echo "harness-pre-commit: detected a sprint-advance chore commit; running audit…"
-    if ! python3 scripts/orchestrate.py --project-dir . --json > /tmp/harness-audit.$$.json 2>&1; then
+    if ! python3 scripts/orchestrate.py --project-dir . --check-only --json > /tmp/harness-audit.$$.json 2>&1; then
         :  # orchestrator prints its own diagnostics; fall through to check
     fi
     if python3 -c "
@@ -64,7 +64,7 @@ sys.exit(0 if d.get('rule') != 'sprint_history_inconsistent' else 1)
         echo "  ✗ blocked by harness-pre-commit (sprint_history_inconsistent)."
         echo "    A sprint-advance commit requires every earlier sprint to have"
         echo "    eval-result-{N}.md containing 'SPRINT PASS'."
-        echo "    See 'python3 scripts/orchestrate.py --json' for details."
+        echo "    See 'python3 scripts/orchestrate.py --check-only --json' for details."
         echo "    Emergency bypass: HARNESS_BYPASS=1 git commit ..."
         audit_log commit_blocked \
           "$(python3 -c 'import json,sys; print(json.dumps({"rule": "sprint_history_inconsistent", "subject": sys.argv[1]}))' "$COMMIT_SUBJECT")"

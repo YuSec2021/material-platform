@@ -19,6 +19,16 @@ def run_orchestrator(project_dir: Path, *extra: str) -> subprocess.CompletedProc
     )
 
 
+def run_git(project_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(project_dir),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -94,6 +104,38 @@ def test_pauses_when_change_request_type_is_invalid(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert payload["rule"] == "change_request_invalid"
     assert payload["action"] == "pause_for_human"
+
+
+def test_needs_human_hard_stops_before_any_routing(tmp_path: Path) -> None:
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "bug-report.md").write_text("# Bug\n\nActual: broken\n", encoding="utf-8")
+    write_json(
+        tmp_path / "run-state.json",
+        {
+            "mode": "paused",
+            "current_sprint": 1,
+            "retry_count": 0,
+            "last_successful_sprint": 0,
+            "last_failure_reason": "manual review required",
+            "needs_human": True,
+            "active_branch": "",
+            "base_branch": "",
+            "last_run_at": "",
+            "request_kind": "",
+        },
+    )
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    run_state = json.loads((tmp_path / "run-state.json").read_text(encoding="utf-8"))
+
+    assert result.returncode == 2
+    assert payload["rule"] == "needs_human_set"
+    assert payload["action"] == "pause_for_human"
+    assert payload["needs_human"] is True
+    assert run_state["needs_human"] is True
+    assert run_state["mode"] == "paused"
+    assert run_state["last_failure_reason"] == "manual review required"
 
 
 def test_codex_command_uses_modern_exec_when_version_is_new(monkeypatch) -> None:
@@ -285,6 +327,33 @@ def test_writes_sprint_fence_before_implementation(tmp_path: Path) -> None:
     assert "started_at" in fence
 
 
+def test_implementation_routes_on_dedicated_sprint_branch(tmp_path: Path) -> None:
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+    assert run_git(tmp_path, "init", "-b", "main").returncode == 0
+    assert run_git(tmp_path, "add", ".").returncode == 0
+    commit = run_git(
+        tmp_path,
+        "-c", "user.name=Test",
+        "-c", "user.email=test@example.com",
+        "commit", "-m", "initial",
+    )
+    assert commit.returncode == 0, commit.stderr
+
+    result = run_orchestrator(tmp_path, "--json")
+    payload = json.loads(result.stdout)
+    run_state = json.loads((tmp_path / "run-state.json").read_text(encoding="utf-8"))
+    branch = run_git(tmp_path, "branch", "--show-current").stdout.strip()
+
+    assert payload["action"] == "invoke_codex_for_implementation"
+    assert branch == "codex/sprint-1-sprint-one"
+    assert run_state["active_branch"] == "codex/sprint-1-sprint-one"
+    assert run_state["base_branch"] == "main"
+    assert (tmp_path / "sprint-fence.json").exists()
+
+
 def test_implementation_prompt_includes_stop_instruction(tmp_path: Path) -> None:
     """The Codex prompt must explicitly tell it to stop after eval-trigger.txt."""
     write_spec(tmp_path / "planner-spec.json")
@@ -298,6 +367,29 @@ def test_implementation_prompt_includes_stop_instruction(tmp_path: Path) -> None
     command = payload["command"] or ""
     assert "STOP" in command, "Implementation prompt must include explicit STOP instruction"
     assert "ONLY" in command, "Implementation prompt must say 'Sprint N ONLY'"
+
+
+def test_check_only_does_not_write_state_logs_or_fence(tmp_path: Path) -> None:
+    write_spec(tmp_path / "planner-spec.json")
+    (tmp_path / "sprint-contract.md").write_text(
+        "## Sprint 1\nCONTRACT APPROVED\n", encoding="utf-8"
+    )
+
+    result = run_orchestrator(tmp_path, "--check-only", "--json")
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert payload["action"] == "invoke_codex_for_implementation"
+    assert not (tmp_path / "run-state.json").exists()
+    assert not (tmp_path / "orchestrator-log.ndjson").exists()
+    assert not (tmp_path / "run-events.ndjson").exists()
+    assert not (tmp_path / "harness-audit.ndjson").exists()
+    assert not (tmp_path / "sprint-fence.json").exists()
+
+
+def test_pre_commit_uses_read_only_orchestrator_check() -> None:
+    hook = (ROOT / ".githooks" / "pre-commit").read_text(encoding="utf-8")
+    assert "scripts/orchestrate.py --project-dir . --check-only --json" in hook
 
 
 # --- retry → evaluator handoff ------------------------------------------------
