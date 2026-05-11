@@ -119,6 +119,18 @@ class MaterialLibraryOut(BaseModel):
     enabled: bool
 
 
+class MaterialLibraryIn(BaseModel):
+    name: str
+    description: str = ""
+    enabled: bool = True
+
+
+class MaterialLibraryUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
 class CategoryOut(BaseModel):
     id: int
     code: str
@@ -430,3 +442,17 @@ class RolePermissionsOut(BaseModel):
     role_name: str
     permissions: list[PermissionEntry]
     catalog: list[PermissionEntry]
+
+
+class AuthLoginIn(BaseModel):
+    username: str
+
+
+class AuthUserOut(BaseModel):
+    id: int | None
+    username: str
+    display_name: str
+    is_super_admin: bool
+    permissions: list[str] = Field(default_factory=list)
+    material_library_scope_ids: list[int] | None = None
+    roles: list[RoleSummaryOut] = Field(default_factory=list)
