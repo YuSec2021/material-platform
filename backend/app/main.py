@@ -21,11 +21,15 @@ from .models import (
     AttributeChange,
     Brand,
     Category,
+    FeaturePermission,
     LLMProviderConfig,
     Material,
     MaterialLibrary,
     ProductName,
+    Role,
+    RoleUser,
     SystemConfig,
+    User,
     WorkflowApplication,
     WorkflowHistory,
 )
@@ -56,8 +60,21 @@ from .schemas import (
     ProviderConfigIn,
     ProviderConfigOut,
     RecommendIn,
+    PermissionEntry,
+    PasswordResetOut,
+    RoleIn,
+    RoleOut,
+    RolePermissionsIn,
+    RolePermissionsOut,
+    RoleUpdate,
+    RoleUserBindingIn,
+    RoleUserReplaceIn,
     SystemConfigIn,
     SystemConfigOut,
+    UserIn,
+    UserOut,
+    UserSummaryOut,
+    UserUpdate,
     WorkflowActionIn,
     WorkflowApplicationIn,
     WorkflowApplicationOut,
@@ -94,6 +111,8 @@ AI_CAPABILITIES = {"material_add", "material_match"}
 APPROVAL_MODES = {"simple", "multi_node"}
 APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop_use"}
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
+USER_STATUSES = {"active", "disabled"}
+ACCOUNT_OWNERSHIPS = {"HCM", "local"}
 DEFAULT_PROVIDER = {
     "provider": "mock",
     "model": "mock-material-governance-v1",
@@ -101,6 +120,42 @@ DEFAULT_PROVIDER = {
     "capabilities": ["material_add", "material_match"],
 }
 KNOWN_BRANDS = ["华为", "Huawei", "HUAWEI", "联想", "Lenovo", "惠普", "HP", "戴尔", "Dell", "治理测试品牌"]
+HCM_SEED_USERS = [
+    {
+        "username": "hcm_zhangsan",
+        "display_name": "张三",
+        "hcm_id": "HCM-1001",
+        "unit": "华东事业部",
+        "department": "采购管理部",
+        "team": "标准化一组",
+        "email": "zhangsan@example.com",
+    },
+    {
+        "username": "hcm_lisi",
+        "display_name": "李四",
+        "hcm_id": "HCM-1002",
+        "unit": "华北事业部",
+        "department": "资产管理部",
+        "team": "物料治理组",
+        "email": "lisi@example.com",
+    },
+]
+PERMISSION_CATALOG = [
+    {"module": "material_archives", "permission_type": "directory", "permission_key": "directory.material_archives", "label": "Material Archives Directory"},
+    {"module": "attribute_management", "permission_type": "directory", "permission_key": "directory.attribute_management", "label": "Attribute Management Directory"},
+    {"module": "material_library", "permission_type": "directory", "permission_key": "directory.material_library", "label": "Material Library Directory"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.create", "label": "Material Archive Create"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.edit", "label": "Material Archive Edit"},
+    {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.delete", "label": "Material Archive Delete"},
+    {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.import", "label": "Attribute Import"},
+    {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.export", "label": "Attribute Export"},
+    {"module": "system_admin", "permission_type": "button", "permission_key": "button.users.reset_password", "label": "Reset Local User Password"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.GET./api/v1/materials", "label": "GET /api/v1/materials"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials", "label": "POST /api/v1/materials"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.GET./api/v1/attributes", "label": "GET /api/v1/attributes"},
+    {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/attributes", "label": "POST /api/v1/attributes"},
+    {"module": "material_library", "permission_type": "api", "permission_key": "api.GET./api/v1/material-libraries", "label": "GET /api/v1/material-libraries"},
+]
 
 
 @app.on_event("startup")
@@ -112,6 +167,7 @@ def startup() -> None:
         ensure_seed_material_context(db)
         ensure_provider_configs(db)
         ensure_system_config(db)
+        ensure_hcm_seed_users(db)
     finally:
         db.close()
 
@@ -190,6 +246,30 @@ def ensure_system_config(db: Session) -> SystemConfig:
     return config
 
 
+def ensure_hcm_seed_users(db: Session) -> None:
+    Base.metadata.create_all(bind=engine)
+    changed = False
+    for item in HCM_SEED_USERS:
+        user = db.query(User).filter(User.username == item["username"]).first()
+        if not user:
+            db.add(
+                User(
+                    **item,
+                    account_ownership="HCM",
+                    status="active",
+                )
+            )
+            changed = True
+        else:
+            for field in ["display_name", "hcm_id", "unit", "department", "team", "email"]:
+                setattr(user, field, item[field])
+            user.account_ownership = "HCM"
+            user.status = user.status or "active"
+            changed = True
+    if changed:
+        db.commit()
+
+
 def approval_mode(db: Session) -> str:
     value = ensure_system_config(db).value
     return value if value in APPROVAL_MODES else "multi_node"
@@ -226,6 +306,140 @@ def provider_to_out(provider: LLMProviderConfig) -> ProviderConfigOut:
         connection_status=provider.connection_status,
         updated_at=provider.updated_at.isoformat(),
     )
+
+
+def permission_catalog_entries() -> list[PermissionEntry]:
+    return [PermissionEntry(**item) for item in PERMISSION_CATALOG]
+
+
+def permission_catalog_by_key() -> dict[str, PermissionEntry]:
+    return {item.permission_key: item for item in permission_catalog_entries()}
+
+
+def role_summary(role: Role) -> dict[str, Any]:
+    return {"id": role.id, "name": role.name, "code": role.code, "enabled": role.enabled}
+
+
+def user_summary(user: User) -> UserSummaryOut:
+    return UserSummaryOut(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        unit=user.unit,
+        department=user.department,
+        team=user.team,
+        account_ownership=user.account_ownership,
+        status=user.status,
+    )
+
+
+def user_to_out(user: User) -> UserOut:
+    roles = [role_summary(link.role) for link in sorted(user.role_links, key=lambda link: link.role.name)]
+    return UserOut(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        hcm_id=user.hcm_id,
+        unit=user.unit,
+        department=user.department,
+        team=user.team,
+        email=user.email,
+        account_ownership=user.account_ownership,
+        account_owner=user.account_ownership,
+        status=user.status,
+        roles=roles,
+        created_at=user.created_at.isoformat(),
+        updated_at=user.updated_at.isoformat(),
+    )
+
+
+def permission_to_entry(permission: FeaturePermission) -> PermissionEntry:
+    return PermissionEntry(
+        module=permission.module,
+        permission_type=permission.permission_type,
+        permission_key=permission.permission_key,
+        label=permission.label,
+    )
+
+
+def role_to_out(role: Role) -> RoleOut:
+    users = [user_summary(link.user) for link in sorted(role.user_links, key=lambda link: link.user.username)]
+    permissions = [
+        permission_to_entry(permission)
+        for permission in sorted(role.permissions, key=lambda item: (item.permission_type, item.permission_key))
+        if permission.enabled
+    ]
+    return RoleOut(
+        id=role.id,
+        name=role.name,
+        code=role.code,
+        description=role.description,
+        enabled=role.enabled,
+        users=users,
+        user_count=len(users),
+        permissions=permissions,
+        created_at=role.created_at.isoformat(),
+        updated_at=role.updated_at.isoformat(),
+    )
+
+
+def require_local_user(user: User) -> None:
+    if user.account_ownership != "local":
+        raise HTTPException(status_code=409, detail="HCM-managed users cannot be locally edited, reset, or deleted")
+
+
+def validate_user_status(status: str) -> str:
+    if status not in USER_STATUSES:
+        raise HTTPException(status_code=422, detail="User status must be active or disabled")
+    return status
+
+
+def validate_role_uniqueness(db: Session, name: str, code: str, role_id: int | None = None) -> None:
+    query = db.query(Role).filter(or_(Role.name == name, Role.code == code))
+    if role_id is not None:
+        query = query.filter(Role.id != role_id)
+    existing = query.first()
+    if existing:
+        field = "name" if existing.name == name else "code"
+        raise HTTPException(status_code=409, detail=f"Role {field} must be unique")
+
+
+def get_role_or_404(db: Session, role_id: int) -> Role:
+    role = db.get(Role, role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return role
+
+
+def get_user_or_404(db: Session, user_id: int) -> User:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def validate_bindable_role(role: Role) -> None:
+    if not role.enabled:
+        raise HTTPException(status_code=409, detail="Disabled roles cannot be bound to users")
+
+
+def normalize_permission_payload(payload: RolePermissionsIn) -> list[PermissionEntry]:
+    catalog = permission_catalog_by_key()
+    entries: list[PermissionEntry] = []
+    seen: set[str] = set()
+    for key in payload.permission_keys:
+        if key not in catalog:
+            raise HTTPException(status_code=422, detail=f"Unknown permission identifier: {key}")
+        if key not in seen:
+            entries.append(catalog[key])
+            seen.add(key)
+    for item in payload.permissions:
+        if item.permission_key not in catalog:
+            raise HTTPException(status_code=422, detail=f"Unknown permission identifier: {item.permission_key}")
+        if item.permission_key not in seen:
+            entries.append(catalog[item.permission_key])
+            seen.add(item.permission_key)
+    return entries
 
 
 def now() -> datetime:
@@ -1351,6 +1565,284 @@ def update_system_config(payload: SystemConfigIn, db: Session = Depends(get_db))
 @app.post("/api/v1/system/config", response_model=SystemConfigOut)
 def save_system_config(payload: SystemConfigIn, db: Session = Depends(get_db)) -> SystemConfigOut:
     return update_system_config(payload, db)
+
+
+@app.get("/api/v1/users", response_model=list[UserOut])
+def list_users(
+    search: str = "",
+    unit: str = "",
+    department: str = "",
+    team: str = "",
+    account_ownership: str = "",
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    ensure_hcm_seed_users(db)
+    query = db.query(User)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(User.username.like(like), User.display_name.like(like), User.email.like(like)))
+    if unit:
+        query = query.filter(User.unit == unit)
+    if department:
+        query = query.filter(User.department == department)
+    if team:
+        query = query.filter(User.team == team)
+    if account_ownership:
+        if account_ownership not in ACCOUNT_OWNERSHIPS:
+            raise HTTPException(status_code=422, detail="account_ownership must be HCM or local")
+        query = query.filter(User.account_ownership == account_ownership)
+    return [user_to_out(user) for user in query.order_by(User.account_ownership, User.id).all()]
+
+
+@app.post("/api/v1/users", response_model=UserOut)
+def create_user(payload: UserIn, db: Session = Depends(get_db)) -> UserOut:
+    ensure_hcm_seed_users(db)
+    username = payload.username.strip()
+    display_name = payload.display_name.strip()
+    if not username or not display_name:
+        raise HTTPException(status_code=422, detail="username and display_name are required")
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=409, detail="Username must be unique")
+    user = User(
+        username=username,
+        display_name=display_name,
+        unit=payload.unit.strip(),
+        department=payload.department.strip(),
+        team=payload.team.strip(),
+        email=payload.email.strip(),
+        account_ownership="local",
+        status=validate_user_status(payload.status),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user_to_out(user)
+
+
+@app.get("/api/v1/users/{user_id}", response_model=UserOut)
+def get_user(user_id: int, db: Session = Depends(get_db)) -> UserOut:
+    ensure_hcm_seed_users(db)
+    return user_to_out(get_user_or_404(db, user_id))
+
+
+@app.put("/api/v1/users/{user_id}", response_model=UserOut)
+def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)) -> UserOut:
+    user = get_user_or_404(db, user_id)
+    require_local_user(user)
+    for field in ["display_name", "unit", "department", "team", "email"]:
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(user, field, value.strip())
+    if payload.status is not None:
+        user.status = validate_user_status(payload.status)
+    if not user.display_name.strip():
+        raise HTTPException(status_code=422, detail="display_name is required")
+    user.updated_at = now()
+    db.commit()
+    db.refresh(user)
+    return user_to_out(user)
+
+
+@app.post("/api/v1/users/{user_id}/password-reset", response_model=PasswordResetOut)
+def reset_user_password(user_id: int, db: Session = Depends(get_db)) -> PasswordResetOut:
+    user = get_user_or_404(db, user_id)
+    require_local_user(user)
+    token = sha1(f"password-reset:{user.id}:{user.username}:{now().isoformat()}".encode("utf-8")).hexdigest()[:12].upper()
+    user.password_reset_token = token
+    user.updated_at = now()
+    db.commit()
+    return PasswordResetOut(
+        user_id=user.id,
+        username=user.username,
+        reset_token=token,
+        temporary_password=f"Temp-{token}",
+        message="Local user password reset succeeded",
+    )
+
+
+@app.delete("/api/v1/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = get_user_or_404(db, user_id)
+    require_local_user(user)
+    db.delete(user)
+    db.commit()
+    return {"deleted": True, "id": user_id}
+
+
+@app.get("/api/v1/permissions/catalog", response_model=list[PermissionEntry])
+def get_permission_catalog() -> list[PermissionEntry]:
+    return permission_catalog_entries()
+
+
+@app.get("/api/v1/roles", response_model=list[RoleOut])
+def list_roles(search: str = "", enabled: bool | None = None, db: Session = Depends(get_db)) -> list[RoleOut]:
+    query = db.query(Role)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(Role.name.like(like), Role.code.like(like), Role.description.like(like)))
+    if enabled is not None:
+        query = query.filter(Role.enabled.is_(enabled))
+    return [role_to_out(role) for role in query.order_by(Role.id.desc()).all()]
+
+
+@app.post("/api/v1/roles", response_model=RoleOut)
+def create_role(payload: RoleIn, db: Session = Depends(get_db)) -> RoleOut:
+    name = payload.name.strip()
+    code = payload.code.strip()
+    if not name or not code:
+        raise HTTPException(status_code=422, detail="role name and code are required")
+    validate_role_uniqueness(db, name, code)
+    role = Role(name=name, code=code, description=payload.description.strip(), enabled=payload.enabled)
+    db.add(role)
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.get("/api/v1/roles/{role_id}", response_model=RoleOut)
+def get_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+    return role_to_out(get_role_or_404(db, role_id))
+
+
+@app.put("/api/v1/roles/{role_id}", response_model=RoleOut)
+def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    name = payload.name.strip() if payload.name is not None else role.name
+    code = payload.code.strip() if payload.code is not None else role.code
+    if not name or not code:
+        raise HTTPException(status_code=422, detail="role name and code are required")
+    validate_role_uniqueness(db, name, code, role.id)
+    role.name = name
+    role.code = code
+    if payload.description is not None:
+        role.description = payload.description.strip()
+    if payload.enabled is not None:
+        role.enabled = payload.enabled
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.patch("/api/v1/roles/{role_id}/enable", response_model=RoleOut)
+def enable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    role.enabled = True
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.patch("/api/v1/roles/{role_id}/disable", response_model=RoleOut)
+def disable_role(role_id: int, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    role.enabled = False
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.delete("/api/v1/roles/{role_id}")
+def delete_role(role_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    role = get_role_or_404(db, role_id)
+    db.delete(role)
+    db.commit()
+    return {"deleted": True, "id": role_id}
+
+
+@app.get("/api/v1/roles/{role_id}/users", response_model=list[UserSummaryOut])
+def list_role_users(role_id: int, db: Session = Depends(get_db)) -> list[UserSummaryOut]:
+    role = get_role_or_404(db, role_id)
+    return [user_summary(link.user) for link in sorted(role.user_links, key=lambda link: link.user.username)]
+
+
+@app.post("/api/v1/roles/{role_id}/users", response_model=RoleOut)
+def add_role_user(role_id: int, payload: RoleUserBindingIn, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    validate_bindable_role(role)
+    user = get_user_or_404(db, payload.user_id)
+    existing = db.query(RoleUser).filter(RoleUser.role_id == role.id, RoleUser.user_id == user.id).first()
+    if not existing:
+        db.add(RoleUser(role_id=role.id, user_id=user.id))
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.put("/api/v1/roles/{role_id}/users", response_model=RoleOut)
+def replace_role_users(role_id: int, payload: RoleUserReplaceIn, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    validate_bindable_role(role)
+    user_ids = set(payload.user_ids)
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    found_ids = {user.id for user in users}
+    missing = user_ids - found_ids
+    if missing:
+        raise HTTPException(status_code=404, detail=f"User not found: {sorted(missing)[0]}")
+    db.query(RoleUser).filter(RoleUser.role_id == role.id).delete()
+    for user_id in sorted(user_ids):
+        db.add(RoleUser(role_id=role.id, user_id=user_id))
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.delete("/api/v1/roles/{role_id}/users/{user_id}", response_model=RoleOut)
+def remove_role_user(role_id: int, user_id: int, db: Session = Depends(get_db)) -> RoleOut:
+    role = get_role_or_404(db, role_id)
+    get_user_or_404(db, user_id)
+    link = db.query(RoleUser).filter(RoleUser.role_id == role.id, RoleUser.user_id == user_id).first()
+    if link:
+        db.delete(link)
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return role_to_out(role)
+
+
+@app.get("/api/v1/roles/{role_id}/permissions", response_model=RolePermissionsOut)
+def get_role_permissions(role_id: int, db: Session = Depends(get_db)) -> RolePermissionsOut:
+    role = get_role_or_404(db, role_id)
+    return RolePermissionsOut(
+        role_id=role.id,
+        role_name=role.name,
+        permissions=[
+            permission_to_entry(permission)
+            for permission in sorted(role.permissions, key=lambda item: (item.permission_type, item.permission_key))
+            if permission.enabled
+        ],
+        catalog=permission_catalog_entries(),
+    )
+
+
+@app.put("/api/v1/roles/{role_id}/permissions", response_model=RolePermissionsOut)
+def save_role_permissions(
+    role_id: int,
+    payload: RolePermissionsIn,
+    db: Session = Depends(get_db),
+) -> RolePermissionsOut:
+    role = get_role_or_404(db, role_id)
+    entries = normalize_permission_payload(payload)
+    db.query(FeaturePermission).filter(FeaturePermission.role_id == role.id).delete()
+    for entry in entries:
+        db.add(
+            FeaturePermission(
+                role_id=role.id,
+                module=entry.module,
+                permission_type=entry.permission_type,
+                permission_key=entry.permission_key,
+                label=entry.label,
+                enabled=True,
+            )
+        )
+    role.updated_at = now()
+    db.commit()
+    db.refresh(role)
+    return get_role_permissions(role.id, db)
 
 
 @app.get("/api/v1/workflows/applications", response_model=list[WorkflowApplicationOut])
