@@ -31,11 +31,11 @@ Generator is always Codex CLI. Never invoke `Agent(subagent_type="generator")`.
 | Bash | 4 |
 | Codex CLI | latest stable |
 | Codex authenticated session or `OPENAI_API_KEY` | — |
-| Playwright MCP | pinned (see Playwright MCP section) |
+| Playwright MCP | pinned only for `verification.mode=browser` |
 
 These are harness-level requirements. Not every item should be enforced by
 `init.sh`: app startup should validate runtime dependencies, while Codex auth
-and Playwright availability should be checked only by the phases that need them.
+and verification-tool availability should be checked only by the phases that need them.
 
 ## Codex Prerequisites
 
@@ -61,7 +61,7 @@ User prompt
   -> Evaluator reviews contract  →  CONTRACT APPROVED
   -> Orchestrator writes sprint-fence.json  (records expected sprint + git HEAD)
   -> Generator implements Sprint N ONLY, commits, writes eval-trigger.txt  →  STOPS
-  -> Evaluator runs live browser CHECK with Playwright MCP
+  -> Evaluator runs black-box CHECK using planner-spec.json verification.mode
   -> Evaluator writes eval-result-{N}.md
   -> SPRINT PASS:  Orchestrator deletes sprint-contract.md, sprint-fence.json,
                    eval-trigger.txt  →  next sprint starts from scratch
@@ -184,9 +184,9 @@ Evaluator runs in two modes:
 1. Contract Review
    Review `sprint-contract.md` and either append `CONTRACT APPROVED` or request changes.
 2. Live CHECK
-   Run `bash init.sh`, execute browser steps with Playwright MCP, and write `eval-result-{N}.md`.
+   Run `bash init.sh`, execute black-box steps through the configured verification surface, and write `eval-result-{N}.md`.
 
-Evaluator must never approve without live browser evidence.
+Evaluator must never approve without independent black-box evidence. For `browser` mode that evidence comes from Playwright MCP; for backend and tooling projects it comes from API responses, CLI outputs, job side effects, or an external library consumer harness.
 
 ### Generator
 
@@ -237,7 +237,29 @@ Re-commit and write eval-trigger.txt containing exactly: sprint=N. STOP after wr
 
 ---
 
-## Playwright MCP
+## Verification Tools
+
+`planner-spec.json` should include:
+
+```json
+{
+  "verification": {
+    "mode": "browser | api | cli | job | library",
+    "base_url": "http://localhost:3000",
+    "command": "pytest -q"
+  }
+}
+```
+
+Evaluator tool choice:
+
+- `browser`: Playwright MCP.
+- `api`: real HTTP requests with `curl`, `httpx`, OpenAPI/Newman-style checks, or equivalent.
+- `cli`: shell commands with exit-code and stdout/stderr assertions.
+- `job`: enqueue/trigger work, poll status, and verify side effects.
+- `library`: install/import from an external consumer harness and verify public API output.
+
+### Playwright MCP
 
 Recommended MCP config:
 
@@ -247,7 +269,7 @@ Recommended MCP config:
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@0.0.29"],
-      "description": "Live browser automation for Evaluator"
+      "description": "Browser-mode automation for Evaluator"
     }
   }
 }
@@ -259,15 +281,16 @@ verifying the new version is compatible.
 
 Configure this in `.claude/settings.json` or pass it via `--mcp-config`.
 
-### Playwright unavailability — pause protocol
+### Verification tool unavailability — pause protocol
 
-If the Evaluator cannot reach Playwright MCP tools (e.g. the MCP server is not
-running, or `npx @playwright/mcp` fails to start), the Evaluator must:
+If the Evaluator cannot reach the required verification tool for the configured
+mode (for example Playwright MCP for `browser`, the HTTP service for `api`, or
+the CLI binary for `cli`), the Evaluator must:
 
-1. Write `SPRINT FAIL` with reason: `Playwright MCP unavailable — cannot run live CHECK`.
+1. Write `SPRINT FAIL` with reason: `Verification tool unavailable — cannot run CHECK`.
 2. The Orchestrator treats this as a pause condition (not a retry-eligible failure).
 3. Set `run-state.json` → `mode: "paused"`, `needs_human: true`,
-   `last_failure_reason: "Playwright MCP unavailable"`.
+   `last_failure_reason: "Verification tool unavailable"`.
 4. Do not increment `retry_count` for this class of failure.
 
 ---
@@ -334,7 +357,7 @@ Read planner-spec.json, identify the next incomplete sprint, invoke Codex to pro
 ### `eval`
 
 ```text
-Read sprint-contract.md and eval-trigger.txt, then invoke the evaluator to run live CHECK and write eval-result-{N}.md.
+Read sprint-contract.md, eval-trigger.txt, and planner-spec.json verification.mode, then invoke the evaluator to run CHECK and write eval-result-{N}.md.
 ```
 
 ### `status`

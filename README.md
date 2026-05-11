@@ -1,8 +1,8 @@
 [中文](./README.zh-CN.md) | **English**
 
-# autonomous-sprint-harness
+# SprintFoundry
 
-A multi-agent harness for product iteration: Claude handles planning, routing, and evaluation, while Codex handles real code implementation. This repository is primarily a process and protocol repo. It is not an application codebase by itself.
+SprintFoundry is a multi-agent harness for product iteration: Claude handles planning, routing, and independent evaluation, while Codex handles real code implementation. This repository is primarily a process and protocol repo. It is not an application codebase by itself.
 
 ## Project Architecture
 
@@ -14,7 +14,7 @@ The harness is built around four collaborating roles:
 | --- | --- | --- |
 | Planner | Claude Code | Expands a short user request into a product spec, visual design language, and sprint plan |
 | Generator | Codex CLI | Reads the spec and approved sprint contract, implements one sprint, self-checks, and commits |
-| Evaluator | Claude Code + Playwright MCP | Reviews the sprint contract and performs a live browser CHECK |
+| Evaluator | Claude Code + verification tools | Reviews the sprint contract and performs an independent black-box CHECK: browser, API, CLI, job, or library |
 | Orchestrator | Claude Code | Reads file state and decides whether to invoke the Planner, Generator, or Evaluator |
 
 ### Boundary of Responsibility
@@ -30,7 +30,7 @@ This architecture has a strict boundary:
 The harness is designed as a file-driven state machine rather than a conversational memory system:
 
 - `planner-spec.json`
-  Product spec, design language, tech stack, and sprint list written by the Planner
+  Product spec, design language, tech stack, verification mode, and sprint list written by the Planner
 - `change-request.md`
   Post-launch iteration request that must be classified before entering an iteration sprint or replan path
 - `bug-report.md`
@@ -79,7 +79,7 @@ It reads disk state first, then routes to the next phase:
 - `change-request.md` with `Type: minor_feature` -> iteration sprint contract first
 - `change-request.md` with `Type: major_feature` or `replan` -> Planner revises the spec first
 - `sprint-contract.md` exists but has no `CONTRACT APPROVED` -> Evaluator contract review only
-- `eval-trigger.txt` exists -> Evaluator live CHECK only
+- `eval-trigger.txt` exists -> Evaluator CHECK only
 - Generator implementation is only allowed after the contract is approved
 
 The point is to prevent the main agent from jumping straight into implementation.
@@ -161,22 +161,46 @@ The repository is organized into three documentation layers:
 
 The full flow looks like this:
 
-```text
-User request
-  -> Orchestrator reads file state and routes
-  -> Planner writes planner-spec.json / init.sh / claude-progress.txt
-  -> Generator proposes sprint-contract.md
-  -> Evaluator reviews the contract and writes CONTRACT APPROVED
-  -> Orchestrator writes sprint-fence.json (sprint number + git HEAD)
-  -> Generator implements the sprint, runs tests, and commits
-  -> Generator writes eval-trigger.txt
-  -> Orchestrator verifies fence matches eval-trigger.txt
-  -> Evaluator performs a live browser acceptance check with Playwright
-  -> Evaluator writes eval-result-{N}.md
-  -> PASS: Orchestrator deletes sprint-contract.md + sprint-fence.json and advances
-  -> FAIL: Orchestrator inlines the verdict into the retry prompt, deletes
-          eval-result-{N}.md, re-invokes Codex, and re-runs the Evaluator on the
-          retry commit. retry_count is bounded; exceeding it pauses for human review.
+```mermaid
+flowchart TD
+    A["User request or unattended tick"] --> B["Orchestrator reads file state"]
+    B --> C{"needs_human=true?"}
+    C -- yes --> P["Pause for human"]
+    C -- no --> D{"planner-spec.json exists?"}
+    D -- no --> PL["Planner writes planner-spec.json, init.sh, claude-progress.txt"]
+    PL --> B
+    D -- yes --> AUD["Audit sprint history from eval-result-N.md"]
+    AUD --> BAD{"State inconsistent?"}
+    BAD -- yes --> P
+    BAD -- no --> T{"eval-trigger.txt exists?"}
+    T -- yes --> F{"trigger matches sprint-fence.json?"}
+    F -- no --> P
+    F -- yes --> ER{"eval-result-N.md state"}
+    ER -- missing --> CHECK["Evaluator runs black-box CHECK using verification.mode"]
+    CHECK --> RESULT["Evaluator writes eval-result-N.md"]
+    RESULT --> B
+    ER -- "SPRINT PASS" --> CLEAN["Orchestrator clears trigger, contract, fence"]
+    CLEAN --> B
+    ER -- "SPRINT FAIL" --> RETRY{"retry_count > limit?"}
+    RETRY -- yes --> P
+    RETRY -- no --> FIX["Orchestrator inlines verdict, deletes stale eval result, invokes Codex retry"]
+    FIX --> B
+    T -- no --> SC{"sprint-contract.md exists?"}
+    SC -- yes --> CA{"CONTRACT APPROVED?"}
+    CA -- no --> CR["Evaluator contract review"]
+    CR --> B
+    CA -- yes --> BR["Orchestrator creates/switches codex/sprint-N branch and writes sprint-fence.json"]
+    BR --> GEN["Codex implements Sprint N only, commits, writes eval-trigger.txt, stops"]
+    GEN --> B
+    SC -- no --> REQ{"bug-report.md or change-request.md?"}
+    REQ -- bugfix/minor --> CC["Codex proposes scoped sprint contract"]
+    CC --> B
+    REQ -- major/replan --> RP["Planner revises planner-spec.json"]
+    RP --> B
+    REQ -- none --> NEXT{"All sprints PASS?"}
+    NEXT -- yes --> DONE["Complete"]
+    NEXT -- no --> NC["Codex proposes next sprint contract"]
+    NC --> B
 ```
 
 Key gates:
@@ -190,9 +214,45 @@ Key state rules:
 - `bug-report.md` means bugfix routing comes first
 - `change-request.md` is routed by `Type` into bugfix, iteration, or replan
 - Unapproved `sprint-contract.md` means contract review comes first
-- `eval-trigger.txt` means live CHECK comes first
+- `eval-trigger.txt` means independent CHECK comes first
 - A sprint is complete only when `eval-result-{N}.md` contains `SPRINT PASS`
 - After a SPRINT PASS the Orchestrator removes `sprint-contract.md` and `sprint-fence.json` so the next sprint must renegotiate its contract
+
+## Verification Modes
+
+The Evaluator is a black-box verifier, not a browser-only verifier. The Planner should include a `verification` block in `planner-spec.json` so the sprint contract can be tested through the right surface:
+
+```json
+{
+  "verification": {
+    "mode": "browser | api | cli | job | library",
+    "base_url": "http://localhost:3000",
+    "command": "pytest -q"
+  }
+}
+```
+
+Supported modes:
+
+| Mode | Evaluator surface | Typical evidence |
+| --- | --- | --- |
+| `browser` | Playwright MCP | Screenshots, visible UI state, user flows |
+| `api` | `curl`, `httpx`, OpenAPI/Newman-style checks | HTTP status, JSON bodies, persisted API-visible state |
+| `cli` | Shell commands | Exit code, stdout/stderr, generated files |
+| `job` | Queue/job endpoints or scripts | Enqueued task, polling status, side effects |
+| `library` | External consumer project or sample script | Import/install success and public API output |
+
+Sprint contracts should use **black-box-verifiable** success criteria. A backend API criterion is just as valid as a browser criterion:
+
+```markdown
+- [ ] Client can create a user and fetch it by id.
+  Evaluator steps:
+  1. Run `bash init.sh`
+  2. POST `http://localhost:8000/users` with JSON `{ "email": "a@example.com" }`
+  3. Assert status is 201 and the response body contains an `id`
+  4. GET `http://localhost:8000/users/<id>`
+  5. Assert status is 200 and `email` equals `a@example.com`
+```
 
 ## Context Hygiene Rules
 
@@ -425,7 +485,7 @@ The Orchestrator is the entrypoint. It reads file state first, then decides whic
 - `bug-report.md` exists -> call Codex to create a bugfix sprint contract first
 - `change-request.md` exists -> route by `Type` into bugfix, minor iteration, or replan
 - pending `sprint-contract.md` exists -> call Evaluator for contract review
-- `eval-trigger.txt` exists -> call Evaluator for live CHECK
+- `eval-trigger.txt` exists -> call Evaluator for CHECK
 - otherwise -> call Codex for the next sprint
 
 If `claude-progress.txt` has turned into a long log, the Orchestrator should compress it back into summary form before continuing.
@@ -499,9 +559,9 @@ One additional operating principle in this architecture:
 The Evaluator has two modes:
 
 - Contract Review
-  Checks whether `sprint-contract.md` is observable and browser-testable
-- Live CHECK
-  Reads `eval-trigger.txt`, starts the environment, and executes each acceptance step through Playwright MCP
+  Checks whether `sprint-contract.md` is observable and black-box-verifiable through the configured verification mode
+- CHECK
+  Reads `eval-trigger.txt`, starts the environment, and executes each acceptance step through the appropriate surface: Playwright for `browser`, HTTP checks for `api`, shell commands for `cli`, queue/job assertions for `job`, or a consumer harness for `library`
 
 Acceptance results are written to:
 
