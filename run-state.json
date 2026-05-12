@@ -1,13 +1,14 @@
 {
-  "mode": "checking",
+  "mode": "planning",
   "current_sprint": 13,
-  "retry_count": 1,
-  "last_successful_sprint": 12,
+  "retry_count": 0,
+  "last_successful_sprint": 13,
   "last_failure_reason": "",
   "needs_human": false,
   "active_branch": "codex/sprint-13-frontend-scaffold",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T16:24:41.912763",
+  "last_run_at": "2026-05-12T08:41:14.493287Z",
   "request_kind": "",
-  "sprint_origin": "major_feature"
+  "sprint_origin": "major_feature",
+  "current_version": "1.0.0"
 }
