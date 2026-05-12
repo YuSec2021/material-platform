@@ -1,0 +1,103 @@
+import * as AccordionModule from "../components/ui/accordion";
+import * as AlertDialogModule from "../components/ui/alert-dialog";
+import * as AlertModule from "../components/ui/alert";
+import * as AspectRatioModule from "../components/ui/aspect-ratio";
+import * as AvatarModule from "../components/ui/avatar";
+import * as BadgeModule from "../components/ui/badge";
+import * as BreadcrumbModule from "../components/ui/breadcrumb";
+import * as ButtonModule from "../components/ui/button";
+import * as CalendarModule from "../components/ui/calendar";
+import * as CardModule from "../components/ui/card";
+import * as CarouselModule from "../components/ui/carousel";
+import * as ChartModule from "../components/ui/chart";
+import * as CheckboxModule from "../components/ui/checkbox";
+import * as CollapsibleModule from "../components/ui/collapsible";
+import * as CommandModule from "../components/ui/command";
+import * as ContextMenuModule from "../components/ui/context-menu";
+import * as DialogModule from "../components/ui/dialog";
+import * as DrawerModule from "../components/ui/drawer";
+import * as DropdownMenuModule from "../components/ui/dropdown-menu";
+import * as FormModule from "../components/ui/form";
+import * as HoverCardModule from "../components/ui/hover-card";
+import * as InputOtpModule from "../components/ui/input-otp";
+import * as InputModule from "../components/ui/input";
+import * as LabelModule from "../components/ui/label";
+import * as MenubarModule from "../components/ui/menubar";
+import * as NavigationMenuModule from "../components/ui/navigation-menu";
+import * as PaginationModule from "../components/ui/pagination";
+import * as PopoverModule from "../components/ui/popover";
+import * as ProgressModule from "../components/ui/progress";
+import * as RadioGroupModule from "../components/ui/radio-group";
+import * as ResizableModule from "../components/ui/resizable";
+import * as ScrollAreaModule from "../components/ui/scroll-area";
+import * as SelectModule from "../components/ui/select";
+import * as SeparatorModule from "../components/ui/separator";
+import * as SheetModule from "../components/ui/sheet";
+import * as SidebarModule from "../components/ui/sidebar";
+import * as SkeletonModule from "../components/ui/skeleton";
+import * as SliderModule from "../components/ui/slider";
+import * as SonnerModule from "../components/ui/sonner";
+import * as SwitchModule from "../components/ui/switch";
+import * as TableModule from "../components/ui/table";
+import * as TabsModule from "../components/ui/tabs";
+import * as TextareaModule from "../components/ui/textarea";
+import * as ToggleGroupModule from "../components/ui/toggle-group";
+import * as ToggleModule from "../components/ui/toggle";
+import * as TooltipModule from "../components/ui/tooltip";
+import * as UseMobileModule from "../components/ui/use-mobile";
+import * as UtilsModule from "../components/ui/utils";
+
+export const componentInventory = [
+  { name: "Accordion", module: AccordionModule },
+  { name: "AlertDialog", module: AlertDialogModule },
+  { name: "Alert", module: AlertModule },
+  { name: "AspectRatio", module: AspectRatioModule },
+  { name: "Avatar", module: AvatarModule },
+  { name: "Badge", module: BadgeModule },
+  { name: "Breadcrumb", module: BreadcrumbModule },
+  { name: "Button", module: ButtonModule },
+  { name: "Calendar", module: CalendarModule },
+  { name: "Card", module: CardModule },
+  { name: "Carousel", module: CarouselModule },
+  { name: "Chart", module: ChartModule },
+  { name: "Checkbox", module: CheckboxModule },
+  { name: "Collapsible", module: CollapsibleModule },
+  { name: "Command", module: CommandModule },
+  { name: "ContextMenu", module: ContextMenuModule },
+  { name: "Dialog", module: DialogModule },
+  { name: "Drawer", module: DrawerModule },
+  { name: "DropdownMenu", module: DropdownMenuModule },
+  { name: "Form", module: FormModule },
+  { name: "HoverCard", module: HoverCardModule },
+  { name: "InputOTP", module: InputOtpModule },
+  { name: "Input", module: InputModule },
+  { name: "Label", module: LabelModule },
+  { name: "Menubar", module: MenubarModule },
+  { name: "NavigationMenu", module: NavigationMenuModule },
+  { name: "Pagination", module: PaginationModule },
+  { name: "Popover", module: PopoverModule },
+  { name: "Progress", module: ProgressModule },
+  { name: "RadioGroup", module: RadioGroupModule },
+  { name: "Resizable", module: ResizableModule },
+  { name: "ScrollArea", module: ScrollAreaModule },
+  { name: "Select", module: SelectModule },
+  { name: "Separator", module: SeparatorModule },
+  { name: "Sheet", module: SheetModule },
+  { name: "Sidebar", module: SidebarModule },
+  { name: "Skeleton", module: SkeletonModule },
+  { name: "Slider", module: SliderModule },
+  { name: "Sonner", module: SonnerModule },
+  { name: "Switch", module: SwitchModule },
+  { name: "Table", module: TableModule },
+  { name: "Tabs", module: TabsModule },
+  { name: "Textarea", module: TextareaModule },
+  { name: "ToggleGroup", module: ToggleGroupModule },
+  { name: "Toggle", module: ToggleModule },
+  { name: "Tooltip", module: TooltipModule },
+  { name: "UseMobile", module: UseMobileModule },
+  { name: "Utils", module: UtilsModule },
+];
+
+export const loadedComponentCount = componentInventory.filter(
+  (item) => Object.keys(item.module).length > 0,
+).length;
