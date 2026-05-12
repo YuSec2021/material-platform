@@ -317,14 +317,52 @@ class TraceDetailOut(BaseModel):
     storage_table: str = "tracer.spans"
 
 
+class ReasonOption(BaseModel):
+    name: str
+    enabled: bool = True
+
+
+class SystemIcon(BaseModel):
+    filename: str = ""
+    content_type: str = ""
+    data_url: str = ""
+
+
 class SystemConfigIn(BaseModel):
-    approval_mode: str
+    system_name: str | None = None
+    icon: SystemIcon | None = None
+    stop_purchase_reasons: list[ReasonOption | str] | None = None
+    stop_use_reasons: list[ReasonOption | str] | None = None
+    approval_mode: str | None = None
 
 
 class SystemConfigOut(BaseModel):
+    system_name: str
+    icon: SystemIcon
+    stop_purchase_reasons: list[ReasonOption]
+    stop_use_reasons: list[ReasonOption]
     approval_mode: str
     updated_by: str
     updated_at: str
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    user: str
+    resource: str
+    action: str
+    before_value: dict[str, Any]
+    after_value: dict[str, Any]
+    timestamp: str
+    source: str
+
+
+class AuditLogListOut(BaseModel):
+    items: list[AuditLogOut]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class WorkflowApplicationIn(BaseModel):

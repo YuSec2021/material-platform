@@ -9,24 +9,28 @@ import csv
 import secrets
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass
 from functools import wraps
 from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
 from typing import Any, Callable
+from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
 from .models import (
     Attribute,
     AttributeChange,
+    AuditLog,
     Brand,
     CapabilityModelMapping,
     Category,
@@ -47,6 +51,8 @@ from .models import (
 from .schemas import (
     AiMaterialAddConfirmIn,
     AiMaterialAddPreviewIn,
+    AuditLogListOut,
+    AuditLogOut,
     AuthLoginIn,
     AuthUserOut,
     AttributeIn,
@@ -87,7 +93,9 @@ from .schemas import (
     RoleUpdate,
     RoleUserBindingIn,
     RoleUserReplaceIn,
+    ReasonOption,
     SystemConfigIn,
+    SystemIcon,
     SystemConfigOut,
     TraceDetailOut,
     TraceSummaryOut,
@@ -109,6 +117,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def operational_audit_middleware(request: Request, call_next: Callable):
+    response = await call_next(request)
+    mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/v1/")
+    excluded = request.url.path.startswith("/api/v1/audit-logs") or request.url.path.startswith("/api/v1/auth/")
+    if mutating and not excluded and response.status_code < 400:
+        db = SessionLocal()
+        try:
+            ensure_audit_log_schema()
+            try:
+                auth = current_auth(request, db)
+            except Exception:
+                auth = None
+            source = "AI" if "/ai/" in request.url.path else "human"
+            add_audit_log(
+                db,
+                auth,
+                request.url.path.removeprefix("/api/v1/"),
+                request.method.lower(),
+                {},
+                {"status_code": response.status_code, "path": request.url.path},
+                source,
+            )
+            db.commit()
+        finally:
+            db.close()
+    return response
 
 SEED_PRODUCT = {
     "name": "Sprint 3 A4 彩色激光打印机",
@@ -133,6 +170,15 @@ APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
 USER_STATUSES = {"active", "disabled"}
 ACCOUNT_OWNERSHIPS = {"HCM", "local"}
+SYSTEM_CONFIG_KEY = "system_configuration"
+DEFAULT_SYSTEM_NAME = "AI Material Management Platform"
+DEFAULT_SYSTEM_ICON = {
+    "filename": "default-system-icon.svg",
+    "content_type": "image/svg+xml",
+    "data_url": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23205493'/%3E%3Cpath d='M18 42V22h9l5 10 5-10h9v20h-7V31l-5 11h-4l-5-11v11z' fill='white'/%3E%3C/svg%3E",
+}
+DEFAULT_STOP_PURCHASE_REASONS = ["供应商停产", "质量风险停采", "战略替代物料", "采购目录清理"]
+DEFAULT_STOP_USE_REASONS = ["长期无库存且无业务需求", "安全合规风险", "技术标准淘汰", "资产归档完成"]
 DEFAULT_PROVIDER = {
     "provider": "mock",
     "model": "mock-material-governance-v1",
@@ -258,12 +304,16 @@ PERMISSION_CATALOG = [
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/brands/{brand_id}", "label": "DELETE /api/v1/brands/{brand_id}"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/system/config", "label": "GET /api/v1/system/config"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/system/config", "label": "PUT /api/v1/system/config"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs", "label": "GET /api/v1/audit-logs"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs/{log_id}", "label": "GET /api/v1/audit-logs/{log_id}"},
+    {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs/export", "label": "GET /api/v1/audit-logs/export"},
 ]
 
 
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_audit_log_schema()
     db = next(get_db())
     try:
         ensure_seed_product(db)
@@ -273,6 +323,25 @@ def startup() -> None:
         ensure_hcm_seed_users(db)
     finally:
         db.close()
+
+
+def ensure_audit_log_schema() -> None:
+    required = {"id", "user", "resource", "action", "before_value", "after_value", "timestamp", "source"}
+    with engine.begin() as connection:
+        table_exists = connection.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
+        ).fetchone()
+        if table_exists:
+            columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(audit_log)").fetchall()}
+            if not required.issubset(columns):
+                legacy_name = f"audit_log_legacy_{int(time.time())}"
+                connection.exec_driver_sql(f"ALTER TABLE audit_log RENAME TO {legacy_name}")
+                legacy_indexes = connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_audit_log_%'"
+                ).fetchall()
+                for index in legacy_indexes:
+                    connection.exec_driver_sql(f"DROP INDEX IF EXISTS {index[0]}")
+        AuditLog.__table__.create(bind=connection, checkfirst=True)
 
 
 def ensure_seed_product(db: Session) -> ProductName:
@@ -410,12 +479,94 @@ def mapping_for_capability(db: Session, capability: str) -> CapabilityModelMappi
     )
 
 
+def default_reason_options(values: list[str]) -> list[dict[str, Any]]:
+    return [{"name": value, "enabled": True} for value in values]
+
+
+def default_system_config() -> dict[str, Any]:
+    return {
+        "system_name": DEFAULT_SYSTEM_NAME,
+        "icon": DEFAULT_SYSTEM_ICON,
+        "stop_purchase_reasons": default_reason_options(DEFAULT_STOP_PURCHASE_REASONS),
+        "stop_use_reasons": default_reason_options(DEFAULT_STOP_USE_REASONS),
+        "approval_mode": "multi_node",
+    }
+
+
+def safe_json_loads(value: str | None, fallback: Any) -> Any:
+    if not value:
+        return fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return fallback
+
+
+def normalize_reason_option(value: ReasonOption | str | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, ReasonOption):
+        name = value.name.strip()
+        enabled = value.enabled
+    elif isinstance(value, dict):
+        name = str(value.get("name") or value.get("label") or value.get("value") or "").strip()
+        enabled = bool(value.get("enabled", True))
+    else:
+        name = str(value).strip()
+        enabled = True
+    if not name:
+        raise HTTPException(status_code=422, detail="Reason option name is required")
+    return {"name": name, "enabled": enabled}
+
+
+def normalize_reason_options(values: list[ReasonOption | str] | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        option = normalize_reason_option(value)
+        if option["name"] in seen:
+            continue
+        normalized.append(option)
+        seen.add(option["name"])
+    return normalized
+
+
+def sanitize_icon(icon: SystemIcon | dict[str, Any] | None) -> dict[str, str]:
+    if not icon:
+        return DEFAULT_SYSTEM_ICON.copy()
+    if isinstance(icon, SystemIcon):
+        data = icon.model_dump()
+    else:
+        data = dict(icon)
+    return {
+        "filename": str(data.get("filename") or "system-icon").strip()[:240],
+        "content_type": str(data.get("content_type") or "image/png").strip()[:120],
+        "data_url": str(data.get("data_url") or "").strip(),
+    }
+
+
+def system_config_payload(config: SystemConfig) -> dict[str, Any]:
+    data = default_system_config()
+    loaded = safe_json_loads(config.value, {})
+    if isinstance(loaded, dict):
+        data.update({key: value for key, value in loaded.items() if key in data})
+    if data["approval_mode"] not in APPROVAL_MODES:
+        data["approval_mode"] = "multi_node"
+    data["system_name"] = compact_space(str(data.get("system_name") or DEFAULT_SYSTEM_NAME)) or DEFAULT_SYSTEM_NAME
+    data["icon"] = sanitize_icon(data.get("icon"))
+    data["stop_purchase_reasons"] = normalize_reason_options(data.get("stop_purchase_reasons") or default_reason_options(DEFAULT_STOP_PURCHASE_REASONS))
+    data["stop_use_reasons"] = normalize_reason_options(data.get("stop_use_reasons") or default_reason_options(DEFAULT_STOP_USE_REASONS))
+    return data
+
+
 def ensure_system_config(db: Session) -> SystemConfig:
     Base.metadata.create_all(bind=engine)
-    config = db.query(SystemConfig).filter(SystemConfig.key == "approval_mode").first()
+    config = db.query(SystemConfig).filter(SystemConfig.key == SYSTEM_CONFIG_KEY).first()
     if config:
         return config
-    config = SystemConfig(key="approval_mode", value="multi_node", updated_by="system")
+    legacy = db.query(SystemConfig).filter(SystemConfig.key == "approval_mode").first()
+    data = default_system_config()
+    if legacy and legacy.value in APPROVAL_MODES:
+        data["approval_mode"] = legacy.value
+    config = SystemConfig(key=SYSTEM_CONFIG_KEY, value=json.dumps(data, ensure_ascii=False), updated_by="system")
     db.add(config)
     db.commit()
     db.refresh(config)
@@ -447,15 +598,71 @@ def ensure_hcm_seed_users(db: Session) -> None:
 
 
 def approval_mode(db: Session) -> str:
-    value = ensure_system_config(db).value
+    value = system_config_payload(ensure_system_config(db)).get("approval_mode")
     return value if value in APPROVAL_MODES else "multi_node"
 
 
 def config_to_out(config: SystemConfig) -> SystemConfigOut:
+    data = system_config_payload(config)
     return SystemConfigOut(
-        approval_mode=config.value,
+        system_name=data["system_name"],
+        icon=SystemIcon(**data["icon"]),
+        stop_purchase_reasons=[ReasonOption(**item) for item in data["stop_purchase_reasons"]],
+        stop_use_reasons=[ReasonOption(**item) for item in data["stop_use_reasons"]],
+        approval_mode=data["approval_mode"],
         updated_by=config.updated_by,
         updated_at=config.updated_at.isoformat(),
+    )
+
+
+def redact_sensitive(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if any(token in lowered for token in ["api_key", "apikey", "secret", "token", "password", "encrypted_api_key"]):
+                redacted[str(key)] = "********"
+            else:
+                redacted[str(key)] = redact_sensitive(item)
+        return redacted
+    if isinstance(value, list):
+        return [redact_sensitive(item) for item in value]
+    return value
+
+
+def audit_to_out(log: AuditLog) -> AuditLogOut:
+    return AuditLogOut(
+        id=log.id,
+        user=log.user,
+        resource=log.resource,
+        action=log.action,
+        before_value=redact_sensitive(safe_json_loads(log.before_value, {})),
+        after_value=redact_sensitive(safe_json_loads(log.after_value, {})),
+        timestamp=log.timestamp.isoformat(),
+        source=log.source,
+    )
+
+
+def add_audit_log(
+    db: Session,
+    auth: AuthContext | None,
+    resource: str,
+    action: str,
+    before_value: dict[str, Any] | None,
+    after_value: dict[str, Any] | None,
+    source: str = "human",
+) -> None:
+    ensure_audit_log_schema()
+    db.add(
+        AuditLog(
+            user=auth.username if auth else "system",
+            resource=resource,
+            action=action,
+            before_value=json.dumps(redact_sensitive(before_value or {}), ensure_ascii=False, sort_keys=True),
+            after_value=json.dumps(redact_sensitive(after_value or {}), ensure_ascii=False, sort_keys=True),
+            timestamp=now(),
+            source=source,
+        )
     )
 
 
@@ -2318,9 +2525,10 @@ def list_categories(
 
 @app.get("/api/v1/system/config", response_model=SystemConfigOut)
 def get_system_config(
+    request: Request,
     db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
 ) -> SystemConfigOut:
+    current_auth(request, db)
     return config_to_out(ensure_system_config(db))
 
 
@@ -2330,13 +2538,29 @@ def update_system_config(
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
 ) -> SystemConfigOut:
-    mode = payload.approval_mode.strip()
-    if mode not in APPROVAL_MODES:
-        raise HTTPException(status_code=422, detail="approval_mode must be simple or multi_node")
     config = ensure_system_config(db)
-    config.value = mode
-    config.updated_by = "super_admin"
+    before = system_config_payload(config)
+    after = dict(before)
+    if payload.system_name is not None:
+        system_name = compact_space(payload.system_name)
+        if not system_name:
+            raise HTTPException(status_code=422, detail="system_name is required")
+        after["system_name"] = system_name
+    if payload.icon is not None:
+        after["icon"] = sanitize_icon(payload.icon)
+    if payload.stop_purchase_reasons is not None:
+        after["stop_purchase_reasons"] = normalize_reason_options(payload.stop_purchase_reasons)
+    if payload.stop_use_reasons is not None:
+        after["stop_use_reasons"] = normalize_reason_options(payload.stop_use_reasons)
+    if payload.approval_mode is not None:
+        mode = payload.approval_mode.strip()
+        if mode not in APPROVAL_MODES:
+            raise HTTPException(status_code=422, detail="approval_mode must be simple or multi_node")
+        after["approval_mode"] = mode
+    config.value = json.dumps(after, ensure_ascii=False)
+    config.updated_by = auth.username
     config.updated_at = now()
+    add_audit_log(db, auth, "system_config", "update", before, after)
     db.commit()
     db.refresh(config)
     return config_to_out(config)
@@ -2349,6 +2573,164 @@ def save_system_config(
     auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
 ) -> SystemConfigOut:
     return update_system_config(payload, db, auth)
+
+
+def audit_query(
+    db: Session,
+    user: str = "",
+    resource: str = "",
+    action: str = "",
+    source: str = "",
+    start_time: str = "",
+    end_time: str = "",
+):
+    query = db.query(AuditLog)
+    if user:
+        query = query.filter(AuditLog.user.like(f"%{user}%"))
+    if resource:
+        query = query.filter(AuditLog.resource == resource)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if source:
+        query = query.filter(AuditLog.source == source)
+    if start_time:
+        try:
+            query = query.filter(AuditLog.timestamp >= datetime.fromisoformat(start_time.replace("Z", "+00:00")))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="start_time must be ISO-8601") from exc
+    if end_time:
+        try:
+            query = query.filter(AuditLog.timestamp <= datetime.fromisoformat(end_time.replace("Z", "+00:00")))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="end_time must be ISO-8601") from exc
+    return query
+
+
+def xlsx_cell(value: Any) -> str:
+    text = xml_escape(str(value if value is not None else ""))
+    return f'<c t="inlineStr"><is><t>{text}</t></is></c>'
+
+
+def build_audit_workbook(rows: list[list[Any]]) -> BytesIO:
+    sheet_rows = "\n".join(
+        f'<row r="{row_index}">' + "".join(xlsx_cell(value) for value in row) + "</row>"
+        for row_index, row in enumerate(rows, start=1)
+    )
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Audit Logs" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{sheet_rows}</sheetData>
+</worksheet>""",
+        )
+    output.seek(0)
+    return output
+
+
+@app.get("/api/v1/audit-logs", response_model=AuditLogListOut)
+def list_audit_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: str = "",
+    resource: str = "",
+    action: str = "",
+    source: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/audit-logs")),
+) -> AuditLogListOut:
+    query = audit_query(db, user, resource, action, source, start_time, end_time)
+    total = query.count()
+    logs = (
+        query.order_by(AuditLog.timestamp.desc(), AuditLog.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    pages = max(1, (total + page_size - 1) // page_size)
+    return AuditLogListOut(items=[audit_to_out(log) for log in logs], total=total, page=page, page_size=page_size, pages=pages)
+
+
+@app.get("/api/v1/audit-logs/export")
+def export_audit_logs(
+    user: str = "",
+    resource: str = "",
+    action: str = "",
+    source: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/audit-logs/export")),
+) -> StreamingResponse:
+    logs = audit_query(db, user, resource, action, source, start_time, end_time).order_by(AuditLog.timestamp.desc(), AuditLog.id.desc()).all()
+    headers = ["timestamp", "user", "resource", "action", "source", "before value", "after value"]
+    rows: list[list[Any]] = [headers]
+    for log in logs:
+        item = audit_to_out(log)
+        rows.append(
+            [
+                item.timestamp,
+                item.user,
+                item.resource,
+                item.action,
+                item.source,
+                json.dumps(item.before_value, ensure_ascii=False, sort_keys=True),
+                json.dumps(item.after_value, ensure_ascii=False, sort_keys=True),
+            ]
+        )
+    output = build_audit_workbook(rows)
+    filename = f"audit-logs-{now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/v1/audit-logs/{log_id}", response_model=AuditLogOut)
+def get_audit_log(
+    log_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/audit-logs/{log_id}")),
+) -> AuditLogOut:
+    log = db.get(AuditLog, log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Audit log not found")
+    return audit_to_out(log)
 
 
 @app.get("/api/v1/users", response_model=list[UserOut])
