@@ -39,14 +39,23 @@ is_port_in_use() {
 
 kill_on_port() {
   local port="$1"
-  if is_port_in_use "$port"; then
-    local pid
-    pid=$(lsof -ti :"$port" 2>/dev/null || echo "")
-    if [[ -n "$pid" ]]; then
-      info "Port $port in use by PID $pid. Killing..."
-      kill "$pid" 2>/dev/null || warn "Unable to kill process on port $port; startup may fail if it remains bound."
+  local pid
+  pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [[ -z "$pid" ]] && is_port_in_use "$port"; then
+    pid=$(lsof -ti :"$port" 2>/dev/null || true)
+  fi
+  if [[ -n "$pid" ]]; then
+    info "Port $port in use by PID $pid. Killing..."
+    kill $pid 2>/dev/null || warn "Unable to kill process on port $port; startup may fail if it remains bound."
+    local count=0
+    while lsof -tiTCP:"$port" -sTCP:LISTEN &>/dev/null; do
       sleep 1
-    fi
+      count=$((count + 1))
+      if [[ $count -ge 10 ]]; then
+        warn "Port $port is still in use after waiting; startup may fail if it remains bound."
+        break
+      fi
+    done
   fi
 }
 
@@ -140,6 +149,15 @@ info "=== Step 2: Setting up frontend ==="
 
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
+if [[ -f "$PROJECT_DIR/package.json" ]]; then
+  if [[ ! -d "$PROJECT_DIR/node_modules/@playwright/test" ]]; then
+    info "Installing root npm dependencies..."
+    (cd "$PROJECT_DIR" && npm install --ignore-scripts)
+  else
+    info "Root npm dependencies already exist"
+  fi
+fi
+
 if [[ ! -d "$FRONTEND_DIR" ]]; then
   info "Creating frontend directory..."
   mkdir -p "$FRONTEND_DIR"
@@ -170,41 +188,42 @@ COMPOSE_PROJECT_NAME="ai-material-platform"
 if [[ -f "$DOCKER_COMPOSE_FILE" ]]; then
   # Check if Docker daemon is running
   if ! docker info &>/dev/null; then
-    fail "Docker daemon is not running. Please start Docker Desktop."
+    warn "Docker daemon is not running. Skipping PostgreSQL and Qdrant containers."
+    warn "Local development will use SQLite unless DATABASE_URL points to an external database."
+  else
+    info "Using docker-compose file: $DOCKER_COMPOSE_FILE"
+
+    # Stop existing containers for idempotency
+    (cd "$PROJECT_DIR" && docker-compose -p "$COMPOSE_PROJECT_NAME" down 2>/dev/null || true)
+
+    info "Starting PostgreSQL and Qdrant containers..."
+    cd "$PROJECT_DIR"
+    docker-compose -p "$COMPOSE_PROJECT_NAME" up -d postgres qdrant
+
+    info "Waiting for PostgreSQL to be ready..."
+    max_wait=30
+    count=0
+    while ! docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" pg_isready -U material -d material_retrieval &>/dev/null 2>&1; do
+      sleep 1
+      count=$((count + 1))
+      if [[ $count -ge $max_wait ]]; then
+        fail "PostgreSQL failed to start within ${max_wait}s"
+      fi
+    done
+    info "PostgreSQL is ready."
+
+    info "Waiting for Qdrant to be ready..."
+    count=0
+    while ! curl -sf "http://localhost:6333/healthz" &>/dev/null && ! curl -sf "http://localhost:6333/health" &>/dev/null; do
+      sleep 1
+      count=$((count + 1))
+      if [[ $count -ge $max_wait ]]; then
+        warn "Qdrant health check failed (may still be starting). Proceeding..."
+        break
+      fi
+    done
+    info "Qdrant check complete."
   fi
-
-  info "Using docker-compose file: $DOCKER_COMPOSE_FILE"
-
-  # Stop existing containers for idempotency
-  (cd "$PROJECT_DIR" && docker-compose -p "$COMPOSE_PROJECT_NAME" down 2>/dev/null || true)
-
-  info "Starting PostgreSQL and Qdrant containers..."
-  cd "$PROJECT_DIR"
-  docker-compose -p "$COMPOSE_PROJECT_NAME" up -d
-
-  info "Waiting for PostgreSQL to be ready..."
-  max_wait=30
-  count=0
-  while ! docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" pg_isready -U postgres &>/dev/null 2>&1; do
-    sleep 1
-    count=$((count + 1))
-    if [[ $count -ge $max_wait ]]; then
-      fail "PostgreSQL failed to start within ${max_wait}s"
-    fi
-  done
-  info "PostgreSQL is ready."
-
-  info "Waiting for Qdrant to be ready..."
-  count=0
-  while ! curl -sf "http://localhost:6333/health" &>/dev/null; do
-    sleep 1
-    count=$((count + 1))
-    if [[ $count -ge $max_wait ]]; then
-      warn "Qdrant health check failed (may still be starting). Proceeding..."
-      break
-    fi
-  done
-  info "Qdrant check complete."
 else
   warn "No docker-compose.yml found. Skipping Docker services."
   warn "To run without Docker, ensure PostgreSQL (5432) and Qdrant (6333) are available externally."

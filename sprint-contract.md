@@ -1,78 +1,52 @@
-## Sprint 11: System Configuration and Audit Logging
+## Sprint 12: Deployment, Integration Testing, and Polish
 
 ### Features
-- F16-System configuration: system info maintenance for system name and icon.
-- F16-Reason options maintenance for stop purchase and stop use reason lists.
-- F16-Approval mode switch between simple approval and multi-node workflow.
-- F20-Operational audit log covering backend write operations with user, resource, action, before value, after value, timestamp, and source.
-- F20-Frontend audit log list view with filters, pagination, and role-based visibility.
-- F20-Before/after value diff view for audited changes.
-- F20-Excel export for compliance audit.
+- Docker Compose setup for private化 deployment.
+- Nginx configuration for production.
+- Playwright E2E smoke tests for critical user flows.
+- README and documentation polish for local, private化, and production operation.
+- Bug fixes and integration testing across the completed platform.
 
 ### Success criteria (black-box-verifiable)
-- [ ] Administrators can maintain system identity settings and see those settings persist in the browser.
+- [ ] A fresh private化 deployment can be started with Docker Compose and exposes the complete application stack.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser as a seeded administrator.
-  2. Open the system configuration page from the system administration navigation, or directly open its documented route under `http://localhost:5173`.
-  3. Change the system name to `Sprint 11 System <timestamp>` and upload or select a visible system icon through the configuration UI.
-  4. Save the configuration, reload `http://localhost:5173`, and assert the visible app header, title area, or configuration form shows `Sprint 11 System <timestamp>` and the selected icon.
-  5. Open `http://localhost:8000/openapi.json`, identify the documented system configuration read endpoint, and send a real HTTP request as the same administrator.
-  6. Assert the API response exposes the saved system name and icon metadata without requiring source-code inspection.
+  1. From a clean checkout, start the stack with `docker compose up -d --build`.
+  2. Poll `http://localhost:8000/docs` until it returns HTTP 200 and assert the FastAPI documentation page is reachable.
+  3. Open `http://localhost:5173` in a browser and assert the AI Material Management Platform shell loads without a blank page or visible startup error.
+  4. Verify the Compose project includes running services for the backend API, frontend or web entrypoint, PostgreSQL, and Qdrant by using `docker compose ps`.
+  5. Stop the stack with `docker compose down`, start it again with `docker compose up -d`, and assert `http://localhost:5173` and `http://localhost:8000/docs` become reachable again without manual database initialization.
 
-- [ ] Administrators can manage stop purchase and stop use reason options, and workflow forms consume the configured options.
+- [ ] The production Nginx configuration serves the frontend and reverse-proxies backend API traffic through one HTTP entrypoint.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
-  2. On the system configuration page, add an enabled stop purchase reason named `Sprint 11 Stop Purchase <timestamp>` and an enabled stop use reason named `Sprint 11 Stop Use <timestamp>`.
-  3. Save the reason configuration, reload `http://localhost:5173`, and assert both new reasons remain listed with their enabled status.
-  4. Open the stop purchase application form from `http://localhost:5173` and assert the stop purchase reason selector includes `Sprint 11 Stop Purchase <timestamp>`.
-  5. Open the stop use application form from `http://localhost:5173` and assert the stop use reason selector includes `Sprint 11 Stop Use <timestamp>`.
-  6. Disable or delete the two Sprint 11 reason options, reload the relevant forms, and assert the removed or disabled options are no longer selectable for new submissions.
+  1. Start the production-style deployment using the documented Docker Compose or Nginx command from the README.
+  2. Open `http://localhost` or the documented production URL in a browser and assert the frontend loads successfully.
+  3. Request `http://localhost/api/v1/materials` or another documented API route through Nginx and assert the response comes from the backend API, with an expected success or authorization response rather than a static-file fallback.
+  4. Request `http://localhost/docs` or the documented proxied API docs route and assert the FastAPI documentation is reachable through Nginx.
+  5. Reload the browser on a deep frontend route such as `http://localhost/materials` or another documented route and assert Nginx returns the application shell instead of HTTP 404.
 
-- [ ] The approval mode switch persists and changes externally visible workflow behavior.
+- [ ] Playwright E2E smoke tests cover the critical completed user flows and can be run as a single black-box command.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
-  2. On the system configuration page, set approval mode to simple approval and save.
-  3. Open a new material category or new material code application workflow at `http://localhost:5173`, create a draft request, and assert the approval route preview or submitted request shows a single approval step.
-  4. Return to system configuration, set approval mode to multi-node workflow, and save without restarting backend or frontend services.
-  5. Create another new material category or new material code application request from `http://localhost:5173` and assert the approval route preview or submitted request shows multiple approval nodes such as department approval followed by asset management approval.
-  6. Reload `http://localhost:5173`, reopen system configuration, and assert the selected approval mode remains multi-node workflow.
+  1. Start the system with `bash init.sh`.
+  2. Run the documented E2E command, `npx playwright test`, from the documented project directory.
+  3. Assert the Playwright run exits with code 0 and reports passing smoke tests for standard management, material management, application workflows, user/role administration, system configuration or audit logging, and LLM gateway UI availability.
+  4. Open the generated Playwright report or trace output using the documented command and assert the report identifies the tested browser, tested URLs under `http://localhost:5173`, and pass/fail status for each smoke test.
+  5. Intentionally stop the backend service, rerun one documented smoke test, and assert Playwright fails with a clear service-unavailable or navigation failure instead of falsely passing.
 
-- [ ] Backend write operations create operational audit records that are visible in the audit log list with filters and pagination.
+- [ ] Documentation enables an operator to run local development, private化 deployment, production Nginx, and E2E verification without reading source code.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
-  2. Perform at least three distinct write operations through the browser or documented API surface, including updating the system name, adding a reason option, and changing the approval mode.
-  3. Open the audit log page from system administration, or directly open its documented route under `http://localhost:5173`.
-  4. Assert the audit log list includes entries for the three writes with user, resource, action, timestamp, and source values visible.
-  5. Use the audit log filters for time range, resource or type, and user; assert the list includes matching entries and excludes non-matching entries.
-  6. Create enough additional write operations to exceed one page of audit entries, use the pagination controls, and assert entries can be viewed across pages without losing the active filters.
-  7. Open `http://localhost:8000/openapi.json`, identify the documented audit log list endpoint, and assert real HTTP requests return the same audited resource/action data shown in the browser.
+  1. Open `README.md` and assert it documents prerequisites, environment variables, `bash init.sh`, Docker Compose private化 startup, Nginx production startup, Playwright E2E execution, and shutdown/cleanup commands.
+  2. Follow the README local development instructions exactly, then assert `http://localhost:5173` and `http://localhost:8000/docs` are reachable.
+  3. Follow the README Docker Compose private化 instructions exactly, then assert the documented frontend and API URLs are reachable.
+  4. Follow the README E2E verification instructions exactly and assert the documented command produces a passing test result.
+  5. Assert the README includes troubleshooting guidance for common startup failures such as occupied ports, missing Docker daemon, database connectivity, and Playwright browser installation.
 
-- [ ] Audit details show before/after changes as a readable diff without exposing unrelated sensitive values.
+- [ ] Integration polish removes cross-module regressions from the completed platform's browser-visible workflows.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
-  2. Change the system name from one unique value to another, such as `Sprint 11 Before <timestamp>` to `Sprint 11 After <timestamp>`.
-  3. Open the audit log page at `http://localhost:5173` and locate the audit record for that system configuration update.
-  4. Open the audit detail or diff view for the record and assert it shows the changed field, the before value `Sprint 11 Before <timestamp>`, and the after value `Sprint 11 After <timestamp>`.
-  5. Repeat with a reason option update and assert the diff view clearly identifies added, removed, or edited reason values.
-  6. Assert the detail view does not display plaintext secrets such as model API keys from prior LLM gateway configuration records.
-
-- [ ] Audit visibility is role-based and restricts non-administrator access.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
-  2. Confirm the administrator can open the audit log page under `http://localhost:5173` and can view audit entries.
-  3. Sign out or switch to a seeded non-administrator user with no audit-log permission.
-  4. Attempt to open the same audit log route under `http://localhost:5173` and assert the UI hides the navigation item and blocks direct access with an access-denied, not-found, or redirect state.
-  5. Open `http://localhost:8000/openapi.json`, identify the documented audit log list endpoint, and send a real HTTP request as the non-administrator user.
-  6. Assert the API rejects the non-administrator audit log request with an authorization failure such as HTTP 401 or HTTP 403.
-
-- [ ] Administrators can export filtered audit logs to an Excel file suitable for compliance review.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`, then generate at least two Sprint 11 audit entries from `http://localhost:5173` using unique values that include `Sprint 11 Export <timestamp>`.
-  2. Open the audit log page, apply a filter that includes the generated Sprint 11 audit entries and excludes unrelated historical entries.
-  3. Click the Excel export action and assert the browser downloads an `.xlsx` file without server errors.
-  4. Open the downloaded workbook with a standard spreadsheet reader or script, and assert it contains column headers for timestamp, user, resource, action, source, before value, and after value.
-  5. Assert the workbook contains the filtered Sprint 11 audit entries and does not contain entries outside the active filter.
-  6. Assert the workbook preserves readable before/after values for compliance review.
+  1. Start the system with `bash init.sh` and open `http://localhost:5173` as a seeded administrator.
+  2. Navigate through the major sidebar modules for standard management, material management, application workflows, AI infrastructure, system administration, system configuration, and audit logs; assert each page renders without a browser error overlay or blank state caused by JavaScript failures.
+  3. Create or update one harmless record through a documented UI flow, such as a reason option, role, product name, or material draft, and assert the change is visible after reloading `http://localhost:5173`.
+  4. Use the browser developer console or Playwright page error collection during the flow and assert there are no uncaught JavaScript exceptions.
+  5. Open `http://localhost:8000/openapi.json` and assert documented routes for the completed modules are still present after the deployment and polish work.
 
 ---
 
