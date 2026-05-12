@@ -63,7 +63,7 @@ export function CategoryApplication() {
             <input
               type="text"
               value="技术部"
-              onChange={(e) => setFormData({ ...formData })}
+              onChange={() => setFormData({ ...formData })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

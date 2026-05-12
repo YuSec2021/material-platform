@@ -16,7 +16,7 @@ interface StopMaterial {
 
 export function StopPurchaseApplication() {
   const navigate = useNavigate();
-  const [materials, setMaterials] = useState<StopMaterial[]>([
+  const [materials] = useState<StopMaterial[]>([
     { id: 1, code: "MAT003", name: "订书机-标准型", spec: "标准型", stock: 0, reason: "" },
   ]);
   const [isModalOpen, setIsModalOpen] = useState(false);
