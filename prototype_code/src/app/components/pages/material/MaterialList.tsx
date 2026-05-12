@@ -1,407 +1,881 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, Download, ChevronRight, ChevronDown, Image, Sparkles, FileInput } from "lucide-react";
-import { apiClient, type Material } from "@/app/api/client";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Edit,
+  FileInput,
+  Image,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import {
+  apiClient,
+  type Attribute,
+  type Brand,
+  type Category,
+  type Material,
+  type MaterialLibrary,
+  type MaterialPayload,
+  type ProductName,
+} from "@/app/api/client";
+import { Badge } from "@/app/components/ui/badge";
 import { ApiState } from "../../common/ApiState";
-import { DataTable } from "../../common/DataTable";
-import { StatusBadge } from "../../common/StatusBadge";
 import { Modal } from "../../common/Modal";
 
-interface MaterialLibrary {
-  id: number;
+type MaterialFormState = {
   name: string;
-  code: string;
-  children?: MaterialCategory[];
+  material_library_id: number | "";
+  category_id: number | "";
+  product_name_id: number | "";
+  unit: string;
+  brand_id: number | "";
+  description: string;
+  attributes: Record<string, string>;
+  images: File[];
+  attachments: File[];
+};
+
+type LifecycleAction = "stop_purchase" | "stop_use";
+type AiModalType = "治理" | "添加" | "匹配";
+
+const emptyForm: MaterialFormState = {
+  name: "",
+  material_library_id: "",
+  category_id: "",
+  product_name_id: "",
+  unit: "",
+  brand_id: "",
+  description: "",
+  attributes: {},
+  images: [],
+  attachments: [],
+};
+
+function normalizeStatus(status: Material["status"]): "normal" | "stop_purchase" | "stop_use" {
+  if (status === "stop-purchase") {
+    return "stop_purchase";
+  }
+  if (status === "stop-use") {
+    return "stop_use";
+  }
+  return status;
 }
 
-interface MaterialCategory {
-  id: number;
-  name: string;
-  children?: MaterialCategory[];
+function statusMeta(status: Material["status"]) {
+  const normalized = normalizeStatus(status);
+  if (normalized === "stop_purchase") {
+    return {
+      label: "停采",
+      className: "border-orange-200 bg-orange-50 text-orange-700",
+    };
+  }
+  if (normalized === "stop_use") {
+    return {
+      label: "停用",
+      className: "border-gray-200 bg-gray-100 text-gray-700",
+    };
+  }
+  return {
+    label: "正常",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  };
 }
 
-const mockLibraries: MaterialLibrary[] = [
-  {
-    id: 1,
-    name: "全部物料",
-    code: "ALL",
-    children: [
-      { id: 1, name: "办公用品", children: [
-        { id: 11, name: "纸张" },
-        { id: 12, name: "文具" },
-      ]},
-      { id: 2, name: "电子设备", children: [
-        { id: 21, name: "电脑" },
-        { id: 22, name: "配件" },
-      ]},
-    ],
-  },
-  {
-    id: 2,
-    name: "通用物料库",
-    code: "GY",
-    children: [
-      { id: 3, name: "办公用品" },
-    ],
-  },
-  {
-    id: 3,
-    name: "专用物料库",
-    code: "ZY",
-    children: [
-      { id: 4, name: "电子设备" },
-    ],
-  },
-];
+function materialToForm(material: Material): MaterialFormState {
+  const attributes = Object.fromEntries(
+    Object.entries(material.attributes ?? {})
+      .filter(([key]) => !key.startsWith("_"))
+      .map(([key, value]) => [key, String(value ?? "")]),
+  );
+
+  return {
+    name: material.name,
+    material_library_id: material.material_library_id,
+    category_id: material.category_id,
+    product_name_id: material.product_name_id,
+    unit: material.unit,
+    brand_id: material.brand_id ?? "",
+    description: material.description,
+    attributes,
+    images: [],
+    attachments: [],
+  };
+}
+
+function selectedName<T extends { id: number; name: string }>(items: T[] | undefined, id: number | "") {
+  return items?.find((item) => item.id === id)?.name ?? "";
+}
+
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function toPayload(form: MaterialFormState, attributes: Attribute[]): MaterialPayload {
+  const attributePayload = attributes.reduce<Record<string, unknown>>((current, attribute) => {
+    current[attribute.name] = form.attributes[attribute.name] ?? "";
+    return current;
+  }, {});
+
+  return {
+    name: form.name.trim(),
+    material_library_id: Number(form.material_library_id),
+    category_id: Number(form.category_id),
+    product_name_id: Number(form.product_name_id),
+    unit: form.unit.trim(),
+    brand_id: form.brand_id === "" ? null : Number(form.brand_id),
+    description: form.description.trim(),
+    status: "normal",
+    attributes: {
+      ...attributePayload,
+      _images: form.images.map((file) => file.name),
+      _attachments: form.attachments.map((file) => file.name),
+    },
+    enabled: true,
+  };
+}
+
+function TreeCategory({
+  category,
+  selectedCategoryId,
+  expandedCategoryIds,
+  onToggle,
+  onSelect,
+}: {
+  category: Category;
+  selectedCategoryId: number | "";
+  expandedCategoryIds: number[];
+  onToggle: (id: number) => void;
+  onSelect: (id: number) => void;
+}) {
+  const expanded = expandedCategoryIds.includes(category.id);
+  const selected = selectedCategoryId === category.id;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => {
+          onToggle(category.id);
+          onSelect(category.id);
+        }}
+        className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm ${
+          selected ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+        }`}
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <span className="truncate">{category.name}</span>
+      </button>
+    </div>
+  );
+}
 
 export function MaterialList() {
-  const [selectedLibrary, setSelectedLibrary] = useState<MaterialLibrary>(mockLibraries[0]!);
+  const queryClient = useQueryClient();
+  const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
+  const [expandedLibraryIds, setExpandedLibraryIds] = useState<number[]>([]);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<number[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [expandedLibraries, setExpandedLibraries] = useState<number[]>([1]);
-  const [expandedCategories, setExpandedCategories] = useState<number[]>([1]);
+  const [statusFilter, setStatusFilter] = useState<"" | "normal" | "stop_purchase" | "stop_use">("");
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [form, setForm] = useState<MaterialFormState>(emptyForm);
+  const [imageFeedback, setImageFeedback] = useState("");
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [aiModalType, setAiModalType] = useState<'治理' | '添加' | '匹配'>('治理');
-  const query = useQuery({
-    queryKey: ["materials"],
-    queryFn: apiClient.materials,
+  const [aiModalType, setAiModalType] = useState<AiModalType>("治理");
+  const [lifecycleMaterial, setLifecycleMaterial] = useState<Material | null>(null);
+  const [lifecycleAction, setLifecycleAction] = useState<LifecycleAction>("stop_purchase");
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [lifecycleFeedback, setLifecycleFeedback] = useState("");
+
+  const materialsQuery = useQuery({
+    queryKey: ["materials", searchTerm, statusFilter],
+    queryFn: () => apiClient.materials({ search: searchTerm.trim(), status: statusFilter }),
     retry: false,
   });
 
-  const materials = (query.data ?? []).filter((item) =>
-    item.name.includes(searchTerm) || item.code.includes(searchTerm),
-  );
+  const librariesQuery = useQuery({
+    queryKey: ["material-libraries"],
+    queryFn: apiClient.materialLibraries,
+    retry: false,
+  });
+
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: apiClient.categories,
+    retry: false,
+  });
+
+  const productNamesQuery = useQuery({
+    queryKey: ["product-names"],
+    queryFn: apiClient.productNames,
+    retry: false,
+  });
+
+  const brandsQuery = useQuery({
+    queryKey: ["brands"],
+    queryFn: apiClient.brands,
+    retry: false,
+  });
+
+  const selectedProductNameId = form.product_name_id === "" ? null : Number(form.product_name_id);
+  const attributesQuery = useQuery({
+    queryKey: ["attributes", selectedProductNameId],
+    queryFn: () => apiClient.attributes(selectedProductNameId),
+    enabled: isFormOpen && selectedProductNameId !== null,
+    retry: false,
+  });
+
+  useEffect(() => {
+    const libraries = librariesQuery.data ?? [];
+    if (selectedLibraryId === "" && libraries.length > 0) {
+      setSelectedLibraryId(libraries[0]!.id);
+      setExpandedLibraryIds([libraries[0]!.id]);
+    }
+  }, [librariesQuery.data, selectedLibraryId]);
+
+  useEffect(() => {
+    const selectedProduct = productNamesQuery.data?.find((item) => item.id === selectedProductNameId);
+    if (selectedProduct && !form.unit) {
+      setForm((current) => ({ ...current, unit: selectedProduct.unit }));
+    }
+  }, [form.unit, productNamesQuery.data, selectedProductNameId]);
+
+  const materialRows = useMemo(() => materialsQuery.data ?? [], [materialsQuery.data]);
+  const libraries = librariesQuery.data ?? [];
+  const categories = categoriesQuery.data ?? [];
+  const productNames = productNamesQuery.data ?? [];
+  const brands = brandsQuery.data ?? [];
+  const dynamicAttributes = attributesQuery.data ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: MaterialPayload) =>
+      editingMaterial ? apiClient.updateMaterial(editingMaterial.id, payload) : apiClient.createMaterial(payload),
+    onSuccess: async () => {
+      setIsFormOpen(false);
+      setEditingMaterial(null);
+      setForm(emptyForm);
+      setImageFeedback("");
+      await queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.deleteMaterial(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+  });
+
+  const lifecycleMutation = useMutation({
+    mutationFn: ({ material, action, reason }: { material: Material; action: LifecycleAction; reason: string }) =>
+      action === "stop_purchase"
+        ? apiClient.stopPurchaseMaterial(material.id, reason)
+        : apiClient.transitionMaterial(material.id, "stop_use", reason),
+    onSuccess: async (_updated, variables) => {
+      setLifecycleFeedback(`${variables.action === "stop_purchase" ? "停采" : "停用"}成功：${variables.reason}`);
+      await queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+    onError: (error) => {
+      setLifecycleFeedback(`操作失败：${error.message}`);
+    },
+  });
+
+  const openCreateForm = () => {
+    setEditingMaterial(null);
+    setForm({
+      ...emptyForm,
+      material_library_id: selectedLibraryId,
+      category_id: selectedCategoryId,
+    });
+    setImageFeedback("");
+    setIsFormOpen(true);
+  };
+
+  const openEditForm = (material: Material) => {
+    setEditingMaterial(material);
+    setForm(materialToForm(material));
+    setImageFeedback("");
+    setIsFormOpen(true);
+  };
+
+  const handleImages = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    const nextImages = [...form.images, ...selected];
+    if (nextImages.length > 3) {
+      setImageFeedback("最多上传 3 张图片，已阻止第 4 张图片。");
+      event.target.value = "";
+      return;
+    }
+    setImageFeedback(selected.length > 0 ? `已选择 ${nextImages.length} / 3 张图片` : "");
+    setForm((current) => ({ ...current, images: nextImages }));
+    event.target.value = "";
+  };
+
+  const handleAttachments = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    setForm((current) => ({ ...current, attachments: [...current.attachments, ...selected] }));
+    event.target.value = "";
+  };
+
+  const handleSubmit = () => {
+    saveMutation.mutate(toPayload(form, dynamicAttributes));
+  };
+
+  const handleDelete = (material: Material) => {
+    if (window.confirm(`确定删除物料 ${material.name} 吗？该操作不可撤销。`)) {
+      deleteMutation.mutate(material.id);
+    }
+  };
+
+  const openLifecycle = (material: Material, action: LifecycleAction) => {
+    setLifecycleMaterial(material);
+    setLifecycleAction(action);
+    setLifecycleReason("");
+    setLifecycleFeedback("");
+  };
+
+  const submitLifecycle = () => {
+    if (!lifecycleMaterial || !lifecycleReason.trim()) {
+      return;
+    }
+    lifecycleMutation.mutate({
+      material: lifecycleMaterial,
+      action: lifecycleAction,
+      reason: lifecycleReason.trim(),
+    });
+  };
+
+  const exportCsv = () => {
+    const headers = ["物料编码", "物料名称", "物料库", "类目", "品名", "单位", "品牌", "状态", "描述"];
+    const rows = materialRows.map((material) => [
+      material.code,
+      material.name,
+      material.material_library,
+      material.category,
+      material.product_name,
+      material.unit,
+      material.brand,
+      statusMeta(material.status).label,
+      material.description,
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "materials.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const toggleLibrary = (id: number) => {
-    setExpandedLibraries(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setExpandedLibraryIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+    setSelectedLibraryId(id);
   };
 
   const toggleCategory = (id: number) => {
-    setExpandedCategories(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setExpandedCategoryIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
-  const renderCategory = (category: MaterialCategory, level: number = 0) => (
-    <div key={category.id}>
-      <button
-        onClick={() => toggleCategory(category.id)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm text-gray-700 hover:bg-gray-100"
-        style={{ paddingLeft: `${(level + 1) * 12}px` }}
-      >
-        {category.children && category.children.length > 0 && (
-          expandedCategories.includes(category.id) ? (
-            <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ChevronRight className="w-3 h-3" />
-          )
-        )}
-        <span>{category.name}</span>
-      </button>
-      {expandedCategories.includes(category.id) && category.children && (
-        <div>
-          {category.children.map(child => renderCategory(child, level + 1))}
-        </div>
-      )}
-    </div>
-  );
-
-  const columns = [
-    { header: "编号", accessor: "id" as keyof Material, width: "80px" },
-    { header: "物料名称", accessor: "name" as keyof Material },
-    { header: "物料编码", accessor: "code" as keyof Material, width: "120px" },
-    { header: "所属类目", accessor: "category" as keyof Material },
-    {
-      header: "规格型号",
-      accessor: (row: Material) => {
-        const spec = row.attributes.spec || row.attributes["规格型号"] || row.description;
-        return spec ? String(spec) : "-";
-      },
-    },
-    { header: "计量单位", accessor: "unit" as keyof Material, width: "100px" },
-    {
-      header: "图片",
-      accessor: (row: Material) => (
-        <div className="flex items-center justify-center">
-          <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center" title={row.name}>
-            <Image className="w-4 h-4 text-gray-400" />
-          </div>
-        </div>
-      ),
-      width: "80px"
-    },
-    {
-      header: "状态",
-      accessor: (row: Material) => (
-        <StatusBadge status={row.status === "stop_purchase" ? "stop-purchase" : row.status === "stop_use" ? "stop-use" : row.status}>
-          {row.status === 'normal' ? '正常' : row.status === 'stop_purchase' || row.status === 'stop-purchase' ? '停采' : '停用'}
-        </StatusBadge>
-      ),
-      width: "100px"
-    },
-    {
-      header: "操作",
-      accessor: (row: Material) => (
-        <div className="flex gap-2">
-          <button className="text-blue-600 hover:underline text-sm">编辑</button>
-          {row.status === 'normal' && (
-            <button className="text-orange-600 hover:underline text-sm">停采</button>
-          )}
-          {(row.status === 'stop_purchase' || row.status === 'stop-purchase') && (
-            <button className="text-gray-600 hover:underline text-sm">停用</button>
-          )}
-          <button className="text-red-600 hover:underline text-sm">删除</button>
-        </div>
-      ),
-      width: "180px"
-    },
-  ];
+  const formReady =
+    form.name.trim() &&
+    form.material_library_id !== "" &&
+    form.category_id !== "" &&
+    form.product_name_id !== "";
 
   return (
-    <div className="flex gap-6 h-full">
-      {/* 左侧物料库和类目树 */}
-      <div className="w-64 bg-white rounded-lg border border-gray-200 p-4 overflow-y-auto">
-        <h2 className="text-sm text-gray-900 mb-4">物料库</h2>
-        <div className="space-y-1">
-          {mockLibraries.map((library) => (
-            <div key={library.id}>
-              <button
-                onClick={() => {
-                  toggleLibrary(library.id);
-                  setSelectedLibrary(library);
-                }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
-                  selectedLibrary.id === library.id
-                    ? "bg-blue-50 text-blue-600"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {expandedLibraries.includes(library.id) ? (
-                    <ChevronDown className="w-4 h-4" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4" />
+    <div className="flex h-full gap-6">
+      <aside className="w-64 shrink-0 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4">
+        <h2 className="mb-4 text-sm font-medium text-gray-900">物料库 / 类目</h2>
+        <ApiState
+          isLoading={librariesQuery.isLoading || categoriesQuery.isLoading}
+          isError={librariesQuery.isError || categoriesQuery.isError}
+          isEmpty={!librariesQuery.isLoading && !categoriesQuery.isLoading && libraries.length === 0}
+          emptyLabel="暂无物料库"
+          onRetry={() => {
+            void librariesQuery.refetch();
+            void categoriesQuery.refetch();
+          }}
+        >
+          <div className="space-y-1">
+            {libraries.map((library: MaterialLibrary) => {
+              const expanded = expandedLibraryIds.includes(library.id);
+              return (
+                <div key={library.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggleLibrary(library.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${
+                      selectedLibraryId === library.id ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+                    }`}
+                  >
+                    <span className="truncate">{library.name}</span>
+                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {expanded && (
+                    <div className="mt-1 space-y-1 pl-3">
+                      {categories.map((category) => (
+                        <TreeCategory
+                          key={`${library.id}-${category.id}`}
+                          category={category}
+                          selectedCategoryId={selectedCategoryId}
+                          expandedCategoryIds={expandedCategoryIds}
+                          onToggle={toggleCategory}
+                          onSelect={setSelectedCategoryId}
+                        />
+                      ))}
+                    </div>
                   )}
-                  <span>{library.name}</span>
                 </div>
-              </button>
-              {expandedLibraries.includes(library.id) && library.children && (
-                <div className="mt-1">
-                  {library.children.map(category => renderCategory(category))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+              );
+            })}
+          </div>
+        </ApiState>
+      </aside>
 
-      {/* 右侧物料列表 */}
-      <div className="flex-1 space-y-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl text-gray-900">物料管理</h1>
-          <div className="flex gap-2">
+      <main className="min-w-0 flex-1 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl text-gray-900">物料管理</h1>
+            <p className="mt-1 text-sm text-gray-500">物料列表、筛选、导出、建档和生命周期操作均连接后端 API。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["治理", "添加", "匹配"] as AiModalType[]).map((label) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => {
+                  setAiModalType(label);
+                  setIsAIModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
+              >
+                <Sparkles className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
             <button
-              onClick={() => { setAiModalType('治理'); setIsAIModalOpen(true); }}
-              className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-md text-sm"
+              type="button"
+              onClick={exportCsv}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
-              <Sparkles className="w-4 h-4" />
-              AI物料治理
-            </button>
-            <button
-              onClick={() => { setAiModalType('添加'); setIsAIModalOpen(true); }}
-              className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-md text-sm"
-            >
-              <Sparkles className="w-4 h-4" />
-              AI添加物料
-            </button>
-            <button
-              onClick={() => { setAiModalType('匹配'); setIsAIModalOpen(true); }}
-              className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-md text-sm"
-            >
-              <Sparkles className="w-4 h-4" />
-              AI物料匹配
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-              <Download className="w-4 h-4" />
+              <Download className="h-4 w-4" />
               导出
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              <Plus className="w-4 h-4" />
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4" />
               新增物料
             </button>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 flex-1 max-w-md">
-              <Search className="w-5 h-5 text-gray-400" />
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex min-w-64 flex-1 items-center gap-2 text-sm text-gray-600">
+              <Search className="h-5 w-5 text-gray-400" />
               <input
-                type="text"
-                placeholder="搜索物料名称或编码..."
+                type="search"
+                placeholder="搜索物料名称、编码、描述或品名..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-1 outline-none text-sm"
+                onChange={(event) => setSearchTerm(event.target.value)}
+                className="flex-1 outline-none"
               />
-            </div>
-            <select className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-              <option>全部状态</option>
-              <option>正常</option>
-              <option>停采</option>
-              <option>停用</option>
+            </label>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as "" | "normal" | "stop_purchase" | "stop_use")}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              aria-label="状态筛选"
+            >
+              <option value="">全部状态</option>
+              <option value="normal">正常</option>
+              <option value="stop_purchase">停采</option>
+              <option value="stop_use">停用</option>
             </select>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-              搜索
-            </button>
           </div>
         </div>
 
         <ApiState
-          isLoading={query.isLoading}
-          isError={query.isError}
-          isEmpty={!query.isLoading && !query.isError && materials.length === 0}
+          isLoading={materialsQuery.isLoading}
+          isError={materialsQuery.isError}
+          isEmpty={!materialsQuery.isLoading && !materialsQuery.isError && materialRows.length === 0}
           emptyLabel="后端暂无物料数据"
-          onRetry={() => void query.refetch()}
+          onRetry={() => void materialsQuery.refetch()}
         >
-          <DataTable data={materials} columns={columns} />
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1120px]">
+                <thead className="border-b border-gray-200 bg-gray-50">
+                  <tr>
+                    {["物料编码", "物料名称", "所属类目", "品名", "物料库", "单位", "品牌", "属性", "状态", "操作"].map((header) => (
+                      <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {materialRows.map((material) => {
+                    const status = normalizeStatus(material.status);
+                    const meta = statusMeta(material.status);
+                    return (
+                      <tr key={material.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-mono text-sm text-gray-700">{material.code}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{material.name}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{material.category}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{material.product_name}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{material.material_library}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{material.unit || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{material.brand || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {Object.entries(material.attributes ?? {})
+                            .filter(([key]) => !key.startsWith("_"))
+                            .slice(0, 2)
+                            .map(([key, value]) => `${key}: ${String(value)}`)
+                            .join("；") || "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline" className={meta.className}>
+                            {meta.label}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditForm(material)}
+                              className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                              编辑
+                            </button>
+                            {status === "normal" && (
+                              <button
+                                type="button"
+                                onClick={() => openLifecycle(material, "stop_purchase")}
+                                className="rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-700 hover:bg-orange-50"
+                              >
+                                停采
+                              </button>
+                            )}
+                            {status === "stop_purchase" && (
+                              <button
+                                type="button"
+                                onClick={() => openLifecycle(material, "stop_use")}
+                                className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                              >
+                                停用
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(material)}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </ApiState>
+      </main>
 
-        <Modal
-          isOpen={isAIModalOpen}
-          onClose={() => setIsAIModalOpen(false)}
-          title={
-            aiModalType === '治理' ? 'AI物料治理' :
-            aiModalType === '添加' ? 'AI添加物料' : 'AI物料匹配'
-          }
-          size="lg"
-          footer={
-            <>
-              <button
-                onClick={() => setIsAIModalOpen(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+      <Modal
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        title={editingMaterial ? "编辑物料" : "新增物料"}
+        size="xl"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setIsFormOpen(false)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!formReady || saveMutation.isPending}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {saveMutation.isPending ? "保存中..." : "保存"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>物料名称</span>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>物料编码</span>
+              <input
+                type="text"
+                value={editingMaterial?.code ?? "保存后自动生成"}
+                readOnly
+                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              />
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>物料库</span>
+              <select
+                value={form.material_library_id}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, material_library_id: event.target.value ? Number(event.target.value) : "" }))
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               >
-                取消
-              </button>
-              <button className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700">
-                {aiModalType === '治理' ? '开始分析' : aiModalType === '添加' ? '开始添加' : '开始匹配'}
-              </button>
-            </>
-          }
-        >
-          {aiModalType === '治理' ? (
-            <div className="space-y-4">
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="text-sm text-purple-900 mb-1">AI物料治理功能</h4>
-                    <p className="text-xs text-purple-700">
-                      添加物料支持导入，对原始导入表进行AI分析，形成标准化数据
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-700 mb-2">导入物料文件</label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-purple-500 transition-colors cursor-pointer">
-                  <FileInput className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600">点击或拖拽上传文件</p>
-                  <p className="text-xs text-gray-400 mt-1">支持 Excel、CSV 格式</p>
-                </div>
-              </div>
+                <option value="">请选择物料库</option>
+                {libraries.map((library) => (
+                  <option key={library.id} value={library.id}>
+                    {library.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>类目级联选择</span>
+              <select
+                value={form.category_id}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, category_id: event.target.value ? Number(event.target.value) : "" }))
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">请选择类目</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name} ({category.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>品名</span>
+              <select
+                value={form.product_name_id}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, product_name_id: event.target.value ? Number(event.target.value) : "", attributes: {} }))
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">请选择品名</option>
+                {productNames.map((productName) => (
+                  <option key={productName.id} value={productName.id}>
+                    {productName.name} / {productName.category}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>品牌</span>
+              <select
+                value={form.brand_id}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, brand_id: event.target.value ? Number(event.target.value) : "" }))
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">无品牌</option>
+                {brands.map((brand: Brand) => (
+                  <option key={brand.id} value={brand.id}>
+                    {brand.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>计量单位</span>
+              <input
+                type="text"
+                value={form.unit}
+                onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <label className="space-y-1 text-sm text-gray-700">
+              <span>选择摘要</span>
+              <input
+                type="text"
+                readOnly
+                value={[
+                  selectedName<MaterialLibrary>(libraries, form.material_library_id),
+                  selectedName<Category>(categories, form.category_id),
+                  selectedName<ProductName>(productNames, form.product_name_id),
+                ].filter(Boolean).join(" / ") || "待选择"}
+                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              />
+            </label>
+          </div>
+
+          <section className="rounded-lg border border-gray-200 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-medium text-gray-900">动态属性</h3>
+              {attributesQuery.isLoading && <span className="text-xs text-gray-500">属性加载中...</span>}
             </div>
-          ) : aiModalType === '添加' ? (
-            <div className="space-y-4">
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="text-sm text-purple-900 mb-1">AI添加物料功能</h4>
-                    <p className="text-xs text-purple-700">
-                      输入物料描述，自动添加物料（关联类目、关联品名、推荐属性）
-                    </p>
-                  </div>
-                </div>
+            {form.product_name_id === "" ? (
+              <p className="text-sm text-gray-500">选择品名后显示对应必填属性。</p>
+            ) : dynamicAttributes.length === 0 ? (
+              <p className="text-sm text-gray-500">该品名暂无后端属性定义。</p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {dynamicAttributes.map((attribute) => (
+                  <label
+                    key={attribute.id}
+                    className={`space-y-1 rounded-md border p-3 text-sm ${
+                      attribute.required ? "border-amber-300 bg-amber-50 text-amber-900" : "border-gray-200 text-gray-700"
+                    }`}
+                  >
+                    <span>
+                      {attribute.name}
+                      {attribute.required && <span className="ml-1 text-red-600">*</span>}
+                    </span>
+                    <input
+                      type={attribute.data_type === "number" ? "number" : "text"}
+                      value={form.attributes[attribute.name] ?? ""}
+                      placeholder={attribute.description || attribute.default_value}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          attributes: { ...current.attributes, [attribute.name]: event.target.value },
+                        }))
+                      }
+                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                ))}
               </div>
-              <div>
-                <label className="block text-sm text-gray-700 mb-1">
-                  物料描述 <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="例如：白色A4打印纸，500张每包，适用于激光打印机"
-                />
-              </div>
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-sm text-gray-700 mb-3">AI分析结果预览：</p>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-start">
-                    <span className="text-gray-600 w-24">关联类目：</span>
-                    <span className="text-gray-900">办公用品 / 纸张 / 打印纸</span>
-                  </div>
-                  <div className="flex items-start">
-                    <span className="text-gray-600 w-24">关联品名：</span>
-                    <span className="text-gray-900">A4打印纸</span>
-                  </div>
-                  <div className="flex items-start">
-                    <span className="text-gray-600 w-24">推荐属性：</span>
-                    <div className="flex-1 space-y-1">
-                      <div>颜色: 白色</div>
-                      <div>规格: 500张/包</div>
-                      <div>适用设备: 激光打印机</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="text-sm text-purple-900 mb-1">AI物料匹配功能</h4>
-                    <p className="text-xs text-purple-700">
-                      对添加的物料进行在已有物料的关联匹配，提示重复物料（无需重复添加）
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-700 mb-1">
-                  物料信息 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="输入物料名称或描述"
-                />
-              </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-sm text-yellow-900 mb-2">⚠️ 发现可能重复的物料：</p>
-                <div className="space-y-2">
-                  <div className="bg-white rounded p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-gray-900">A4打印纸-白色-500张</span>
-                      <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">相似度: 95%</span>
-                    </div>
-                    <p className="text-xs text-gray-600">物料编码: MAT001</p>
-                  </div>
-                  <div className="bg-white rounded p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-gray-900">A4复印纸-白色-500张</span>
-                      <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">相似度: 85%</span>
-                    </div>
-                    <p className="text-xs text-gray-600">物料编码: MAT006</p>
-                  </div>
-                </div>
-              </div>
+            )}
+          </section>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 rounded-lg border-2 border-dashed border-gray-300 p-5 text-center text-sm text-gray-600 hover:border-blue-400">
+              <Image className="mx-auto h-8 w-8 text-gray-400" />
+              <span>图片上传，最多 3 张</span>
+              <input type="file" accept="image/*" multiple onChange={handleImages} className="sr-only" />
+              <span className="block text-xs text-gray-500">{form.images.map((file) => file.name).join("、") || "点击选择图片"}</span>
+              {imageFeedback && <span className="block text-xs text-orange-700">{imageFeedback}</span>}
+            </label>
+            <label className="space-y-2 rounded-lg border-2 border-dashed border-gray-300 p-5 text-center text-sm text-gray-600 hover:border-blue-400">
+              <FileInput className="mx-auto h-8 w-8 text-gray-400" />
+              <span>附件上传</span>
+              <input type="file" multiple onChange={handleAttachments} className="sr-only" />
+              <span className="block text-xs text-gray-500">{form.attachments.map((file) => file.name).join("、") || "点击选择附件"}</span>
+            </label>
+          </div>
+
+          <label className="space-y-1 text-sm text-gray-700">
+            <span>描述</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              rows={3}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          {saveMutation.isError && <p className="text-sm text-red-600">{saveMutation.error.message}</p>}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(lifecycleMaterial)}
+        onClose={() => setLifecycleMaterial(null)}
+        title={lifecycleAction === "stop_purchase" ? "物料停采确认" : "物料停用确认"}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setLifecycleMaterial(null)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              关闭
+            </button>
+            <button
+              type="button"
+              onClick={submitLifecycle}
+              disabled={!lifecycleReason.trim() || lifecycleMutation.isPending}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              确认
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            {lifecycleMaterial?.code} {lifecycleMaterial?.name}
+          </p>
+          <label className="space-y-1 text-sm text-gray-700">
+            <span>{lifecycleAction === "stop_purchase" ? "停采原因" : "停用原因"}</span>
+            <textarea
+              value={lifecycleReason}
+              onChange={(event) => setLifecycleReason(event.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          {lifecycleFeedback && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              {lifecycleFeedback}
             </div>
           )}
-        </Modal>
-      </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        title={`AI物料${aiModalType}`}
+        size="lg"
+        footer={
+          <button
+            type="button"
+            onClick={() => setIsAIModalOpen(false)}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+          >
+            知道了
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="mt-0.5 h-5 w-5 text-blue-700" />
+              <div>
+                <h4 className="text-sm font-medium text-blue-900">AI物料{aiModalType}</h4>
+                <p className="mt-1 text-sm text-blue-700">
+                  Sprint 16 提供入口与说明，不会触发物料新增、更新、删除、停采或停用请求；完整 AI API 接入在后续 Sprint 完成。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
