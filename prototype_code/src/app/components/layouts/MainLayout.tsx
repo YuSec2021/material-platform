@@ -1,4 +1,4 @@
-import { Outlet, Link, useLocation } from "react-router";
+import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import {
   LayoutDashboard,
   Database,
@@ -9,6 +9,7 @@ import {
   User
 } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/app/auth/AuthContext";
 
 interface MenuItem {
   title: string;
@@ -66,12 +67,23 @@ const menuItems: MenuItem[] = [
 
 export function MainLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const auth = useAuth();
   const [expandedMenus, setExpandedMenus] = useState<string[]>(["标准管理", "物料管理", "申请流程", "系统管理"]);
 
   const toggleMenu = (title: string) => {
     setExpandedMenus(prev =>
       prev.includes(title) ? prev.filter(item => item !== title) : [...prev, title]
     );
+  };
+
+  const roleLabel = auth.user?.is_super_admin
+    ? "super-admin"
+    : auth.user?.roles[0]?.name || "user";
+
+  const handleLogout = () => {
+    auth.logout();
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -136,8 +148,18 @@ export function MainLayout() {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
                 <User className="w-5 h-5 text-gray-600" />
-                <span className="text-sm text-gray-700">超级管理员</span>
+                <span className="text-sm text-gray-700">{auth.user?.display_name}</span>
+                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                  {roleLabel}
+                </span>
               </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                退出登录
+              </button>
             </div>
           </div>
         </header>

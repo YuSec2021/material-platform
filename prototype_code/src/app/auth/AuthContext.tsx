@@ -1,31 +1,83 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  apiClient,
+  clearAuthSession,
+  readAuthSession,
+  writeAuthSession,
+  type AuthUser,
+} from "../api/client";
 
-export type AuthUser = {
-  id: string;
-  name: string;
-  role: string;
-};
+type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 type AuthContextValue = {
-  status: "authenticated";
-  user: AuthUser;
+  status: AuthStatus;
+  user: AuthUser | null;
+  login: (username: string) => Promise<void>;
+  logout: () => void;
+  refreshCurrentUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const defaultUser: AuthUser = {
-  id: "admin",
-  name: "超级管理员",
-  role: "system-admin",
-};
-
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<AuthStatus>("loading");
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  const refreshCurrentUser = useCallback(async () => {
+    const session = readAuthSession();
+    if (!session) {
+      setUser(null);
+      setStatus("unauthenticated");
+      return;
+    }
+
+    try {
+      const currentUser = await apiClient.auth.me();
+      setUser(currentUser);
+      setStatus("authenticated");
+    } catch {
+      clearAuthSession();
+      setUser(null);
+      setStatus("unauthenticated");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCurrentUser();
+  }, [refreshCurrentUser]);
+
+  const login = useCallback(async (username: string) => {
+    const normalizedUsername = username.trim();
+    const userRole = normalizedUsername === "super_admin" ? "super_admin" : "user";
+    writeAuthSession({ username: normalizedUsername, role: userRole });
+
+    try {
+      const loggedInUser = await apiClient.auth.login(normalizedUsername);
+      setUser(loggedInUser);
+      setStatus("authenticated");
+    } catch (error) {
+      clearAuthSession();
+      setUser(null);
+      setStatus("unauthenticated");
+      throw error;
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    clearAuthSession();
+    setUser(null);
+    setStatus("unauthenticated");
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
-      status: "authenticated",
-      user: defaultUser,
+      status,
+      user,
+      login,
+      logout,
+      refreshCurrentUser,
     }),
-    [],
+    [login, logout, refreshCurrentUser, status, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

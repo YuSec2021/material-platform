@@ -1,31 +1,30 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
+import { apiClient, type User } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
-
-interface User {
-  id: number;
-  username: string;
-  company: string;
-  department: string;
-  team: string;
-  account: string;
-}
-
-const mockData: User[] = [
-  { id: 1, username: "张三", company: "总公司", department: "技术部", team: "开发组", account: "超级管理员" },
-  { id: 2, username: "李四", company: "总公司", department: "采购部", team: "采购组", account: "物料管理员" },
-];
 
 export function UserList() {
   const [searchTerm, setSearchTerm] = useState("");
+  const query = useQuery({
+    queryKey: ["users"],
+    queryFn: apiClient.users,
+    retry: false,
+  });
+
+  const data = (query.data ?? []).filter((item) =>
+    item.username.includes(searchTerm) || item.display_name.includes(searchTerm),
+  );
 
   const columns = [
     { header: "编号", accessor: "id" as keyof User },
     { header: "用户名", accessor: "username" as keyof User },
-    { header: "单位", accessor: "company" as keyof User },
+    { header: "姓名", accessor: "display_name" as keyof User },
+    { header: "单位", accessor: "unit" as keyof User },
     { header: "部门", accessor: "department" as keyof User },
     { header: "班组", accessor: "team" as keyof User },
-    { header: "账号归属", accessor: "account" as keyof User },
+    { header: "账号归属", accessor: "account_ownership" as keyof User },
     {
       header: "操作",
       accessor: () => (
@@ -54,7 +53,7 @@ export function UserList() {
             <Search className="w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索用户名..."
+              placeholder="搜索用户名或姓名..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="flex-1 outline-none text-sm"
@@ -66,7 +65,15 @@ export function UserList() {
         </div>
       </div>
 
-      <DataTable data={mockData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={!query.isLoading && !query.isError && data.length === 0}
+        emptyLabel="后端暂无用户数据"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={data} columns={columns} />
+      </ApiState>
     </div>
   );
 }

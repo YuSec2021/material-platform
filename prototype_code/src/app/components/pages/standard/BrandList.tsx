@@ -1,22 +1,21 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
+import { apiClient, type Brand } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
-
-interface Brand {
-  id: number;
-  name: string;
-  code: string;
-  description: string;
-  logo: string;
-}
-
-const mockData: Brand[] = [
-  { id: 1, name: "得力", code: "DELI", description: "办公用品品牌", logo: "" },
-  { id: 2, name: "晨光", code: "CHGQ", description: "文具品牌", logo: "" },
-];
 
 export function BrandList() {
   const [searchTerm, setSearchTerm] = useState("");
+  const query = useQuery({
+    queryKey: ["brands"],
+    queryFn: apiClient.brands,
+    retry: false,
+  });
+
+  const data = (query.data ?? []).filter((item) =>
+    item.name.includes(searchTerm) || item.code.includes(searchTerm),
+  );
 
   const columns = [
     { header: "编号", accessor: "id" as keyof Brand },
@@ -25,7 +24,7 @@ export function BrandList() {
     { header: "描述", accessor: "description" as keyof Brand },
     {
       header: "Logo",
-      accessor: (row: Brand) => row.logo || "未上传",
+      accessor: (row: Brand) => row.logo?.filename || "未上传",
     },
     {
       header: "操作",
@@ -66,7 +65,15 @@ export function BrandList() {
         </div>
       </div>
 
-      <DataTable data={mockData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={!query.isLoading && !query.isError && data.length === 0}
+        emptyLabel="后端暂无品牌数据"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={data} columns={columns} />
+      </ApiState>
     </div>
   );
 }

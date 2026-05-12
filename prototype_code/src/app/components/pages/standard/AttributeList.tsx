@@ -1,35 +1,34 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, Sparkles, FileInput } from "lucide-react";
+import { apiClient, type Attribute } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { Modal } from "../../common/Modal";
-
-interface Attribute {
-  id: number;
-  name: string;
-  type: string;
-  required: boolean;
-  defaultValue: string;
-}
-
-const mockData: Attribute[] = [
-  { id: 1, name: "颜色", type: "下拉选择", required: true, defaultValue: "白色" },
-  { id: 2, name: "尺寸", type: "下拉选择", required: false, defaultValue: "标准" },
-];
 
 export function AttributeList() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [aiModalType, setAiModalType] = useState<'治理' | '推荐'>('治理');
+  const query = useQuery({
+    queryKey: ["attributes"],
+    queryFn: apiClient.attributes,
+    retry: false,
+  });
+
+  const data = (query.data ?? []).filter((item) =>
+    item.name.includes(searchTerm) || item.product_name.includes(searchTerm),
+  );
 
   const columns = [
     { header: "编号", accessor: "id" as keyof Attribute },
     { header: "属性名称", accessor: "name" as keyof Attribute },
-    { header: "属性类型", accessor: "type" as keyof Attribute },
+    { header: "属性类型", accessor: "data_type" as keyof Attribute },
     {
       header: "是否必填",
       accessor: (row: Attribute) => (row.required ? "是" : "否"),
     },
-    { header: "默认值", accessor: "defaultValue" as keyof Attribute },
+    { header: "默认值", accessor: "default_value" as keyof Attribute },
     {
       header: "操作",
       accessor: () => (
@@ -86,7 +85,15 @@ export function AttributeList() {
         </div>
       </div>
 
-      <DataTable data={mockData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={!query.isLoading && !query.isError && data.length === 0}
+        emptyLabel="后端暂无属性数据"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={data} columns={columns} />
+      </ApiState>
 
       <Modal
         isOpen={isAIModalOpen}

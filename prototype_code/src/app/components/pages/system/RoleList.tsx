@@ -1,24 +1,21 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
+import { apiClient, type Role } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
-
-interface Role {
-  id: number;
-  name: string;
-  code: string;
-  description: string;
-  enabled: boolean;
-  type: string;
-  createTime: string;
-}
-
-const mockData: Role[] = [
-  { id: 1, name: "超级管理员", code: "SUPER_ADMIN", description: "系统超级管理员", enabled: true, type: "系统角色", createTime: "2026-01-01" },
-  { id: 2, name: "物料管理员", code: "MATERIAL_ADMIN", description: "物料管理权限", enabled: true, type: "业务角色", createTime: "2026-01-02" },
-];
 
 export function RoleList() {
   const [searchTerm, setSearchTerm] = useState("");
+  const query = useQuery({
+    queryKey: ["roles"],
+    queryFn: apiClient.roles,
+    retry: false,
+  });
+
+  const data = (query.data ?? []).filter((item) =>
+    item.name.includes(searchTerm) || item.code.includes(searchTerm),
+  );
 
   const columns = [
     { header: "编号", accessor: "id" as keyof Role },
@@ -33,7 +30,10 @@ export function RoleList() {
         </span>
       ),
     },
-    { header: "角色类型", accessor: "type" as keyof Role },
+    {
+      header: "用户数",
+      accessor: (row: Role) => row.user_count,
+    },
     {
       header: "操作",
       accessor: () => (
@@ -74,7 +74,15 @@ export function RoleList() {
         </div>
       </div>
 
-      <DataTable data={mockData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={!query.isLoading && !query.isError && data.length === 0}
+        emptyLabel="后端暂无角色数据"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={data} columns={columns} />
+      </ApiState>
     </div>
   );
 }
