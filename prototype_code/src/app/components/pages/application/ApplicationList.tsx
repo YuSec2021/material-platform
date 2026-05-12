@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Search, Eye, Plus } from "lucide-react";
 import { useNavigate } from "react-router";
+import { apiClient, type Material, type WorkflowApplication } from "@/app/api/client";
 import { DataTable } from "../../common/DataTable";
 import { StatusBadge } from "../../common/StatusBadge";
 
@@ -50,6 +52,31 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+  const [stopPurchaseReason, setStopPurchaseReason] = useState("停采申请草稿");
+  const [submissionMessage, setSubmissionMessage] = useState("");
+  const materialsQuery = useQuery({
+    queryKey: ["materials", "stop-purchase-selector"],
+    queryFn: apiClient.materials,
+    retry: false,
+    enabled: type === "stop-purchase",
+  });
+  const stopPurchaseMutation = useMutation<WorkflowApplication, Error>({
+    mutationFn: () =>
+      apiClient.submitStopPurchase({
+        type: "stop_purchase",
+        applicant: "super_admin",
+        business_reason: stopPurchaseReason,
+        material_id: selectedMaterialId,
+        reason: stopPurchaseReason,
+      }),
+    onSuccess: (application) => {
+      setSubmissionMessage(`已提交: ${application.application_no}`);
+    },
+    onError: (error) => {
+      setSubmissionMessage(`后端校验失败: ${error.message}`);
+    },
+  });
 
   const data = mockData[type] || [];
   const filteredData = data.filter(item => {
@@ -96,6 +123,15 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
     navigate(`/application/${type}/detail/new`);
   };
 
+  const selectableMaterials = (materialsQuery.data ?? []).filter(
+    (material: Material) => material.status === "normal",
+  );
+
+  const handleSubmitStopPurchase = () => {
+    setSubmissionMessage("");
+    void stopPurchaseMutation.mutate();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -108,6 +144,56 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
           新建申请
         </button>
       </div>
+
+      {type === "stop-purchase" && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-medium text-blue-900">停采申请后端提交</h2>
+              <p className="text-xs text-blue-700">
+                可选物料来自 GET /api/v1/materials，提交发送 POST /api/v1/workflows/applications/stop-purchase。
+              </p>
+            </div>
+            <span className="text-xs text-blue-700">
+              {materialsQuery.isLoading ? "物料加载中" : `可选物料 ${selectableMaterials.length} 个`}
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <select
+              value={selectedMaterialId ?? ""}
+              onChange={(event) => setSelectedMaterialId(event.target.value ? Number(event.target.value) : null)}
+              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            >
+              <option value="">请选择正常状态物料</option>
+              {selectableMaterials.map((material) => (
+                <option key={material.id} value={material.id}>
+                  {material.code} - {material.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={stopPurchaseReason}
+              onChange={(event) => setStopPurchaseReason(event.target.value)}
+              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="停采原因"
+            />
+            <button
+              type="button"
+              onClick={handleSubmitStopPurchase}
+              disabled={stopPurchaseMutation.isPending}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {stopPurchaseMutation.isPending ? "提交中" : "提交停采申请"}
+            </button>
+          </div>
+          {materialsQuery.isError && (
+            <p className="mt-3 text-sm text-red-700">物料列表加载失败，可重试刷新页面。</p>
+          )}
+          {submissionMessage && (
+            <p className="mt-3 text-sm text-blue-900">{submissionMessage}</p>
+          )}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <div className="flex items-center gap-4">

@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search, Download, ChevronRight, ChevronDown, Image, Sparkles, FileInput } from "lucide-react";
+import { apiClient, type Material } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { StatusBadge } from "../../common/StatusBadge";
 import { Modal } from "../../common/Modal";
@@ -15,17 +18,6 @@ interface MaterialCategory {
   id: number;
   name: string;
   children?: MaterialCategory[];
-}
-
-interface Material {
-  id: number;
-  name: string;
-  code: string;
-  category: string;
-  spec: string;
-  unit: string;
-  image?: string;
-  status: 'normal' | 'stop-purchase' | 'stop-use';
 }
 
 const mockLibraries: MaterialLibrary[] = [
@@ -62,21 +54,22 @@ const mockLibraries: MaterialLibrary[] = [
   },
 ];
 
-const mockMaterials: Material[] = [
-  { id: 1, name: "A4打印纸-白色-500张", code: "MAT001", category: "办公用品/纸张", spec: "500张/包", unit: "包", status: "normal" },
-  { id: 2, name: "签字笔-黑色-0.5mm", code: "MAT002", category: "办公用品/文具", spec: "0.5mm", unit: "支", status: "normal" },
-  { id: 3, name: "订书机-标准型", code: "MAT003", category: "办公用品/文具", spec: "标准型", unit: "个", status: "stop-purchase" },
-  { id: 4, name: "鼠标垫-大号", code: "MAT004", category: "办公用品/文具", spec: "300x800mm", unit: "个", status: "normal" },
-  { id: 5, name: "文件夹-A4", code: "MAT005", category: "办公用品/文具", spec: "A4", unit: "个", status: "stop-use" },
-];
-
 export function MaterialList() {
-  const [selectedLibrary, setSelectedLibrary] = useState(mockLibraries[0]);
+  const [selectedLibrary, setSelectedLibrary] = useState<MaterialLibrary>(mockLibraries[0]!);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedLibraries, setExpandedLibraries] = useState<number[]>([1]);
   const [expandedCategories, setExpandedCategories] = useState<number[]>([1]);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [aiModalType, setAiModalType] = useState<'治理' | '添加' | '匹配'>('治理');
+  const query = useQuery({
+    queryKey: ["materials"],
+    queryFn: apiClient.materials,
+    retry: false,
+  });
+
+  const materials = (query.data ?? []).filter((item) =>
+    item.name.includes(searchTerm) || item.code.includes(searchTerm),
+  );
 
   const toggleLibrary = (id: number) => {
     setExpandedLibraries(prev =>
@@ -119,19 +112,21 @@ export function MaterialList() {
     { header: "物料名称", accessor: "name" as keyof Material },
     { header: "物料编码", accessor: "code" as keyof Material, width: "120px" },
     { header: "所属类目", accessor: "category" as keyof Material },
-    { header: "规格型号", accessor: "spec" as keyof Material },
+    {
+      header: "规格型号",
+      accessor: (row: Material) => {
+        const spec = row.attributes.spec || row.attributes["规格型号"] || row.description;
+        return spec ? String(spec) : "-";
+      },
+    },
     { header: "计量单位", accessor: "unit" as keyof Material, width: "100px" },
     {
       header: "图片",
       accessor: (row: Material) => (
         <div className="flex items-center justify-center">
-          {row.image ? (
-            <img src={row.image} alt="" className="w-8 h-8 object-cover rounded" />
-          ) : (
-            <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
-              <Image className="w-4 h-4 text-gray-400" />
-            </div>
-          )}
+          <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center" title={row.name}>
+            <Image className="w-4 h-4 text-gray-400" />
+          </div>
         </div>
       ),
       width: "80px"
@@ -139,8 +134,8 @@ export function MaterialList() {
     {
       header: "状态",
       accessor: (row: Material) => (
-        <StatusBadge status={row.status}>
-          {row.status === 'normal' ? '正常' : row.status === 'stop-purchase' ? '停采' : '停用'}
+        <StatusBadge status={row.status === "stop_purchase" ? "stop-purchase" : row.status === "stop_use" ? "stop-use" : row.status}>
+          {row.status === 'normal' ? '正常' : row.status === 'stop_purchase' || row.status === 'stop-purchase' ? '停采' : '停用'}
         </StatusBadge>
       ),
       width: "100px"
@@ -153,7 +148,7 @@ export function MaterialList() {
           {row.status === 'normal' && (
             <button className="text-orange-600 hover:underline text-sm">停采</button>
           )}
-          {row.status === 'stop-purchase' && (
+          {(row.status === 'stop_purchase' || row.status === 'stop-purchase') && (
             <button className="text-gray-600 hover:underline text-sm">停用</button>
           )}
           <button className="text-red-600 hover:underline text-sm">删除</button>
@@ -262,7 +257,15 @@ export function MaterialList() {
           </div>
         </div>
 
-        <DataTable data={mockMaterials} columns={columns} />
+        <ApiState
+          isLoading={query.isLoading}
+          isError={query.isError}
+          isEmpty={!query.isLoading && !query.isError && materials.length === 0}
+          emptyLabel="后端暂无物料数据"
+          onRetry={() => void query.refetch()}
+        >
+          <DataTable data={materials} columns={columns} />
+        </ApiState>
 
         <Modal
           isOpen={isAIModalOpen}

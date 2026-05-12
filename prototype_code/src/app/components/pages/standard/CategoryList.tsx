@@ -47,7 +47,7 @@ const mockLibraries: CategoryLibrary[] = [
 ];
 
 export function CategoryList() {
-  const [selectedLibrary, setSelectedLibrary] = useState(mockLibraries[0]);
+  const [selectedLibrary, setSelectedLibrary] = useState<CategoryLibrary>(mockLibraries[0]!);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedLibraries, setExpandedLibraries] = useState<number[]>([1]);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);

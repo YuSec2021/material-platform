@@ -1,27 +1,25 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
+import { apiClient, type ProductName } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
-
-interface ProductName {
-  id: number;
-  name: string;
-  code: string;
-  category: string;
-  unit: string;
-}
-
-const mockData: ProductName[] = [
-  { id: 1, name: "A4打印纸", code: "PN001", category: "办公用品/纸张", unit: "包" },
-  { id: 2, name: "签字笔", code: "PN002", category: "办公用品/文具", unit: "支" },
-];
 
 export function ProductNameList() {
   const [searchTerm, setSearchTerm] = useState("");
+  const query = useQuery({
+    queryKey: ["product-names"],
+    queryFn: apiClient.productNames,
+    retry: false,
+  });
+
+  const data = (query.data ?? []).filter((item) =>
+    item.name.includes(searchTerm) || item.category.includes(searchTerm),
+  );
 
   const columns = [
     { header: "编号", accessor: "id" as keyof ProductName },
     { header: "品名", accessor: "name" as keyof ProductName },
-    { header: "编码", accessor: "code" as keyof ProductName },
     { header: "所属类目", accessor: "category" as keyof ProductName },
     { header: "品名单位", accessor: "unit" as keyof ProductName },
     {
@@ -63,7 +61,15 @@ export function ProductNameList() {
         </div>
       </div>
 
-      <DataTable data={mockData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={!query.isLoading && !query.isError && data.length === 0}
+        emptyLabel="后端暂无品名数据"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={data} columns={columns} />
+      </ApiState>
     </div>
   );
 }

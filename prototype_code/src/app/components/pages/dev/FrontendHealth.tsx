@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiClient, type ApiResult } from "@/app/api/client";
+import { apiClient, type ProductName } from "@/app/api/client";
 import { useAuth } from "@/app/auth/AuthContext";
 import { aliasProbe } from "@/app/dev/aliasProbe";
 import { useAppStore } from "@/app/store/useAppStore";
@@ -21,11 +21,18 @@ type Check = {
   detail: string;
 };
 
+type ProxyResult = {
+  ok: boolean;
+  status: number;
+  data: ProductName[] | null;
+  error: string | null;
+};
+
 export function FrontendHealth() {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const { healthProbeCount, lastHealthProbeAt, markHealthProbe } = useAppStore();
-  const [proxyResult, setProxyResult] = useState<ApiResult<unknown[]> | null>(null);
+  const [proxyResult, setProxyResult] = useState<ProxyResult | null>(null);
   const [proxyState, setProxyState] = useState<"idle" | "checking" | "done" | "error">("idle");
 
   const checks: Check[] = [
@@ -37,7 +44,7 @@ export function FrontendHealth() {
     {
       name: "Auth context",
       status: auth.status === "authenticated" ? "ready" : "pending",
-      detail: auth.user.name,
+      detail: auth.user?.display_name ?? "not authenticated",
     },
     {
       name: "React Query provider",
@@ -67,13 +74,17 @@ export function FrontendHealth() {
 
     try {
       const result = await apiClient.productNames();
-      setProxyResult(result);
-      setProxyState(result.ok ? "done" : "error");
+      setProxyResult({
+        ok: true,
+        status: 200,
+        data: result,
+        error: null,
+      });
+      setProxyState("done");
     } catch (error) {
       setProxyResult({
         ok: false,
         status: 0,
-        url: "/api/v1/product-names",
         data: null,
         error: error instanceof Error ? error.message : "Unknown request failure",
       });
