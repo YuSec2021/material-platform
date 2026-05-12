@@ -1,0 +1,9 @@
+fastapi==0.128.0
+uvicorn[standard]==0.30.0
+pydantic==2.9.0
+sqlalchemy==2.0.35
+psycopg[binary]==3.2.3
+python-multipart==0.0.12
+httpx==0.27.2
+cryptography==43.0.1
+openpyxl==3.1.5

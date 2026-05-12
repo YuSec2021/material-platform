@@ -328,19 +328,20 @@ def startup() -> None:
 def ensure_audit_log_schema() -> None:
     required = {"id", "user", "resource", "action", "before_value", "after_value", "timestamp", "source"}
     with engine.begin() as connection:
-        table_exists = connection.exec_driver_sql(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
-        ).fetchone()
-        if table_exists:
-            columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(audit_log)").fetchall()}
-            if not required.issubset(columns):
-                legacy_name = f"audit_log_legacy_{int(time.time())}"
-                connection.exec_driver_sql(f"ALTER TABLE audit_log RENAME TO {legacy_name}")
-                legacy_indexes = connection.exec_driver_sql(
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_audit_log_%'"
-                ).fetchall()
-                for index in legacy_indexes:
-                    connection.exec_driver_sql(f"DROP INDEX IF EXISTS {index[0]}")
+        if engine.dialect.name == "sqlite":
+            table_exists = connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
+            ).fetchone()
+            if table_exists:
+                columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(audit_log)").fetchall()}
+                if not required.issubset(columns):
+                    legacy_name = f"audit_log_legacy_{int(time.time())}"
+                    connection.exec_driver_sql(f"ALTER TABLE audit_log RENAME TO {legacy_name}")
+                    legacy_indexes = connection.exec_driver_sql(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_audit_log_%'"
+                    ).fetchall()
+                    for index in legacy_indexes:
+                        connection.exec_driver_sql(f"DROP INDEX IF EXISTS {index[0]}")
         AuditLog.__table__.create(bind=connection, checkfirst=True)
 
 

@@ -1,0 +1,5 @@
+{
+  "name": "@playwright/test",
+  "version": "1.59.1",
+  "main": "index.js"
+}
