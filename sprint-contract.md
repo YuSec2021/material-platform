@@ -1,71 +1,78 @@
-## Sprint 10: LLM Gateway and AI Infrastructure
+## Sprint 11: System Configuration and Audit Logging
 
 ### Features
-- F17-LLM Gateway: model_config CRUD for DashScope, Azure OpenAI, vLLM, and Ollama providers.
-- F17-Capability model mapping for AI capabilities, including hot-switch behavior without application restart.
-- F17-AES-256 encrypted API key storage with masked browser/API reads and usable persisted credentials.
-- F17-Connection test on save and explicit connection test action.
-- F17-Fallback model auto-switch when the primary model times out or returns 5xx.
-- F18-AITracer framework: @trace decorator, SpanCollector, persisted tracer.spans records, and trace debug UI at /debug/trace.
+- F16-System configuration: system info maintenance for system name and icon.
+- F16-Reason options maintenance for stop purchase and stop use reason lists.
+- F16-Approval mode switch between simple approval and multi-node workflow.
+- F20-Operational audit log covering backend write operations with user, resource, action, before value, after value, timestamp, and source.
+- F20-Frontend audit log list view with filters, pagination, and role-based visibility.
+- F20-Before/after value diff view for audited changes.
+- F20-Excel export for compliance audit.
 
 ### Success criteria (black-box-verifiable)
-- [ ] Administrators can create, edit, disable, and safely view LLM model configurations without exposing stored API keys.
+- [ ] Administrators can maintain system identity settings and see those settings persist in the browser.
   Evaluator steps:
   1. Start the system with `bash init.sh`, then open `http://localhost:5173` in a browser as a seeded administrator.
-  2. Open the LLM model management page from system administration, or directly open its documented route from `http://localhost:5173` navigation.
-  3. Create a model configuration named `Sprint 10 Primary <timestamp>` with provider `vLLM` or `Ollama`, base URL `http://127.0.0.1:18080`, model name `primary-model`, and API key `sprint10-secret-primary`.
-  4. Reload the model management page and assert the new model remains listed with provider, model name, base URL, status, and a masked API key value that does not reveal `sprint10-secret-primary`.
-  5. Open `http://localhost:8000/openapi.json`, identify the documented model configuration list/detail endpoints, and send real HTTP requests as the same administrator.
-  6. Assert the API responses contain the saved model metadata but do not contain the literal string `sprint10-secret-primary`.
-  7. Edit the model display name or timeout setting, save, reload `http://localhost:5173`, and assert the edited value persists.
-  8. Disable the model, reload the page, and assert the model remains visible as disabled and is unavailable for new capability mappings.
+  2. Open the system configuration page from the system administration navigation, or directly open its documented route under `http://localhost:5173`.
+  3. Change the system name to `Sprint 11 System <timestamp>` and upload or select a visible system icon through the configuration UI.
+  4. Save the configuration, reload `http://localhost:5173`, and assert the visible app header, title area, or configuration form shows `Sprint 11 System <timestamp>` and the selected icon.
+  5. Open `http://localhost:8000/openapi.json`, identify the documented system configuration read endpoint, and send a real HTTP request as the same administrator.
+  6. Assert the API response exposes the saved system name and icon metadata without requiring source-code inspection.
 
-- [ ] Connection testing uses the configured provider endpoint and records clear success and failure results.
+- [ ] Administrators can manage stop purchase and stop use reason options, and workflow forms consume the configured options.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then start a local OpenAI-compatible mock provider at `http://127.0.0.1:18080` that accepts `POST /v1/chat/completions` and returns HTTP 200 with a minimal chat completion JSON body.
-  2. In the browser at `http://localhost:5173`, create or edit an enabled model configuration named `Sprint 10 Connection OK <timestamp>` that points to `http://127.0.0.1:18080` and model `connection-ok`.
-  3. Trigger the connection test from the save flow or explicit test action and assert the UI reports success without requiring a page reload.
-  4. Stop or reconfigure the mock provider so `http://127.0.0.1:18081/v1/chat/completions` is unreachable or returns HTTP 500.
-  5. Create or edit a model configuration named `Sprint 10 Connection Fail <timestamp>` pointing to `http://127.0.0.1:18081`, trigger the connection test, and assert the UI reports a failure with a human-readable timeout, network, or 5xx error.
-  6. Reload `http://localhost:5173` and assert the latest connection status or last test result for each model remains visible.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
+  2. On the system configuration page, add an enabled stop purchase reason named `Sprint 11 Stop Purchase <timestamp>` and an enabled stop use reason named `Sprint 11 Stop Use <timestamp>`.
+  3. Save the reason configuration, reload `http://localhost:5173`, and assert both new reasons remain listed with their enabled status.
+  4. Open the stop purchase application form from `http://localhost:5173` and assert the stop purchase reason selector includes `Sprint 11 Stop Purchase <timestamp>`.
+  5. Open the stop use application form from `http://localhost:5173` and assert the stop use reason selector includes `Sprint 11 Stop Use <timestamp>`.
+  6. Disable or delete the two Sprint 11 reason options, reload the relevant forms, and assert the removed or disabled options are no longer selectable for new submissions.
 
-- [ ] Capability-to-model mappings can be changed at runtime and the active model hot-switches without restarting backend or frontend services.
+- [ ] The approval mode switch persists and changes externally visible workflow behavior.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then start two local OpenAI-compatible mock providers at `http://127.0.0.1:18080` and `http://127.0.0.1:18082`; each provider must return a response body that uniquely identifies its model, such as `primary-model` and `secondary-model`.
-  2. In `http://localhost:5173`, create two enabled model configurations named `Sprint 10 Primary <timestamp>` and `Sprint 10 Secondary <timestamp>` pointing to those two provider URLs.
-  3. Open the capability mapping UI and map an AI capability such as `category_match`, `material_analysis`, or another documented capability to `Sprint 10 Primary <timestamp>`.
-  4. From the browser or documented API surface, trigger that capability through the application and assert the externally visible result, mock-provider request log, or response metadata shows `primary-model` was used.
-  5. Without rerunning `bash init.sh` or restarting any process, change the same capability mapping to `Sprint 10 Secondary <timestamp>` and save.
-  6. Trigger the same capability again and assert the result, mock-provider request log, or response metadata now shows `secondary-model` was used.
-  7. Reload `http://localhost:5173`, reopen the mapping UI, and assert the saved mapping still points to `Sprint 10 Secondary <timestamp>`.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
+  2. On the system configuration page, set approval mode to simple approval and save.
+  3. Open a new material category or new material code application workflow at `http://localhost:5173`, create a draft request, and assert the approval route preview or submitted request shows a single approval step.
+  4. Return to system configuration, set approval mode to multi-node workflow, and save without restarting backend or frontend services.
+  5. Create another new material category or new material code application request from `http://localhost:5173` and assert the approval route preview or submitted request shows multiple approval nodes such as department approval followed by asset management approval.
+  6. Reload `http://localhost:5173`, reopen system configuration, and assert the selected approval mode remains multi-node workflow.
 
-- [ ] The gateway falls back to the configured fallback model when the primary provider times out or returns a 5xx response.
+- [ ] Backend write operations create operational audit records that are visible in the audit log list with filters and pagination.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then start a primary mock provider at `http://127.0.0.1:18083` that returns HTTP 500 or intentionally delays past the configured timeout for `POST /v1/chat/completions`.
-  2. Start a fallback mock provider at `http://127.0.0.1:18084` that returns HTTP 200 with a response body identifying `fallback-model`.
-  3. In `http://localhost:5173`, create enabled model configurations for both providers, configure the primary model with a short timeout, and set the fallback model as its fallback or as the fallback for the same capability mapping.
-  4. Map an AI capability such as `category_match`, `material_analysis`, or another documented capability to the primary model.
-  5. Trigger that capability through the browser or documented API surface and assert the user receives a successful AI result from `fallback-model` rather than an unhandled failure.
-  6. Assert the mock-provider logs show the primary provider was attempted before the fallback provider.
-  7. Change the primary mock provider to return HTTP 200, trigger the same capability again, and assert the primary model is used and the fallback provider is not called for that successful request.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
+  2. Perform at least three distinct write operations through the browser or documented API surface, including updating the system name, adding a reason option, and changing the approval mode.
+  3. Open the audit log page from system administration, or directly open its documented route under `http://localhost:5173`.
+  4. Assert the audit log list includes entries for the three writes with user, resource, action, timestamp, and source values visible.
+  5. Use the audit log filters for time range, resource or type, and user; assert the list includes matching entries and excludes non-matching entries.
+  6. Create enough additional write operations to exceed one page of audit entries, use the pagination controls, and assert entries can be viewed across pages without losing the active filters.
+  7. Open `http://localhost:8000/openapi.json`, identify the documented audit log list endpoint, and assert real HTTP requests return the same audited resource/action data shown in the browser.
 
-- [ ] AITracer records trace spans for gateway activity and exposes them through the debug trace UI.
+- [ ] Audit details show before/after changes as a readable diff without exposing unrelated sensitive values.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, then trigger at least one successful LLM gateway-backed capability from `http://localhost:5173` using a local mock provider such as `http://127.0.0.1:18080`.
-  2. Open `http://localhost:5173/debug/trace` in the same browser session.
-  3. Assert the debug trace list includes a new trace for the gateway-backed capability with a trace ID, start time, status, duration, and root operation name.
-  4. Open the trace detail view and assert it shows a parent-child span tree containing at least one application chain span and one LLM/provider span.
-  5. Assert the LLM/provider span shows model/provider metadata, status, latency or duration, and an error field only when the request failed.
-  6. Reload `http://localhost:5173/debug/trace` and assert the trace remains visible, proving spans were persisted rather than kept only in memory.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
+  2. Change the system name from one unique value to another, such as `Sprint 11 Before <timestamp>` to `Sprint 11 After <timestamp>`.
+  3. Open the audit log page at `http://localhost:5173` and locate the audit record for that system configuration update.
+  4. Open the audit detail or diff view for the record and assert it shows the changed field, the before value `Sprint 11 Before <timestamp>`, and the after value `Sprint 11 After <timestamp>`.
+  5. Repeat with a reason option update and assert the diff view clearly identifies added, removed, or edited reason values.
+  6. Assert the detail view does not display plaintext secrets such as model API keys from prior LLM gateway configuration records.
 
-- [ ] The trace debug UI supports practical investigation controls and is blocked when AI debug mode is disabled.
+- [ ] Audit visibility is role-based and restricts non-administrator access.
   Evaluator steps:
-  1. Start the system with `bash init.sh`, generate at least one successful gateway trace and one failed or fallback gateway trace, then open `http://localhost:5173/debug/trace`.
-  2. Use the trace UI filters for status, operation or capability name, and time range; assert the trace list updates to include matching traces and exclude non-matching traces.
-  3. Open a failed or fallback trace and assert the detail view displays the failure reason or fallback decision without exposing plaintext API keys.
-  4. Stop the running services, restart the application with `AI_DEBUG=false` using the documented startup command or environment override, and open `http://localhost:5173/debug/trace`.
-  5. Assert the debug trace page is unavailable in non-debug mode by showing a 403/access-denied state, a not-found state, or a redirect to a safe page.
-  6. Restart the application with `AI_DEBUG=true` and assert `http://localhost:5173/debug/trace` is available again to an administrator.
+  1. Start the system with `bash init.sh`, then open `http://localhost:5173` as a seeded administrator.
+  2. Confirm the administrator can open the audit log page under `http://localhost:5173` and can view audit entries.
+  3. Sign out or switch to a seeded non-administrator user with no audit-log permission.
+  4. Attempt to open the same audit log route under `http://localhost:5173` and assert the UI hides the navigation item and blocks direct access with an access-denied, not-found, or redirect state.
+  5. Open `http://localhost:8000/openapi.json`, identify the documented audit log list endpoint, and send a real HTTP request as the non-administrator user.
+  6. Assert the API rejects the non-administrator audit log request with an authorization failure such as HTTP 401 or HTTP 403.
+
+- [ ] Administrators can export filtered audit logs to an Excel file suitable for compliance review.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, then generate at least two Sprint 11 audit entries from `http://localhost:5173` using unique values that include `Sprint 11 Export <timestamp>`.
+  2. Open the audit log page, apply a filter that includes the generated Sprint 11 audit entries and excludes unrelated historical entries.
+  3. Click the Excel export action and assert the browser downloads an `.xlsx` file without server errors.
+  4. Open the downloaded workbook with a standard spreadsheet reader or script, and assert it contains column headers for timestamp, user, resource, action, source, before value, and after value.
+  5. Assert the workbook contains the filtered Sprint 11 audit entries and does not contain entries outside the active filter.
+  6. Assert the workbook preserves readable before/after values for compliance review.
 
 ---
 
