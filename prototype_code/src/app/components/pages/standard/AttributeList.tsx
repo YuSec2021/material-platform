@@ -1,41 +1,206 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, Sparkles, FileInput } from "lucide-react";
-import { apiClient, type Attribute } from "@/app/api/client";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Clock3, Edit, Plus, Trash2 } from "lucide-react";
+import { apiClient, type Attribute, type AttributePayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { Modal } from "../../common/Modal";
+import { SearchPanel } from "./standardPageUtils";
+
+const DEFAULT_PRODUCT_NAME = "Sprint 3 A4 彩色激光打印机";
+const ATTRIBUTE_TYPES = ["text", "number", "select", "multi_select", "boolean", "date"];
+
+type AttributeFormState = {
+  name: string;
+  data_type: string;
+  required: boolean;
+  optionsText: string;
+  default_value: string;
+  description: string;
+};
+
+const emptyForm: AttributeFormState = {
+  name: "",
+  data_type: "text",
+  required: false,
+  optionsText: "",
+  default_value: "",
+  description: "",
+};
+
+function splitOptions(value: string): string[] {
+  return value
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function attributeToForm(attribute: Attribute): AttributeFormState {
+  return {
+    name: attribute.name,
+    data_type: attribute.data_type,
+    required: attribute.required,
+    optionsText: attribute.options.join("\n"),
+    default_value: attribute.default_value,
+    description: attribute.description,
+  };
+}
+
+function formToPayload(form: AttributeFormState): AttributePayload {
+  return {
+    product_name: DEFAULT_PRODUCT_NAME,
+    name: form.name.trim(),
+    data_type: form.data_type,
+    required: form.required,
+    default_value: form.default_value.trim(),
+    options: splitOptions(form.optionsText),
+    description: form.description.trim(),
+    source: "manual",
+  };
+}
+
+function typeLabel(type: string) {
+  const labels: Record<string, string> = {
+    text: "文本",
+    number: "数值",
+    select: "单选",
+    multi_select: "多选",
+    boolean: "布尔",
+    date: "日期",
+  };
+  return labels[type] ?? type;
+}
+
+function AttributeTypeBadge({ type }: { type: string }) {
+  return (
+    <span className="inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+      {typeLabel(type)}
+    </span>
+  );
+}
 
 export function AttributeList() {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [aiModalType, setAiModalType] = useState<'治理' | '推荐'>('治理');
+  const [form, setForm] = useState<AttributeFormState>(emptyForm);
+  const [editingAttribute, setEditingAttribute] = useState<Attribute | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [openChangeAttribute, setOpenChangeAttribute] = useState<Attribute | null>(null);
+
   const query = useQuery({
     queryKey: ["attributes"],
     queryFn: apiClient.attributes,
     retry: false,
   });
 
-  const data = (query.data ?? []).filter((item) =>
-    item.name.includes(searchTerm) || item.product_name.includes(searchTerm),
-  );
+  const changesQuery = useQuery({
+    queryKey: ["attribute-changes", openChangeAttribute?.id],
+    queryFn: () => apiClient.attributeChanges(openChangeAttribute!.id),
+    enabled: Boolean(openChangeAttribute),
+    retry: false,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: AttributePayload) =>
+      editingAttribute
+        ? apiClient.updateAttribute(editingAttribute.id, payload)
+        : apiClient.createAttribute(payload),
+    onSuccess: async () => {
+      setIsFormOpen(false);
+      setEditingAttribute(null);
+      setForm(emptyForm);
+      await queryClient.invalidateQueries({ queryKey: ["attributes"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.deleteAttribute(id),
+    onSuccess: async () => {
+      setOpenChangeAttribute(null);
+      await queryClient.invalidateQueries({ queryKey: ["attributes"] });
+    },
+  });
+
+  const data = useMemo(() => {
+    const term = searchTerm.trim();
+    const attributes = query.data ?? [];
+    if (!term) {
+      return attributes;
+    }
+    return attributes.filter((item) =>
+      [item.name, item.code, item.product_name, item.default_value, item.description].some((value) =>
+        value.includes(term),
+      ),
+    );
+  }, [query.data, searchTerm]);
+
+  const openCreateForm = () => {
+    setEditingAttribute(null);
+    setForm(emptyForm);
+    setIsFormOpen(true);
+  };
+
+  const openEditForm = (attribute: Attribute) => {
+    setEditingAttribute(attribute);
+    setForm(attributeToForm(attribute));
+    setIsFormOpen(true);
+  };
+
+  const handleSubmit = () => {
+    saveMutation.mutate(formToPayload(form));
+  };
+
+  const handleDelete = (attribute: Attribute) => {
+    if (window.confirm(`确定删除属性 ${attribute.name} 吗？`)) {
+      deleteMutation.mutate(attribute.id);
+    }
+  };
 
   const columns = [
     { header: "编号", accessor: "id" as keyof Attribute },
     { header: "属性名称", accessor: "name" as keyof Attribute },
-    { header: "属性类型", accessor: "data_type" as keyof Attribute },
+    {
+      header: "属性类型",
+      accessor: (row: Attribute) => <AttributeTypeBadge type={row.data_type} />,
+    },
     {
       header: "是否必填",
       accessor: (row: Attribute) => (row.required ? "是" : "否"),
     },
+    {
+      header: "选项",
+      accessor: (row: Attribute) => (row.options.length > 0 ? row.options.join("、") : "-"),
+    },
     { header: "默认值", accessor: "default_value" as keyof Attribute },
+    { header: "提示文本", accessor: "description" as keyof Attribute },
     {
       header: "操作",
-      accessor: () => (
-        <div className="flex gap-2">
-          <button className="text-blue-600 hover:underline text-sm">编辑</button>
-          <button className="text-orange-600 hover:underline text-sm">日志</button>
-          <button className="text-red-600 hover:underline text-sm">删除</button>
+      accessor: (row: Attribute) => (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => openEditForm(row)}
+            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
+          >
+            <Edit className="h-3.5 w-3.5" />
+            编辑
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpenChangeAttribute((current) => (current?.id === row.id ? null : row))}
+            className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2.5 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
+          >
+            <Clock3 className="h-3.5 w-3.5" />
+            日志
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDelete(row)}
+            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            删除
+          </button>
         </div>
       ),
     },
@@ -43,47 +208,22 @@ export function AttributeList() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl text-gray-900">属性管理</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setAiModalType('治理'); setIsAIModalOpen(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-md"
-          >
-            <Sparkles className="w-4 h-4" />
-            AI属性治理
-          </button>
-          <button
-            onClick={() => { setAiModalType('推荐'); setIsAIModalOpen(true); }}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 shadow-md"
-          >
-            <Sparkles className="w-4 h-4" />
-            AI属性推荐
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Plus className="w-4 h-4" />
-            新增属性
-          </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl text-gray-900">属性管理</h1>
+          <p className="mt-1 text-sm text-gray-500">属性数据来自后端 API，支持新增、编辑、删除和变更日志查看。</p>
         </div>
+        <button
+          type="button"
+          onClick={openCreateForm}
+          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4" />
+          新增属性
+        </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <Search className="w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="搜索属性名称..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 outline-none text-sm"
-            />
-          </div>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-            搜索
-          </button>
-        </div>
-      </div>
+      <SearchPanel value={searchTerm} onChange={setSearchTerm} placeholder="搜索属性名称、编码、品名或提示文本..." />
 
       <ApiState
         isLoading={query.isLoading}
@@ -95,89 +235,132 @@ export function AttributeList() {
         <DataTable data={data} columns={columns} />
       </ApiState>
 
+      {openChangeAttribute && (
+        <section className="rounded-lg border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-medium text-gray-900">变更日志：{openChangeAttribute.name}</h2>
+            <button type="button" onClick={() => setOpenChangeAttribute(null)} className="text-sm text-gray-500 hover:text-gray-700">
+              收起
+            </button>
+          </div>
+          <ApiState
+            isLoading={changesQuery.isLoading}
+            isError={changesQuery.isError}
+            isEmpty={!changesQuery.isLoading && !changesQuery.isError && (changesQuery.data ?? []).length === 0}
+            emptyLabel="暂无属性变更日志"
+            onRetry={() => void changesQuery.refetch()}
+          >
+            <ol className="mt-4 space-y-4 border-l border-blue-200 pl-4">
+              {(changesQuery.data ?? []).map((change) => (
+                <li key={change.id} className="relative">
+                  <span className="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-white bg-blue-600" />
+                  <div className="rounded-md bg-gray-50 p-3">
+                    <p className="text-sm font-medium text-gray-900">
+                      v{change.version} {change.changed_fields.join("、")}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {change.operator} · {change.created_at}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </ApiState>
+        </section>
+      )}
+
       <Modal
-        isOpen={isAIModalOpen}
-        onClose={() => setIsAIModalOpen(false)}
-        title={aiModalType === '治理' ? 'AI属性治理' : 'AI属性推荐'}
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        title={editingAttribute ? "编辑属性" : "新增属性"}
+        size="lg"
         footer={
           <>
             <button
-              onClick={() => setIsAIModalOpen(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              type="button"
+              onClick={() => setIsFormOpen(false)}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
               取消
             </button>
-            <button className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700">
-              {aiModalType === '治理' ? '开始分析' : '开始推荐'}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!form.name.trim() || saveMutation.isPending}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {saveMutation.isPending ? "保存中..." : "保存"}
             </button>
           </>
         }
       >
-        {aiModalType === '治理' ? (
-          <div className="space-y-4">
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                <div className="flex-1">
-                  <h4 className="text-sm text-purple-900 mb-1">AI属性治理功能</h4>
-                  <p className="text-xs text-purple-700">
-                    添加属性支持导入，对原始导入表进行AI分析，形成标准化数据
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-700 mb-2">导入属性文件</label>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-purple-500 transition-colors cursor-pointer">
-                <FileInput className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                <p className="text-sm text-gray-600">点击或拖拽上传文件</p>
-                <p className="text-xs text-gray-400 mt-1">支持 Excel、CSV 格式</p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
-                <div className="flex-1">
-                  <h4 className="text-sm text-purple-900 mb-1">AI属性推荐功能</h4>
-                  <p className="text-xs text-purple-700">
-                    选择品名，自动推荐属性（属性名、属性值、填写方式）
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-700 mb-1">
-                选择品名 <span className="text-red-500">*</span>
-              </label>
-              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                <option>请选择品名</option>
-                <option>A4打印纸</option>
-                <option>签字笔</option>
-                <option>订书机</option>
-              </select>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <p className="text-sm text-gray-700 mb-3">AI推荐结果预览：</p>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">属性名：</span>
-                  <span className="text-gray-900">颜色</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">属性值：</span>
-                  <span className="text-gray-900">白色、蓝色、黄色</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">填写方式：</span>
-                  <span className="text-gray-900">下拉选择</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="space-y-1 text-sm text-gray-700">
+            <span>属性名称</span>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <label className="space-y-1 text-sm text-gray-700">
+            <span>属性类型</span>
+            <select
+              value={form.data_type}
+              onChange={(event) => setForm((current) => ({ ...current, data_type: event.target.value }))}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              {ATTRIBUTE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {typeLabel(type)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={form.required}
+              onChange={(event) => setForm((current) => ({ ...current, required: event.target.checked }))}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+            />
+            是否必填
+          </label>
+          <label className="space-y-1 text-sm text-gray-700">
+            <span>默认值</span>
+            <input
+              type="text"
+              value={form.default_value}
+              onChange={(event) => setForm((current) => ({ ...current, default_value: event.target.value }))}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+            <span>选项</span>
+            <textarea
+              value={form.optionsText}
+              onChange={(event) => setForm((current) => ({ ...current, optionsText: event.target.value }))}
+              rows={3}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              placeholder="每行一个选项，或用逗号分隔"
+            />
+          </label>
+          <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+            <span>提示文本</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              rows={3}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          {saveMutation.isError && (
+            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 md:col-span-2">
+              保存失败，请检查后端返回。
+            </p>
+          )}
+        </div>
       </Modal>
     </div>
   );

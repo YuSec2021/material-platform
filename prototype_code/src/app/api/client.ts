@@ -26,6 +26,14 @@ export type ProductName = {
   category: string;
 };
 
+export type Category = {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+};
+
 export type BrandLogo = {
   filename: string;
   content_type: string;
@@ -56,6 +64,39 @@ export type Attribute = {
   source: string;
   version: number;
   enabled: boolean;
+};
+
+export type AttributeChange = {
+  id: number;
+  attribute_id: number;
+  attribute_code: string;
+  attribute_name: string;
+  version: number;
+  operator: string;
+  changed_fields: string[];
+  before_values: Record<string, unknown>;
+  after_values: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AttributePayload = {
+  product_name?: string;
+  product_name_id?: number | null;
+  name: string;
+  data_type: string;
+  unit?: string;
+  required: boolean;
+  default_value: string;
+  options: string[];
+  description: string;
+  source?: string;
+};
+
+export type BrandPayload = {
+  name: string;
+  description: string;
+  logo: BrandLogo;
+  enabled?: boolean;
 };
 
 export type MaterialLibrary = {
@@ -307,11 +348,35 @@ export const apiClient = {
   productNames() {
     return request<ProductName[]>("/product-names");
   },
+  categories() {
+    return request<Category[]>("/categories");
+  },
   brands() {
     return request<Brand[]>("/brands");
   },
+  createBrand(payload: BrandPayload) {
+    return request<Brand>("/brands", { method: "POST", body: payload });
+  },
+  updateBrand(id: number, payload: Partial<BrandPayload>) {
+    return request<Brand>(`/brands/${id}`, { method: "PUT", body: payload });
+  },
+  deleteBrand(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/brands/${id}`, { method: "DELETE" });
+  },
   attributes() {
     return request<Attribute[]>("/attributes");
+  },
+  createAttribute(payload: AttributePayload) {
+    return request<Attribute>("/attributes", { method: "POST", body: payload });
+  },
+  updateAttribute(id: number, payload: Partial<AttributePayload>) {
+    return request<Attribute>(`/attributes/${id}`, { method: "PUT", body: payload });
+  },
+  deleteAttribute(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/attributes/${id}`, { method: "DELETE" });
+  },
+  attributeChanges(id: number) {
+    return request<AttributeChange[]>(`/attributes/${id}/changes`);
   },
   materialLibraries() {
     return request<MaterialLibrary[]>("/material-libraries");
