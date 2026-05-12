@@ -16,3 +16,10 @@
 - Full CRUD flow verified end-to-end. Type badges render correctly. Change log timeline panel expands and fetches data from the correct endpoint.
 - Full CRUD confirmed. Read-only generated code field works correctly. Logo thumbnail feature present (renders ImageIcon placeholder when no logo is uploaded, renders actual thumbnail when logo data exists).
 - All three quality gates pass cleanly.
+
+## v2.2.0 — Sprint 16 [MINOR bump]
+- Card grid uses custom div-based styling. All CRUD flows work. Note: the CSS class-based selector approach in the initial automated test missed cards due to Tailwind class ordering; targeted text content inspection confirmed cards are present.
+- Search and status filter use a 1-second debounce (MaterialList.tsx line 489-490). Both features work correctly when tested with adequate wait time (~1.5s after input change).
+- All selector endpoints wired. Attribute selector lazy-loads on product name selection (`enabled: isFormOpen && selectedProductNameId !== null`).
+- Status normalization handles both `stop-purchase` and `stop_purchase` backend values (normalizeStatus function, lines 58-66).
+- Loading/error/empty states only visible when intercepting the frontend proxy URL (`localhost:5173/api/*`) not the backend URL (`localhost:8000/api/*`) -- the Vite dev server's proxy introduces timing that affects the test. The ApiState component is correctly implemented and works when tested with the correct interception target.

@@ -1,14 +1,14 @@
 {
   "mode": "planning",
-  "current_sprint": 15,
+  "current_sprint": 16,
   "retry_count": 0,
-  "last_successful_sprint": 15,
+  "last_successful_sprint": 16,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-15-standard-management",
+  "active_branch": "codex/sprint-16-material-management",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T13:18:04.266863Z",
+  "last_run_at": "2026-05-12T14:12:52.121970Z",
   "request_kind": "",
   "sprint_origin": "feature",
-  "current_version": "2.1.0"
+  "current_version": "2.2.0"
 }
