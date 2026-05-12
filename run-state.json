@@ -1,14 +1,14 @@
 {
   "mode": "planning",
-  "current_sprint": 13,
+  "current_sprint": 14,
   "retry_count": 0,
-  "last_successful_sprint": 13,
+  "last_successful_sprint": 14,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-13-frontend-scaffold",
+  "active_branch": "codex/sprint-14-api-client-auth",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T08:41:14.493287Z",
+  "last_run_at": "2026-05-12T09:44:53.874791Z",
   "request_kind": "",
-  "sprint_origin": "major_feature",
-  "current_version": "1.0.0"
+  "sprint_origin": "feature",
+  "current_version": "2.0.0"
 }
