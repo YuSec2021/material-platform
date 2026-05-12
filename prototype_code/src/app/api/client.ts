@@ -129,6 +129,35 @@ export type Material = {
   updated_at: string;
 };
 
+export type MaterialLibraryPayload = {
+  name: string;
+  description: string;
+  enabled?: boolean;
+};
+
+export type MaterialPayload = {
+  name: string;
+  product_name_id: number;
+  material_library_id: number;
+  category_id: number;
+  unit: string;
+  brand_id: number | null;
+  status?: "normal";
+  description: string;
+  attributes: Record<string, unknown>;
+  enabled?: boolean;
+};
+
+export type MaterialQueryParams = {
+  search?: string;
+  status?: "" | "normal" | "stop_purchase" | "stop_use";
+  product_name_id?: number | null;
+};
+
+type QueryFunctionContextLike = {
+  queryKey: unknown;
+};
+
 export type User = {
   id: number;
   username: string;
@@ -293,6 +322,17 @@ function pathToUrl(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
 }
 
+function withQuery(path: string, params: Record<string, string | number | null | undefined>): string {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = pathToUrl(path);
   const headers = requestHeaders(options.headers);
@@ -363,8 +403,9 @@ export const apiClient = {
   deleteBrand(id: number) {
     return request<{ deleted: boolean; id: number }>(`/brands/${id}`, { method: "DELETE" });
   },
-  attributes() {
-    return request<Attribute[]>("/attributes");
+  attributes(productNameId?: number | null | QueryFunctionContextLike) {
+    const selectedProductNameId = typeof productNameId === "number" ? productNameId : null;
+    return request<Attribute[]>(withQuery("/attributes", { product_name_id: selectedProductNameId }));
   },
   createAttribute(payload: AttributePayload) {
     return request<Attribute>("/attributes", { method: "POST", body: payload });
@@ -381,8 +422,39 @@ export const apiClient = {
   materialLibraries() {
     return request<MaterialLibrary[]>("/material-libraries");
   },
-  materials() {
-    return request<Material[]>("/materials");
+  createMaterialLibrary(payload: MaterialLibraryPayload) {
+    return request<MaterialLibrary>("/material-libraries", { method: "POST", body: payload });
+  },
+  updateMaterialLibrary(id: number, payload: Partial<MaterialLibraryPayload>) {
+    return request<MaterialLibrary>(`/material-libraries/${id}`, { method: "PUT", body: payload });
+  },
+  deleteMaterialLibrary(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/material-libraries/${id}`, { method: "DELETE" });
+  },
+  materials(params: MaterialQueryParams | QueryFunctionContextLike = {}) {
+    const materialParams = "queryKey" in params ? {} : params;
+    return request<Material[]>(withQuery("/materials", materialParams));
+  },
+  createMaterial(payload: MaterialPayload) {
+    return request<Material>("/materials", { method: "POST", body: payload });
+  },
+  updateMaterial(id: number, payload: Partial<MaterialPayload>) {
+    return request<Material>(`/materials/${id}`, { method: "PUT", body: payload });
+  },
+  deleteMaterial(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/materials/${id}`, { method: "DELETE" });
+  },
+  stopPurchaseMaterial(id: number, reason: string) {
+    return request<Material>(`/materials/${id}/stop-purchase`, {
+      method: "PATCH",
+      body: { reason, actor: "super_admin" },
+    });
+  },
+  transitionMaterial(id: number, targetStatus: "stop_use", reason: string) {
+    return request<Material>(`/materials/${id}/transition`, {
+      method: "POST",
+      body: { target_status: targetStatus, reason },
+    });
   },
   users() {
     return request<User[]>("/users");
