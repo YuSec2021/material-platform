@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:backend-down": "E2E_EXPECT_BACKEND_DOWN=1 playwright test tests/e2e/backend-down.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "file:tools/playwright-test-adapter"
+  }
+}

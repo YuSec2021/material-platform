@@ -1,0 +1,9 @@
+.git
+backend/.venv
+backend/material_retrieval.db
+frontend/node_modules
+logs
+playwright-report
+test-results
+*.pyc
+__pycache__
