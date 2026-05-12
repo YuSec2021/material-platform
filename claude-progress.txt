@@ -10,4 +10,7 @@ Status: SPRINT PASS.
 Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth (Seeded Administrator, role badge, logout), all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health.
 Sprint 15: Standard Management React Pages
 Status: SPRINT PASS.
-Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList (read-only GET + disabled controls with tooltip), ProductNameList (read-only GET + disabled controls), CategoryLibraryList (read-only empty state + disabled controls). All 6 criteria pass.
+Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList/ProductNameList (read-only GET + disabled controls with tooltip), CategoryLibraryList (read-only empty state + disabled controls).
+Sprint 16: Material Management React Pages
+Status: SPRINT PASS.
+Notes: MaterialList split-pane (category tree ~256px + right table), search/status filter debounced GET, export CSV, AI action buttons (治理/添加/匹配) UI-only, MaterialLibraryList full CRUD, Material create/edit with dynamic selectors, image upload max 3, lifecycle badges and stop-purchase/stop-use actions. All 5 criteria pass.
