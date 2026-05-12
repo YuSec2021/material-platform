@@ -1,12 +1,13 @@
 {
-  "mode": "contract",
-  "current_sprint": 12,
-  "retry_count": 0,
-  "last_successful_sprint": 11,
+  "mode": "checking",
+  "current_sprint": 13,
+  "retry_count": 1,
+  "last_successful_sprint": 12,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-12-deployment-testing",
+  "active_branch": "codex/sprint-13-frontend-scaffold",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T09:50:00+08:00",
-  "request_kind": ""
+  "last_run_at": "2026-05-12T16:24:41.912763",
+  "request_kind": "",
+  "sprint_origin": "major_feature"
 }

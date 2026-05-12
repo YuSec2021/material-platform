@@ -1,16 +1,5 @@
-Project summary: Sprint 12 added private Docker Compose deployment, Nginx production proxying, root Playwright E2E smoke coverage, README operator docs, and deployment/runtime polish.
-
-Sprint 10: LLM Gateway and AI Infrastructure
-Status: SPRINT PASS before Sprint 11 work.
-Notes: Model/provider management, hot-switch mappings, encrypted API keys, fallback gateway invocation, and AITracer debug traces remain covered.
-Verification: Existing Sprint 10 tests included in unittest discovery.
-
-Sprint 11: System Configuration and Audit Logging
-Status: SPRINT PASS before Sprint 12 work.
-Notes: /system/config, lifecycle reason options, approval mode persistence, /audit-logs UI/API/detail/filter/pagination/export, and redaction are in place.
-Verification: Existing Sprint 11 tests included in unittest discovery.
-
+Project summary: Sprint 12 PASS. Frontend redesign re-planned using prototype_code/ (React/Vite/shadcn-ui SPA). Sprints 13-20 replace old 13-16. Backend unchanged (FastAPI + PostgreSQL + Qdrant).
 Sprint 12: Deployment, Integration Testing, and Polish
-Status: implemented; git commit blocked by sandbox .git index.lock write denial; eval-trigger.txt written as sprint=12.
-Notes: Added docker-compose.yml, backend/frontend Dockerfiles, nginx.conf, Postgres DATABASE_URL support, root Playwright smoke tests, offline Playwright adapter, and README deployment/E2E docs.
-Verification: unittest discovery passed; JS/Python syntax checks passed; docker compose config passed; npx playwright test --list passed. Live browser E2E was blocked by sandbox port binding.
+Status: SPRINT PASS.
+Notes: Docker Compose, Nginx, Playwright E2E smoke tests, Postgres DATABASE_URL, offline Playwright adapter, README deployment docs.
+Sprint 13: Frontend Scaffolding and Dev Environment
