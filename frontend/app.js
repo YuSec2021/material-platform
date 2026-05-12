@@ -1,4 +1,4 @@
-const API = "http://localhost:8000/api/v1";
+const API = window.MATERIAL_API_BASE || (window.location.port === "5173" ? "http://localhost:8000/api/v1" : "/api/v1");
 const app = document.getElementById("app");
 let products = [];
 let materialLibraries = [];
