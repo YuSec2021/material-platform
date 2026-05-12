@@ -17,9 +17,8 @@ let materialGovernanceFile = null;
 let aiMaterialPreview = null;
 let workflowReferenceImages = [];
 let currentUser = null;
+let systemConfigCache = null;
 const AI_CAPABILITIES = ["material_add", "material_match", "category_match", "material_analysis", "attr_recommend", "material_governance"];
-const STOP_PURCHASE_REASONS = ["供应商停产", "质量风险停采", "战略替代物料", "采购目录清理"];
-const STOP_USE_REASONS = ["长期无库存且无业务需求", "安全合规风险", "技术标准淘汰", "资产归档完成"];
 const NAV_ITEMS = [
   { href: "/materials", label: "Material Management", permission: "directory.material_archives" },
   { href: "/materials/ai-add", label: "AI Material Add", permission: "directory.material_archives" },
@@ -34,6 +33,7 @@ const NAV_ITEMS = [
   { href: "/system/users", label: "Users", permission: "directory.system_admin" },
   { href: "/system/roles", label: "Roles", permission: "directory.system_admin" },
   { href: "/system/config", label: "System Config", permission: "directory.system_admin" },
+  { href: "/audit-logs", label: "Audit Logs", permission: "directory.system_admin" },
   { href: "/categories", label: "Categories", permission: "directory.category_management" },
   { href: "/ai/providers", label: "AI Providers", permission: "directory.system_admin" },
   { href: "/debug/trace", label: "AI Trace Debug", permission: "directory.system_admin" },
@@ -50,6 +50,7 @@ const ROUTE_PERMISSIONS = [
   { test: (path) => path.includes("/standard/attributes"), permission: "directory.attribute_management" },
   { test: (path) => path.includes("/workflows"), permission: "directory.workflow" },
   { test: (path) => path.includes("/system"), permission: "directory.system_admin" },
+  { test: (path) => path.includes("/audit-logs"), permission: "directory.system_admin" },
   { test: (path) => path.includes("/ai/providers") || path.includes("/debug/trace"), permission: "directory.system_admin" },
   { test: (path) => path.includes("/categories"), permission: "directory.category_management" },
   { test: (path) => path.includes("/standard/product-names"), permission: "directory.product_name_management" },
@@ -77,6 +78,38 @@ async function request(path, options = {}) {
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+async function requestBlob(path, options = {}) {
+  const response = await fetch(`${API}${path}`, {
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {})
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.blob();
+}
+
+async function loadSystemConfig(force = false) {
+  if (systemConfigCache && !force) return systemConfigCache;
+  systemConfigCache = await request("/system/config");
+  applySystemIdentity(systemConfigCache);
+  return systemConfigCache;
+}
+
+function applySystemIdentity(config) {
+  const h1 = document.querySelector(".topbar h1");
+  const eyebrow = document.querySelector(".topbar .eyebrow");
+  if (h1) {
+    const icon = config.icon?.data_url ? `<img class="system-icon" src="${esc(config.icon.data_url)}" alt="${esc(config.system_name)} icon" />` : "";
+    h1.innerHTML = `${icon}<span>${esc(config.system_name || "AI Material Management Platform")}</span>`;
+  }
+  if (eyebrow) eyebrow.textContent = "Material Management";
+  document.title = config.system_name || "AI Material Management Platform";
 }
 
 function storedSession() {
@@ -109,6 +142,11 @@ function accessDenied(permissionKey) {
 
 async function loadCurrentUser() {
   currentUser = await request("/auth/me");
+  try {
+    await loadSystemConfig(true);
+  } catch {
+    systemConfigCache = null;
+  }
   renderNavigation();
   renderSessionBar();
 }
@@ -1120,6 +1158,11 @@ function workflowStatusBadge(status) {
   return `<span class="status-badge status-workflow-${esc(status)}">${esc(status)}</span>`;
 }
 
+function approvalRoutePreview(config) {
+  const simple = config?.approval_mode === "simple";
+  return `<div class="approval-preview">${simple ? "Approval route preview: single approval step (approver)" : "Approval route preview: department approval -> asset management approval"}</div>`;
+}
+
 function workflowHistory(history) {
   if (!history?.length) return `<div class="empty">No approval history</div>`;
   return `
@@ -1164,28 +1207,280 @@ function workflowDetail(application) {
   `;
 }
 
-async function renderSystemConfig() {
-  const config = await request("/system/config");
-  app.innerHTML = `
-    <h2>System Configuration</h2>
-    <section class="panel narrow-panel">
-      <label>Approval mode
-        <select id="approvalMode">
-          <option value="multi_node" ${config.approval_mode === "multi_node" ? "selected" : ""}>multi-node workflow</option>
-          <option value="simple" ${config.approval_mode === "simple" ? "selected" : ""}>simple approval</option>
-        </select>
-      </label>
-      <button id="saveApprovalMode">Save configuration</button>
-      <div id="configStatus" class="status muted">Current mode: ${esc(config.approval_mode)}. Last update: ${esc(config.updated_at)}</div>
+function reasonEditor(type, reasons) {
+  return `
+    <section class="panel">
+      <h3>${type === "stop_purchase" ? "Stop purchase reasons" : "Stop use reasons"}</h3>
+      <div id="${type}Reasons" class="reason-list">
+        ${reasons.map((reason, index) => `
+          <div class="reason-row" data-reason-row="${type}">
+            <input data-reason-name="${type}" value="${esc(reason.name || reason)}" />
+            <label class="inline-check"><span><input data-reason-enabled="${type}" type="checkbox" ${reason.enabled === false ? "" : "checked"} /> enabled</span></label>
+            <button class="secondary" data-remove-reason="${type}" data-index="${index}">Remove</button>
+          </div>
+        `).join("")}
+      </div>
+      <div class="toolbar compact-toolbar">
+        <input id="${type}NewReason" placeholder="Add reason option" />
+        <button class="secondary" data-add-reason="${type}">Add</button>
+      </div>
     </section>
   `;
-  document.getElementById("saveApprovalMode").addEventListener("click", async () => {
+}
+
+function collectReasons(type) {
+  const names = Array.from(document.querySelectorAll(`[data-reason-name="${type}"]`));
+  const enabled = Array.from(document.querySelectorAll(`[data-reason-enabled="${type}"]`));
+  return names
+    .map((input, index) => ({ name: input.value.trim(), enabled: enabled[index]?.checked ?? true }))
+    .filter((item) => item.name);
+}
+
+function bindReasonEditors(config) {
+  document.querySelectorAll("[data-add-reason]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.addReason;
+      const input = document.getElementById(`${type}NewReason`);
+      const value = input.value.trim();
+      if (!value) return;
+      const list = document.getElementById(`${type}Reasons`);
+      list.insertAdjacentHTML("beforeend", `
+        <div class="reason-row" data-reason-row="${type}">
+          <input data-reason-name="${type}" value="${esc(value)}" />
+          <label class="inline-check"><span><input data-reason-enabled="${type}" type="checkbox" checked /> enabled</span></label>
+          <button class="secondary" data-remove-reason="${type}">Remove</button>
+        </div>
+      `);
+      input.value = "";
+      bindRemoveReasonButtons();
+    });
+  });
+  bindRemoveReasonButtons();
+}
+
+function bindRemoveReasonButtons() {
+  document.querySelectorAll("[data-remove-reason]").forEach((button) => {
+    button.onclick = () => button.closest(".reason-row")?.remove();
+  });
+}
+
+async function renderSystemConfig() {
+  const config = await loadSystemConfig(true);
+  app.innerHTML = `
+    <h2>System Configuration</h2>
+    <div class="grid material-grid">
+      <section class="panel">
+        <h3>System identity</h3>
+        <label>System name<input id="systemName" value="${esc(config.system_name)}" /></label>
+        <label>System icon<input id="systemIconFile" type="file" accept="image/*" /></label>
+        <input id="systemIconData" value="${esc(config.icon?.data_url || "")}" placeholder="Icon data URL or image URL" />
+        <div class="thumb-row">${config.icon?.data_url ? `<img class="system-icon large-system-icon" src="${esc(config.icon.data_url)}" alt="Current system icon" />` : ""}</div>
+        <h3>Approval behavior</h3>
+        <label>Approval mode
+          <select id="approvalMode">
+            <option value="multi_node" ${config.approval_mode === "multi_node" ? "selected" : ""}>multi-node workflow</option>
+            <option value="simple" ${config.approval_mode === "simple" ? "selected" : ""}>simple approval</option>
+          </select>
+        </label>
+        <button id="saveSystemConfig">Save configuration</button>
+        <div id="configStatus" class="status muted">Current mode: ${esc(config.approval_mode)}. Last update: ${esc(config.updated_at)}</div>
+      </section>
+      <div>
+        ${reasonEditor("stop_purchase", config.stop_purchase_reasons || [])}
+        ${reasonEditor("stop_use", config.stop_use_reasons || [])}
+      </div>
+    </div>
+  `;
+  bindReasonEditors(config);
+  document.getElementById("systemIconFile").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    document.getElementById("systemIconData").value = await fileDataUrl(file);
+  });
+  document.getElementById("saveSystemConfig").addEventListener("click", async () => {
+    const iconData = document.getElementById("systemIconData").value.trim();
     const saved = await request("/system/config", {
       method: "PUT",
-      body: JSON.stringify({ approval_mode: document.getElementById("approvalMode").value })
+      body: JSON.stringify({
+        system_name: document.getElementById("systemName").value.trim(),
+        icon: {
+          filename: document.getElementById("systemIconFile").files[0]?.name || config.icon?.filename || "system-icon",
+          content_type: document.getElementById("systemIconFile").files[0]?.type || config.icon?.content_type || "image/png",
+          data_url: iconData
+        },
+        stop_purchase_reasons: collectReasons("stop_purchase"),
+        stop_use_reasons: collectReasons("stop_use"),
+        approval_mode: document.getElementById("approvalMode").value
+      })
     });
-    document.getElementById("configStatus").textContent = `Saved approval mode: ${saved.approval_mode}`;
+    systemConfigCache = saved;
+    applySystemIdentity(saved);
+    document.getElementById("configStatus").textContent = `Saved ${saved.system_name}; approval mode: ${saved.approval_mode}`;
   });
+}
+
+function auditFiltersFromDom() {
+  return {
+    user: document.getElementById("auditUser")?.value.trim() || "",
+    resource: document.getElementById("auditResource")?.value.trim() || "",
+    action: document.getElementById("auditAction")?.value.trim() || "",
+    source: document.getElementById("auditSource")?.value.trim() || "",
+    start_time: document.getElementById("auditStart")?.value || "",
+    end_time: document.getElementById("auditEnd")?.value || ""
+  };
+}
+
+function auditQueryString(filters, page = 1) {
+  const params = new URLSearchParams({ page: String(page), page_size: "10" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return params.toString();
+}
+
+function auditExportQueryString(filters) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return params.toString();
+}
+
+function auditValueSummary(value) {
+  const text = JSON.stringify(value || {}, null, 0);
+  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
+function auditTable(result) {
+  return `
+    <section class="panel">
+      <div class="toolbar">
+        <span class="pill">total ${esc(result.total)}</span>
+        <span class="pill">page ${esc(result.page)} / ${esc(result.pages)}</span>
+      </div>
+      <table>
+        <thead><tr><th>Timestamp</th><th>User</th><th>Resource</th><th>Action</th><th>Source</th><th>Before</th><th>After</th><th>Detail</th></tr></thead>
+        <tbody>
+          ${result.items.map((item) => `
+            <tr>
+              <td>${esc(item.timestamp)}</td>
+              <td>${esc(item.user)}</td>
+              <td>${esc(item.resource)}</td>
+              <td>${esc(item.action)}</td>
+              <td>${esc(item.source)}</td>
+              <td><code>${esc(auditValueSummary(item.before_value))}</code></td>
+              <td><code>${esc(auditValueSummary(item.after_value))}</code></td>
+              <td><button class="secondary" data-audit-detail="${item.id}">Diff</button></td>
+            </tr>
+          `).join("") || `<tr><td colspan="8"><div class="empty">No audit logs found</div></td></tr>`}
+        </tbody>
+      </table>
+      <div class="toolbar">
+        <button id="auditPrev" class="secondary" ${result.page <= 1 ? "disabled" : ""}>Previous</button>
+        <button id="auditNext" class="secondary" ${result.page >= result.pages ? "disabled" : ""}>Next</button>
+      </div>
+    </section>
+  `;
+}
+
+async function renderAuditLogs(page = 1) {
+  const filters = auditFiltersFromDom();
+  const result = await request(`/audit-logs?${auditQueryString(filters, page)}`);
+  app.innerHTML = `
+    <h2>Operational Audit Log</h2>
+    <section class="panel">
+      <div class="filter-grid">
+        <label>User<input id="auditUser" value="${esc(filters.user)}" placeholder="super_admin" /></label>
+        <label>Resource<input id="auditResource" value="${esc(filters.resource)}" placeholder="system_config" /></label>
+        <label>Action<input id="auditAction" value="${esc(filters.action)}" placeholder="update" /></label>
+        <label>Source
+          <select id="auditSource">
+            <option value="">Any</option>
+            <option value="human" ${filters.source === "human" ? "selected" : ""}>human</option>
+            <option value="AI" ${filters.source === "AI" ? "selected" : ""}>AI</option>
+            <option value="system" ${filters.source === "system" ? "selected" : ""}>system</option>
+          </select>
+        </label>
+        <label>Start<input id="auditStart" type="datetime-local" value="${esc(filters.start_time)}" /></label>
+        <label>End<input id="auditEnd" type="datetime-local" value="${esc(filters.end_time)}" /></label>
+      </div>
+      <div class="toolbar">
+        <button id="applyAuditFilters">Apply filters</button>
+        <button id="clearAuditFilters" class="secondary">Clear</button>
+        <button id="exportAuditLogs" class="secondary">Export Excel</button>
+      </div>
+      <div id="auditStatus" class="status muted"></div>
+    </section>
+    <div id="auditTable">${auditTable(result)}</div>
+    <section id="auditDetail" class="panel detail-card"></section>
+  `;
+  document.getElementById("applyAuditFilters").addEventListener("click", () => renderAuditLogs(1));
+  document.getElementById("clearAuditFilters").addEventListener("click", () => {
+    ["auditUser", "auditResource", "auditAction", "auditSource", "auditStart", "auditEnd"].forEach((id) => {
+      const item = document.getElementById(id);
+      if (item) item.value = "";
+    });
+    renderAuditLogs(1);
+  });
+  document.getElementById("auditPrev").addEventListener("click", () => renderAuditLogs(result.page - 1));
+  document.getElementById("auditNext").addEventListener("click", () => renderAuditLogs(result.page + 1));
+  document.querySelectorAll("[data-audit-detail]").forEach((button) => {
+    button.addEventListener("click", () => renderAuditDetail(button.dataset.auditDetail));
+  });
+  document.getElementById("exportAuditLogs").addEventListener("click", exportAuditLogs);
+}
+
+function diffRows(beforeValue, afterValue) {
+  const keys = Array.from(new Set([...Object.keys(beforeValue || {}), ...Object.keys(afterValue || {})])).sort();
+  return keys.map((key) => {
+    const beforeText = JSON.stringify(beforeValue?.[key] ?? "", null, 2);
+    const afterText = JSON.stringify(afterValue?.[key] ?? "", null, 2);
+    const changed = beforeText !== afterText;
+    return `
+      <tr class="${changed ? "diff-changed" : ""}">
+        <td>${esc(key)}</td>
+        <td><pre>${esc(beforeText)}</pre></td>
+        <td><pre>${esc(afterText)}</pre></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function renderAuditDetail(logId) {
+  const item = await request(`/audit-logs/${logId}`);
+  document.getElementById("auditDetail").innerHTML = `
+    <h3>Audit diff #${esc(item.id)}</h3>
+    <div class="toolbar">
+      <span class="pill">${esc(item.resource)}</span>
+      <span class="pill">${esc(item.action)}</span>
+      <span class="pill">${esc(item.user)}</span>
+      <span class="pill">${esc(item.source)}</span>
+    </div>
+    <table>
+      <thead><tr><th>Field</th><th>Before value</th><th>After value</th></tr></thead>
+      <tbody>${diffRows(item.before_value, item.after_value)}</tbody>
+    </table>
+  `;
+}
+
+async function exportAuditLogs() {
+  const status = document.getElementById("auditStatus");
+  try {
+    const filters = auditFiltersFromDom();
+    const query = auditExportQueryString(filters);
+    const blob = await requestBlob(`/audit-logs/export${query ? `?${query}` : ""}`);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-logs-${Date.now()}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    status.textContent = "Excel export downloaded";
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 function roleNames(user) {
@@ -1608,10 +1903,12 @@ async function renderCategories() {
 
 async function renderNewCategoryWorkflow() {
   await loadMaterialContext();
+  const config = await loadSystemConfig();
   app.innerHTML = `
     <h2>New Material Category Application</h2>
     <div class="grid">
       <section class="panel">
+        ${approvalRoutePreview(config)}
         ${materialLibrarySelect()}
         <label>Parent category
           <select id="parentCategorySelect">
@@ -1660,11 +1957,13 @@ function imageInputHint() {
 
 async function renderNewMaterialCodeWorkflow() {
   await loadMaterialContext();
+  const config = await loadSystemConfig();
   workflowReferenceImages = [];
   app.innerHTML = `
     <h2>New Material Code Application</h2>
     <div class="grid material-grid">
       <section class="panel">
+        ${approvalRoutePreview(config)}
         ${productSelect()}
         ${materialLibrarySelect()}
         ${categorySelect()}
@@ -1725,6 +2024,10 @@ async function submitMaterialCodeWorkflow() {
   }
 }
 
+function enabledReasonNames(reasons) {
+  return (reasons || []).filter((reason) => reason.enabled !== false).map((reason) => reason.name || reason).filter(Boolean);
+}
+
 function reasonSelect(id, reasons, label) {
   return `<label>${label}
     <select id="${id}" required>
@@ -1744,8 +2047,10 @@ function stopMaterialOptions(materials, eligibleStatus, selectedId) {
 
 async function renderStopPurchaseWorkflow() {
   await loadMaterialContext();
+  const config = await loadSystemConfig();
   const selectedId = new URLSearchParams(window.location.search).get("material_id") || "";
   const materials = await request("/materials");
+  const reasons = enabledReasonNames(config.stop_purchase_reasons);
   app.innerHTML = `
     <h2>Stop Purchase Application</h2>
     <div class="grid material-grid">
@@ -1753,7 +2058,7 @@ async function renderStopPurchaseWorkflow() {
         <label>Target normal material
           <select id="stopPurchaseMaterial">${stopMaterialOptions(materials, "normal", selectedId)}</select>
         </label>
-        ${reasonSelect("stopPurchaseReason", STOP_PURCHASE_REASONS, "Stop-purchase reason")}
+        ${reasonSelect("stopPurchaseReason", reasons, "Stop-purchase reason")}
         <label>Business justification<textarea id="stopPurchaseBusinessReason" placeholder="Describe the evidence and business impact"></textarea></label>
         <button id="submitStopPurchaseWorkflow">Submit stop purchase application</button>
         <div id="stopPurchaseWorkflowStatus" class="status muted"></div>
@@ -1786,8 +2091,10 @@ async function submitStopPurchaseWorkflow() {
 
 async function renderStopUseWorkflow() {
   await loadMaterialContext();
+  const config = await loadSystemConfig();
   const selectedId = new URLSearchParams(window.location.search).get("material_id") || "";
   const materials = await request("/materials");
+  const reasons = enabledReasonNames(config.stop_use_reasons);
   app.innerHTML = `
     <h2>Stop Use Application</h2>
     <div class="grid material-grid">
@@ -1795,7 +2102,7 @@ async function renderStopUseWorkflow() {
         <label>Target stop_purchase material
           <select id="stopUseMaterial">${stopMaterialOptions(materials, "stop_purchase", selectedId)}</select>
         </label>
-        ${reasonSelect("stopUseReason", STOP_USE_REASONS, "Stop-use reason")}
+        ${reasonSelect("stopUseReason", reasons, "Stop-use reason")}
         <label>Business justification<textarea id="stopUseBusinessReason" placeholder="Stop use requires prior stop_purchase and cannot be reverted"></textarea></label>
         <label><span><input id="stopUseAcknowledge" type="checkbox" /> I acknowledge stop_use is terminal and non-reversible</span></label>
         <button id="submitStopUseWorkflow">Submit stop use application</button>
@@ -2225,6 +2532,7 @@ async function route() {
     if (path.includes("/ai/providers") || path.includes("/system/models")) return renderAIProviders();
     if (path.includes("/debug/trace")) return renderTraceDebug();
     if (path.includes("/system/config")) return renderSystemConfig();
+    if (path.includes("/audit-logs")) return renderAuditLogs();
     if (path.includes("/material-libraries")) return renderMaterialLibraries();
     if (path.includes("/workflows/new-category")) return renderNewCategoryWorkflow();
     if (path.includes("/workflows/new-material-code")) return renderNewMaterialCodeWorkflow();

@@ -1,16 +1,16 @@
-Project summary: Sprint 10 implements the LLM gateway model configuration surface, capability hot-switch mappings, AES-256 API key storage, provider connection testing, fallback invocation, and persisted AITracer debug traces.
-
-Sprint 8: User management and role management
-Status: SPRINT PASS before Sprint 9 work.
-Notes: Added User/Role/RoleUser/FeaturePermission models, HCM seed users, local user operations, role binding, permission catalog/config APIs, and UI pages.
-Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; pytest unavailable in venv.
+Project summary: Sprint 11 implements system identity/configuration, configurable lifecycle reason options, approval mode persistence, operational audit logging, audit review UI, diff detail, RBAC-protected audit APIs, and Excel export.
 
 Sprint 9: Permission system implementation
 Status: SPRINT PASS before Sprint 10 work.
-Notes: RBAC enforcement and permission-based UI remained intact through Sprint 10 regression testing.
+Notes: RBAC enforcement and permission-based UI remained intact through later regression testing.
 Verification: Existing Sprint 9 tests included in unittest discovery.
 
 Sprint 10: LLM Gateway and AI Infrastructure
+Status: SPRINT PASS before Sprint 11 work.
+Notes: Model/provider management, hot-switch capability mappings, encrypted API keys, fallback gateway invocation, and AITracer debug traces are in place.
+Verification: Existing Sprint 10 tests included in unittest discovery.
+
+Sprint 11: System Configuration and Audit Logging
 Status: implemented; git commit blocked by sandbox .git index.lock write denial.
-Notes: Added model_config CRUD-compatible provider API, capability_model_mapping hot-switch, AES-256 encrypted keys, connection tests, fallback gateway invocation, tracer spans, /ai/providers UI, and /debug/trace UI.
-Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; backend/.venv/bin/python -m pytest -q unavailable because pytest is not installed.
+Notes: Added full /system/config UI and API, dynamic stop-purchase/stop-use reasons, /audit-logs UI, audit_log API/detail/filter/pagination/export, sensitive-value redaction, and legacy audit schema repair.
+Verification: backend/.venv/bin/python -m unittest discover -s tests passed; node --check frontend/app.js passed; pytest and python -m pytest unavailable because pytest is not installed.

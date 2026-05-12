@@ -227,6 +227,19 @@ class SystemConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user: Mapped[str] = mapped_column(String(120), default="system", index=True)
+    resource: Mapped[str] = mapped_column(String(160), default="", index=True)
+    action: Mapped[str] = mapped_column(String(80), default="", index=True)
+    before_value: Mapped[str] = mapped_column(Text, default="{}")
+    after_value: Mapped[str] = mapped_column(Text, default="{}")
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    source: Mapped[str] = mapped_column(String(40), default="human", index=True)
+
+
 class WorkflowApplication(Base):
     __tablename__ = "workflow_applications"
 
