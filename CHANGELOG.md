@@ -8,3 +8,11 @@
 - Both build and lint scripts execute successfully from the external command surface. The production bundle is generated. ESLint reports zero lint errors.
 
 ## v2.0.0 — Sprint 14 [MAJOR bump]
+
+## v2.1.0 — Sprint 15 [MINOR bump]
+- The page renders a safe read-only empty state with all write controls disabled and the correct tooltip. No write requests leak through.
+- Correctly wired to the GET endpoint only; write controls are disabled with the expected tooltip.
+- Correctly wired to the GET endpoint only; write controls are disabled.
+- Full CRUD flow verified end-to-end. Type badges render correctly. Change log timeline panel expands and fetches data from the correct endpoint.
+- Full CRUD confirmed. Read-only generated code field works correctly. Logo thumbnail feature present (renders ImageIcon placeholder when no logo is uploaded, renders actual thumbnail when logo data exists).
+- All three quality gates pass cleanly.

@@ -4,7 +4,10 @@ Status: SPRINT PASS.
 Notes: Docker Compose, Nginx, Playwright E2E smoke tests, Postgres DATABASE_URL, offline Playwright adapter, README deployment docs.
 Sprint 13: Frontend Scaffolding and Dev Environment
 Status: SPRINT PASS.
-Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes (/dev/frontend-health, /dev/component-smoke), strict TS, ESLint, build+lint scripts. All 6 criteria pass via Playwright browser verification.
+Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes (/dev/frontend-health, /dev/component-smoke), strict TS, ESLint, build+lint scripts.
 Sprint 14: API Client Layer and Auth Integration
 Status: SPRINT PASS.
-Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth (Seeded Administrator, role badge, logout), all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health. All 6 criteria pass via Playwright browser verification.
+Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth (Seeded Administrator, role badge, logout), all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health.
+Sprint 15: Standard Management React Pages
+Status: SPRINT PASS.
+Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList (read-only GET + disabled controls with tooltip), ProductNameList (read-only GET + disabled controls), CategoryLibraryList (read-only empty state + disabled controls). All 6 criteria pass.
