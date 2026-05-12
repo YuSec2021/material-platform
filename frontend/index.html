@@ -3,41 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Material Management Platform</title>
+    <title>AI物料中台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">Material Management</div>
-        <h1>AI Material Management Platform</h1>
+    <div class="app-layout">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="sidebar-brand">
+          <div class="brand-copy">
+            <div class="eyebrow brand-eyebrow">物料管理</div>
+            <h1 class="brand-title">AI物料中台</h1>
+          </div>
+          <button id="sidebarToggle" class="icon-button sidebar-toggle" type="button" aria-label="收起侧边栏" aria-expanded="true">&lt;</button>
+        </div>
+        <nav id="sidebarNav" class="sidebar-nav"></nav>
+      </aside>
+      <div class="workspace">
+        <header class="workspace-header">
+          <div>
+            <div class="eyebrow" id="workspaceEyebrow">企业级标准化物料平台</div>
+          </div>
+          <div class="workspace-actions">
+            <button id="languageToggle" class="secondary language-toggle" type="button">EN</button>
+            <div id="sessionBar" class="session-bar"></div>
+          </div>
+        </header>
+        <main id="app" class="shell"></main>
       </div>
-      <nav>
-        <a href="/materials">Material Management</a>
-        <a href="/materials/ai-add">AI Material Add</a>
-        <a href="/materials/governance">Material AI Governance</a>
-        <a href="/workflows/new-category">New Category Workflow</a>
-        <a href="/workflows/new-material-code">New Material Code</a>
-        <a href="/workflows/stop-purchase">Stop Purchase</a>
-        <a href="/workflows/stop-use">Stop Use</a>
-        <a href="/workflows/tasks">Workflow Tasks</a>
-        <a href="/workflows/applications">My Applications</a>
-        <a href="/system/users">Users</a>
-        <a href="/system/roles">Roles</a>
-        <a href="/system/config">System Config</a>
-        <a href="/audit-logs">Audit Logs</a>
-        <a href="/categories">Categories</a>
-        <a href="/ai/providers">AI Providers</a>
-        <a href="/debug/trace">AI Trace Debug</a>
-        <a href="/standard/product-names">Product Names</a>
-        <a href="/standard/attributes">Attributes</a>
-        <a href="/standard/attributes/ai-governance">AI Governance</a>
-        <a href="/standard/attribute-recommend">Attribute Recommend</a>
-        <a href="/standard/attributes/changes">Changes</a>
-        <a href="/standard/brands">Brands</a>
-      </nav>
-    </header>
-    <main id="app" class="shell"></main>
+    </div>
     <script src="/app.js"></script>
   </body>
 </html>

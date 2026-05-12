@@ -18,32 +18,108 @@ let aiMaterialPreview = null;
 let workflowReferenceImages = [];
 let currentUser = null;
 let systemConfigCache = null;
+let currentLanguage = localStorage.getItem("material_language") || "zh";
+const compactSidebarQuery = window.matchMedia("(max-width: 1024px)");
+let sidebarCollapsed = localStorage.getItem("material_sidebar_collapsed");
+if (sidebarCollapsed === null) {
+  sidebarCollapsed = compactSidebarQuery.matches;
+} else {
+  sidebarCollapsed = compactSidebarQuery.matches || sidebarCollapsed === "true";
+}
 const AI_CAPABILITIES = ["material_add", "material_match", "category_match", "material_analysis", "attr_recommend", "material_governance"];
 const NAV_ITEMS = [
-  { href: "/materials", label: "Material Management", permission: "directory.material_archives" },
-  { href: "/materials/ai-add", label: "AI Material Add", permission: "directory.material_archives" },
-  { href: "/materials/governance", label: "Material AI Governance", permission: "directory.material_archives" },
-  { href: "/material-libraries", label: "Material Libraries", permission: "directory.material_library" },
-  { href: "/workflows/new-category", label: "New Category Workflow", permission: "directory.workflow" },
-  { href: "/workflows/new-material-code", label: "New Material Code", permission: "directory.workflow" },
-  { href: "/workflows/stop-purchase", label: "Stop Purchase", permission: "directory.workflow" },
-  { href: "/workflows/stop-use", label: "Stop Use", permission: "directory.workflow" },
-  { href: "/workflows/tasks", label: "Workflow Tasks", permission: "directory.workflow" },
-  { href: "/workflows/applications", label: "My Applications", permission: "directory.workflow" },
-  { href: "/system/users", label: "Users", permission: "directory.system_admin" },
-  { href: "/system/roles", label: "Roles", permission: "directory.system_admin" },
-  { href: "/system/config", label: "System Config", permission: "directory.system_admin" },
-  { href: "/audit-logs", label: "Audit Logs", permission: "directory.system_admin" },
-  { href: "/categories", label: "Categories", permission: "directory.category_management" },
-  { href: "/ai/providers", label: "AI Providers", permission: "directory.system_admin" },
-  { href: "/debug/trace", label: "AI Trace Debug", permission: "directory.system_admin" },
-  { href: "/standard/product-names", label: "Product Names", permission: "directory.product_name_management" },
-  { href: "/standard/attributes", label: "Attributes", permission: "directory.attribute_management" },
-  { href: "/standard/attributes/ai-governance", label: "AI Governance", permission: "directory.attribute_management" },
-  { href: "/standard/attribute-recommend", label: "Attribute Recommend", permission: "directory.attribute_management" },
-  { href: "/standard/attributes/changes", label: "Changes", permission: "directory.attribute_management" },
-  { href: "/standard/brands", label: "Brands", permission: "directory.brand_management" }
+  { href: "/materials", labelKey: "nav.materials", icon: "MM", permission: "directory.material_archives" },
+  { href: "/materials/ai-add", labelKey: "nav.aiAdd", icon: "AI", permission: "directory.material_archives" },
+  { href: "/materials/governance", labelKey: "nav.materialGovernance", icon: "MG", permission: "directory.material_archives" },
+  { href: "/material-libraries", labelKey: "nav.materialLibraries", icon: "ML", permission: "directory.material_library" },
+  { href: "/workflows/new-category", labelKey: "nav.newCategory", icon: "NC", permission: "directory.workflow" },
+  { href: "/workflows/new-material-code", labelKey: "nav.newMaterialCode", icon: "MC", permission: "directory.workflow" },
+  { href: "/workflows/stop-purchase", labelKey: "nav.stopPurchase", icon: "SP", permission: "directory.workflow" },
+  { href: "/workflows/stop-use", labelKey: "nav.stopUse", icon: "SU", permission: "directory.workflow" },
+  { href: "/workflows/tasks", labelKey: "nav.workflowTasks", icon: "WT", permission: "directory.workflow" },
+  { href: "/workflows/applications", labelKey: "nav.myApplications", icon: "MA", permission: "directory.workflow" },
+  { href: "/system/users", labelKey: "nav.users", icon: "US", permission: "directory.system_admin" },
+  { href: "/system/roles", labelKey: "nav.roles", icon: "RL", permission: "directory.system_admin" },
+  { href: "/system/config", labelKey: "nav.systemConfig", icon: "SC", permission: "directory.system_admin" },
+  { href: "/audit-logs", labelKey: "nav.auditLogs", icon: "AL", permission: "directory.system_admin" },
+  { href: "/categories", labelKey: "nav.categories", icon: "CT", permission: "directory.category_management" },
+  { href: "/ai/providers", labelKey: "nav.aiProviders", icon: "AP", permission: "directory.system_admin" },
+  { href: "/debug/trace", labelKey: "nav.aiTrace", icon: "TR", permission: "directory.system_admin" },
+  { href: "/standard/product-names", labelKey: "nav.productNames", icon: "PN", permission: "directory.product_name_management" },
+  { href: "/standard/attributes", labelKey: "nav.attributes", icon: "AT", permission: "directory.attribute_management" },
+  { href: "/standard/attributes/ai-governance", labelKey: "nav.aiGovernance", icon: "AG", permission: "directory.attribute_management" },
+  { href: "/standard/attribute-recommend", labelKey: "nav.attributeRecommend", icon: "AR", permission: "directory.attribute_management" },
+  { href: "/standard/attributes/changes", labelKey: "nav.changes", icon: "CH", permission: "directory.attribute_management" },
+  { href: "/standard/brands", labelKey: "nav.brands", icon: "BR", permission: "directory.brand_management" }
 ];
+const I18N = {
+  zh: {
+    "app.defaultTitle": "AI物料中台",
+    "app.eyebrow": "物料管理",
+    "app.workspaceEyebrow": "企业级标准化物料平台",
+    "controls.collapse": "收起侧边栏",
+    "controls.expand": "展开侧边栏",
+    "session.username": "用户名",
+    "session.switch": "切换用户",
+    "session.admin": "使用管理员",
+    "nav.materials": "物料管理",
+    "nav.aiAdd": "AI新增物料",
+    "nav.materialGovernance": "物料AI治理",
+    "nav.materialLibraries": "物料库",
+    "nav.newCategory": "新增分类流程",
+    "nav.newMaterialCode": "新增物料编码",
+    "nav.stopPurchase": "停购物料",
+    "nav.stopUse": "停用物料",
+    "nav.workflowTasks": "流程任务",
+    "nav.myApplications": "我的申请",
+    "nav.users": "用户管理",
+    "nav.roles": "角色管理",
+    "nav.systemConfig": "系统配置",
+    "nav.auditLogs": "审计日志",
+    "nav.categories": "分类管理",
+    "nav.aiProviders": "AI供应商",
+    "nav.aiTrace": "AI链路追踪",
+    "nav.productNames": "品名管理",
+    "nav.attributes": "属性管理",
+    "nav.aiGovernance": "AI治理",
+    "nav.attributeRecommend": "属性推荐",
+    "nav.changes": "变更记录",
+    "nav.brands": "品牌管理"
+  },
+  en: {
+    "app.defaultTitle": "AI Material Management Platform",
+    "app.eyebrow": "Material Management",
+    "app.workspaceEyebrow": "Enterprise material standardization platform",
+    "controls.collapse": "Collapse sidebar",
+    "controls.expand": "Expand sidebar",
+    "session.username": "Username",
+    "session.switch": "Switch User",
+    "session.admin": "Use Admin",
+    "nav.materials": "Material Management",
+    "nav.aiAdd": "AI Material Add",
+    "nav.materialGovernance": "Material AI Governance",
+    "nav.materialLibraries": "Material Libraries",
+    "nav.newCategory": "New Category Workflow",
+    "nav.newMaterialCode": "New Material Code",
+    "nav.stopPurchase": "Stop Purchase",
+    "nav.stopUse": "Stop Use",
+    "nav.workflowTasks": "Workflow Tasks",
+    "nav.myApplications": "My Applications",
+    "nav.users": "Users",
+    "nav.roles": "Roles",
+    "nav.systemConfig": "System Config",
+    "nav.auditLogs": "Audit Logs",
+    "nav.categories": "Categories",
+    "nav.aiProviders": "AI Providers",
+    "nav.aiTrace": "AI Trace Debug",
+    "nav.productNames": "Product Names",
+    "nav.attributes": "Attributes",
+    "nav.aiGovernance": "AI Governance",
+    "nav.attributeRecommend": "Attribute Recommend",
+    "nav.changes": "Changes",
+    "nav.brands": "Brands"
+  }
+};
 const ROUTE_PERMISSIONS = [
   { test: (path) => path.includes("/material-libraries"), permission: "directory.material_library" },
   { test: (path) => path.includes("/materials"), permission: "directory.material_archives" },
@@ -64,6 +140,69 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "\"": "&quot;",
   "'": "&#039;"
 }[char]));
+
+function t(key) {
+  return I18N[currentLanguage]?.[key] || I18N.en[key] || key;
+}
+
+function applySidebarState() {
+  document.body.classList.toggle("sidebar-collapsed", Boolean(sidebarCollapsed));
+  const toggle = document.getElementById("sidebarToggle");
+  if (!toggle) return;
+  toggle.setAttribute("aria-expanded", String(!sidebarCollapsed));
+  toggle.setAttribute("aria-label", sidebarCollapsed ? t("controls.expand") : t("controls.collapse"));
+  toggle.title = sidebarCollapsed ? t("controls.expand") : t("controls.collapse");
+}
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  if (!compactSidebarQuery.matches) {
+    localStorage.setItem("material_sidebar_collapsed", String(sidebarCollapsed));
+  }
+  applySidebarState();
+}
+
+function syncResponsiveSidebar(event) {
+  if (event.matches) {
+    sidebarCollapsed = true;
+  } else {
+    sidebarCollapsed = localStorage.getItem("material_sidebar_collapsed") === "true";
+  }
+  applySidebarState();
+}
+
+function setLanguage(language) {
+  currentLanguage = language;
+  localStorage.setItem("material_language", language);
+  document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+  applyShellText();
+  renderNavigation();
+  renderSessionBar();
+}
+
+function toggleLanguage() {
+  setLanguage(currentLanguage === "zh" ? "en" : "zh");
+  route();
+}
+
+function applyShellText() {
+  document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
+  const eyebrow = document.querySelector(".brand-eyebrow");
+  if (eyebrow) eyebrow.textContent = t("app.eyebrow");
+  const workspaceEyebrow = document.getElementById("workspaceEyebrow");
+  if (workspaceEyebrow) workspaceEyebrow.textContent = t("app.workspaceEyebrow");
+  const languageToggle = document.getElementById("languageToggle");
+  if (languageToggle) languageToggle.textContent = currentLanguage === "zh" ? "EN" : "中文";
+  applySidebarState();
+  if (systemConfigCache) applySystemIdentity(systemConfigCache);
+}
+
+function bindShellControls() {
+  document.getElementById("sidebarToggle")?.addEventListener("click", toggleSidebar);
+  document.getElementById("languageToggle")?.addEventListener("click", toggleLanguage);
+  compactSidebarQuery.addEventListener("change", syncResponsiveSidebar);
+  applyShellText();
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
@@ -102,14 +241,16 @@ async function loadSystemConfig(force = false) {
 }
 
 function applySystemIdentity(config) {
-  const h1 = document.querySelector(".topbar h1");
-  const eyebrow = document.querySelector(".topbar .eyebrow");
+  const h1 = document.querySelector(".brand-title");
+  const eyebrow = document.querySelector(".brand-eyebrow");
+  const fallbackName = t("app.defaultTitle");
   if (h1) {
-    const icon = config.icon?.data_url ? `<img class="system-icon" src="${esc(config.icon.data_url)}" alt="${esc(config.system_name)} icon" />` : "";
-    h1.innerHTML = `${icon}<span>${esc(config.system_name || "AI Material Management Platform")}</span>`;
+    const systemName = config.system_name || fallbackName;
+    const icon = config.icon?.data_url ? `<img class="system-icon" src="${esc(config.icon.data_url)}" alt="${esc(systemName)} icon" />` : "";
+    h1.innerHTML = `${icon}<span>${esc(systemName)}</span>`;
   }
-  if (eyebrow) eyebrow.textContent = "Material Management";
-  document.title = config.system_name || "AI Material Management Platform";
+  if (eyebrow) eyebrow.textContent = t("app.eyebrow");
+  document.title = config.system_name || fallbackName;
 }
 
 function storedSession() {
@@ -152,11 +293,21 @@ async function loadCurrentUser() {
 }
 
 function renderNavigation() {
-  const nav = document.querySelector("nav");
+  const nav = document.getElementById("sidebarNav");
   if (!nav) return;
+  const path = window.location.pathname;
   nav.innerHTML = NAV_ITEMS
     .filter((item) => can(item.permission))
-    .map((item) => `<a href="${item.href}">${esc(item.label)}</a>`)
+    .map((item) => {
+      const label = t(item.labelKey);
+      const active = path === item.href || (item.href !== "/materials" && path.startsWith(item.href));
+      return `
+        <a href="${item.href}" class="${active ? "active" : ""}" title="${esc(label)}">
+          <span class="nav-icon" aria-hidden="true">${esc(item.icon)}</span>
+          <span class="nav-label">${esc(label)}</span>
+        </a>
+      `;
+    })
     .join("");
 }
 
@@ -166,13 +317,13 @@ function renderSessionBar() {
     bar = document.createElement("div");
     bar.id = "sessionBar";
     bar.className = "session-bar";
-    document.querySelector(".topbar").appendChild(bar);
+    document.querySelector(".workspace-header")?.appendChild(bar);
   }
   bar.innerHTML = `
     <span class="pill">${esc(currentUser?.username || "super_admin")}</span>
-    <input id="sessionUsername" placeholder="Username" />
-    <button id="switchSession" class="secondary">Switch User</button>
-    <button id="adminSession" class="secondary">Use Admin</button>
+    <input id="sessionUsername" placeholder="${esc(t("session.username"))}" />
+    <button id="switchSession" class="secondary">${esc(t("session.switch"))}</button>
+    <button id="adminSession" class="secondary">${esc(t("session.admin"))}</button>
   `;
   document.getElementById("switchSession").addEventListener("click", switchSession);
   document.getElementById("adminSession").addEventListener("click", useAdminSession);
@@ -2524,6 +2675,7 @@ async function route() {
   try {
     if (!currentUser) await loadCurrentUser();
     const path = window.location.pathname;
+    renderNavigation();
     const required = ROUTE_PERMISSIONS.find((item) => item.test(path))?.permission;
     if (required && !can(required)) return accessDenied(required);
     if (path.match(/\/(?:system\/)?roles\/\d+\/permissions/)) return renderRolePermissions();
@@ -2560,6 +2712,7 @@ async function route() {
 }
 
 window.addEventListener("popstate", route);
+bindShellControls();
 loadCurrentUser().then(route).catch((error) => {
   app.innerHTML = `<div class="panel"><h2>Unable to load session</h2><pre>${esc(error.message)}</pre></div>`;
 });
