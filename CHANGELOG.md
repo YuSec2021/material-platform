@@ -6,3 +6,5 @@
 - The Vite proxy at port 5173 correctly intercepts browser requests to `/api/*` and forwards them to the FastAPI backend at port 8000. The browser never calls port 8000 directly, confirming the proxy is the sole forwarding mechanism.
 - 48 shadcn/ui components compile without errors. All required representative controls render successfully. The React.forwardRef warnings are a React 19 compatibility issue in @radix-ui/react-slot, non-blocking, and not classified as console errors in the React dev warnings sense.
 - Both build and lint scripts execute successfully from the external command surface. The production bundle is generated. ESLint reports zero lint errors.
+
+## v2.0.0 — Sprint 14 [MAJOR bump]
