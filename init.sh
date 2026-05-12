@@ -147,7 +147,7 @@ info "Python dependencies installed."
 # -----------------------------------------------------------------------------
 info "=== Step 2: Setting up frontend ==="
 
-FRONTEND_DIR="$PROJECT_DIR/frontend"
+FRONTEND_DIR="$PROJECT_DIR/prototype_code"
 
 if [[ -f "$PROJECT_DIR/package.json" ]]; then
   if [[ ! -d "$PROJECT_DIR/node_modules/@playwright/test" ]]; then
