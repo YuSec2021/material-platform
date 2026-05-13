@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Database,
   FileText,
+  Info,
   Languages,
   LayoutDashboard,
   Menu,
@@ -14,6 +15,13 @@ import {
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/app/auth/AuthContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/app/components/ui/dialog";
 import {
   Sheet,
   SheetContent,
@@ -181,6 +189,7 @@ export function MainLayout() {
     "debug",
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const menuItems = buildMenuItems(t);
 
   const toggleMenu = (key: string) => {
@@ -253,6 +262,14 @@ export function MainLayout() {
               </div>
               <button
                 type="button"
+                onClick={() => setIsAboutOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.98]"
+              >
+                <Info className="h-4 w-4" />
+                {t("app.about")}
+              </button>
+              <button
+                type="button"
                 onClick={handleLogout}
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.98]"
               >
@@ -260,6 +277,19 @@ export function MainLayout() {
               </button>
             </div>
           </div>
+          <Dialog open={isAboutOpen} onOpenChange={setIsAboutOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t("app.aboutTitle")}</DialogTitle>
+                <DialogDescription>{t("app.aboutDescription")}</DialogDescription>
+              </DialogHeader>
+              <dl className="space-y-3 text-sm text-gray-700">
+                <div>{t("app.aboutName")}</div>
+                <div>{t("app.aboutVersion")}</div>
+                <div>{t("app.aboutDescription")}</div>
+              </dl>
+            </DialogContent>
+          </Dialog>
         </header>
 
         <main className="flex-1 overflow-auto p-4 md:p-6">
