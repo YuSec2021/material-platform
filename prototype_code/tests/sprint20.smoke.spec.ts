@@ -38,8 +38,12 @@ async function login(page: Page) {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: authUser });
   });
+  await page.route("**/api/v1/users/me**", async (route) => {
+    await route.fulfill({ json: authUser });
+  });
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await page.waitForLoadState("networkidle");
 }
 
 test("login, navigation, i18n switching, and responsive shell", async () => {
@@ -86,7 +90,7 @@ test("materials list exposes skeleton, empty, error, and deterministic AI comple
   });
 
   await page.goto("/materials");
-  await expect(page.getByRole("status")).toBeVisible();
+  await expect(page.getByRole("progressbar")).toBeVisible();
   releaseMaterials?.();
   await expect(page.getByText(/No material data|后端暂无物料数据/)).toBeVisible();
 
