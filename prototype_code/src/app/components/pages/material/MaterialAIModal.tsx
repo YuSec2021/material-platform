@@ -3,6 +3,7 @@ import { useMutation, type QueryClient } from "@tanstack/react-query";
 import { CheckCircle2, FileInput, RefreshCcw, Search, Sparkles } from "lucide-react";
 import {
   apiClient,
+  type ApiError,
   type MaterialAddPreviewResult,
   type MaterialGovernancePreviewResult,
   type MaterialMatch,
@@ -223,7 +224,7 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
     },
   });
 
-  const matchMutation = useMutation({
+  const matchMutation = useMutation<unknown, ApiError, void>({
     mutationFn: () => {
       if (!libraryId) {
         throw new Error("请选择物料库");
@@ -436,7 +437,7 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
             </div>
           )}
           {matchMutation.isError && <p className="text-sm text-red-600">匹配失败：{matchMutation.error.message}</p>}
-          {matchResult && matches.length === 0 && (
+          {matchResult !== null && matches.length === 0 && (
             <div className="rounded-md border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-600">暂无匹配结果</div>
           )}
           {matches.length > 0 && (
