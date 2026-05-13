@@ -29,7 +29,7 @@ export function ApiState({
     return (
       <div
         className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
-        role="status"
+        role="progressbar"
         aria-label={loadingLabel ?? t("app.loading")}
       >
         <div className="mb-4 flex items-center justify-between">

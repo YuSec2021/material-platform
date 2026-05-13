@@ -264,11 +264,18 @@ const resources = {
   },
 };
 
+// Persist language preference to localStorage
+const savedLang = localStorage.getItem("language");
 void i18n.use(initReactI18next).init({
   resources,
-  lng: "zh-CN",
+  lng: savedLang ?? "zh-CN",
   fallbackLng: "zh-CN",
   interpolation: { escapeValue: false },
+});
+
+// Sync language changes back to localStorage
+i18n.on("languageChanged", (lng) => {
+  localStorage.setItem("language", lng);
 });
 
 export default i18n;
