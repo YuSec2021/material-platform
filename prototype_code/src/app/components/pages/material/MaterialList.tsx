@@ -25,6 +25,7 @@ import {
 import { Badge } from "@/app/components/ui/badge";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import { MaterialAIModal, type AiModalType } from "./MaterialAIModal";
 
 type MaterialFormState = {
   name: string;
@@ -40,7 +41,12 @@ type MaterialFormState = {
 };
 
 type LifecycleAction = "stop_purchase" | "stop_use";
-type AiModalType = "治理" | "添加" | "匹配";
+
+const aiActionLabels: Record<AiModalType, string> = {
+  治理: "AI物料治理",
+  添加: "AI自然语言添加",
+  匹配: "AI向量匹配",
+};
 
 const emptyForm: MaterialFormState = {
   name: "",
@@ -449,6 +455,7 @@ export function MaterialList() {
               <button
                 key={label}
                 type="button"
+                aria-label={aiActionLabels[label]}
                 onClick={() => {
                   setAiModalType(label);
                   setIsAIModalOpen(true);
@@ -847,35 +854,14 @@ export function MaterialList() {
         </div>
       </Modal>
 
-      <Modal
+      <MaterialAIModal
         isOpen={isAIModalOpen}
+        type={aiModalType}
+        selectedLibraryId={selectedLibraryId}
+        selectedCategoryId={selectedCategoryId}
         onClose={() => setIsAIModalOpen(false)}
-        title={`AI物料${aiModalType}`}
-        size="lg"
-        footer={
-          <button
-            type="button"
-            onClick={() => setIsAIModalOpen(false)}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-          >
-            知道了
-          </button>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <div className="flex items-start gap-3">
-              <Sparkles className="mt-0.5 h-5 w-5 text-blue-700" />
-              <div>
-                <h4 className="text-sm font-medium text-blue-900">AI物料{aiModalType}</h4>
-                <p className="mt-1 text-sm text-blue-700">
-                  Sprint 16 提供入口与说明，不会触发物料新增、更新、删除、停采或停用请求；完整 AI API 接入在后续 Sprint 完成。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Modal>
+        queryClient={queryClient}
+      />
     </div>
   );
 }
