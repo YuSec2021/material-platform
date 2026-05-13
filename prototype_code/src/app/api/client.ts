@@ -215,6 +215,19 @@ export type StopPurchasePayload = {
   reason_code?: string;
 };
 
+export type WorkflowType = "new_category" | "new_material_code" | "stop_purchase" | "stop_use";
+
+export type WorkflowHistory = {
+  id: number;
+  actor: string;
+  node: string;
+  action: string;
+  from_status: string;
+  to_status: string;
+  comment: string;
+  created_at: string;
+};
+
 export type WorkflowApplication = {
   id: number;
   application_no: string;
@@ -225,10 +238,61 @@ export type WorkflowApplication = {
   business_reason: string;
   rejection_reason: string;
   data: Record<string, unknown>;
+  approval_history: WorkflowHistory[];
   created_resource_type: string;
   created_resource_id: number | null;
   created_at: string;
   updated_at: string;
+};
+
+export type WorkflowApplicationQuery = {
+  type?: WorkflowType;
+  status?: string;
+  applicant?: string;
+  material_id?: number | null;
+};
+
+export type ReferenceImagePayload = {
+  filename: string;
+  content_type: string;
+  data_url: string;
+};
+
+export type CategoryWorkflowPayload = {
+  type?: "new_category";
+  applicant: string;
+  business_reason: string;
+  material_library_id: number | null;
+  parent_category_id: number | null;
+  proposed_category_name: string;
+  proposed_category_code?: string;
+  description: string;
+};
+
+export type MaterialCodeWorkflowPayload = {
+  type?: "new_material_code";
+  applicant: string;
+  business_reason: string;
+  material_library_id: number | null;
+  category_id: number | null;
+  product_name_id: number | null;
+  material_name: string;
+  unit: string;
+  brand_id: number | null;
+  attributes: Record<string, unknown>;
+  description: string;
+  reference_mall_link: string;
+  reference_images: ReferenceImagePayload[];
+};
+
+export type StopWorkflowPayload = {
+  type?: "stop_purchase" | "stop_use";
+  applicant: string;
+  business_reason: string;
+  material_id: number | null;
+  reason: string;
+  reason_code?: string;
+  acknowledge_terminal?: boolean;
 };
 
 export type ApiHealthState = {
@@ -465,8 +529,38 @@ export const apiClient = {
   permissionsCatalog() {
     return request<PermissionEntry[]>("/permissions/catalog");
   },
+  workflowApplications(params: WorkflowApplicationQuery) {
+    return request<WorkflowApplication[]>(withQuery("/workflows/applications", params));
+  },
+  workflowApplication(id: number) {
+    return request<WorkflowApplication>(`/workflows/applications/${id}`);
+  },
+  submitNewCategoryApplication(payload: CategoryWorkflowPayload) {
+    return request<WorkflowApplication>("/workflows/applications/new-category", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  submitNewMaterialCodeApplication(payload: MaterialCodeWorkflowPayload) {
+    return request<WorkflowApplication>("/workflows/applications/new-material-code", {
+      method: "POST",
+      body: payload,
+    });
+  },
   submitStopPurchase(payload: StopPurchasePayload) {
     return request<WorkflowApplication>("/workflows/applications/stop-purchase", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  submitStopPurchaseApplication(payload: StopWorkflowPayload) {
+    return request<WorkflowApplication>("/workflows/applications/stop-purchase", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  submitStopUseApplication(payload: StopWorkflowPayload) {
+    return request<WorkflowApplication>("/workflows/applications/stop-use", {
       method: "POST",
       body: payload,
     });
