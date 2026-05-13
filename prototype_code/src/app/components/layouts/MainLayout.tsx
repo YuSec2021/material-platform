@@ -191,7 +191,7 @@ export function MainLayout() {
 
   const roleLabel = auth.user?.is_super_admin
     ? "super-admin"
-    : auth.user?.roles[0]?.name || "user";
+    : auth.user?.roles?.[0]?.name || "user";
 
   const handleLogout = () => {
     auth.logout();
