@@ -1,14 +1,14 @@
 {
   "mode": "planning",
-  "current_sprint": 18,
+  "current_sprint": 19,
   "retry_count": 0,
-  "last_successful_sprint": 18,
-  "last_failure_reason": "",
+  "last_successful_sprint": 19,
+  "last_failure_reason": "AI Modal component not wired into MaterialList; TypeScript type-check error; missing aria-labels on AI buttons",
   "needs_human": false,
-  "active_branch": "codex/sprint-18-system-admin",
+  "active_branch": "codex/sprint-19-ai-integration",
   "base_branch": "main",
-  "last_run_at": "2026-05-13T07:26:07.650838Z",
+  "last_run_at": "2026-05-13T08:52:17.342185Z",
   "request_kind": "",
   "sprint_origin": "feature",
-  "current_version": "4.0.0"
+  "current_version": "4.1.0"
 }

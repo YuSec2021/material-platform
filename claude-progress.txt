@@ -4,19 +4,22 @@ Status: SPRINT PASS.
 Notes: Docker Compose, Nginx, Playwright E2E smoke tests, Postgres DATABASE_URL, offline Playwright adapter, README deployment docs.
 Sprint 13: Frontend Scaffolding and Dev Environment
 Status: SPRINT PASS.
-Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes (/dev/frontend-health, /dev/component-smoke), strict TS, ESLint, build+lint scripts.
+Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes, strict TS, ESLint, build+lint scripts.
 Sprint 14: API Client Layer and Auth Integration
 Status: SPRINT PASS.
-Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth, all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health.
+Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth, all mock-data pages wired to real API endpoints.
 Sprint 15: Standard Management React Pages
 Status: SPRINT PASS.
-Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList/ProductNameList (read-only GET + disabled controls), CategoryLibraryList (read-only empty state + disabled controls).
+Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails), CategoryList/ProductNameList/CategoryLibraryList (read-only GET + disabled controls).
 Sprint 16: Material Management React Pages
 Status: SPRINT PASS.
-Notes: MaterialList split-pane (category tree + right table), search/status filter, export CSV, AI action buttons, MaterialLibraryList CRUD, Material create/edit with dynamic selectors, lifecycle badges and stop-purchase/stop-use actions.
+Notes: MaterialList split-pane (category tree + right table), search/status filter, export CSV, AI action buttons, MaterialLibraryList CRUD, Material create/edit with dynamic selectors, lifecycle badges and stop-purchase/stop-use.
 Sprint 17: Application Workflow React Pages
 Status: SPRINT PASS.
-Notes: ApplicationList (4-type tabs wired to /api/v1/workflows/applications?type=X), CategoryApplication (cascade selectors, ApprovalTimeline), MaterialCodeApplication (3 required images), StopPurchaseApplication (material selection modal), StopUseApplication (pre-filtered to stop-purchased materials).
+Notes: ApplicationList (4-type tabs), CategoryApplication (cascade selectors, ApprovalTimeline), MaterialCodeApplication, StopPurchaseApplication, StopUseApplication (pre-filtered).
 Sprint 18: System Admin React Pages
 Status: SPRINT PASS.
-Notes: UserList CRUD (username/unit/department/team, password reset, HCM-protected), RoleList (enable/disable toggle, bind-users modal), PermissionConfig (directory tree + 19 permission checkboxes wired to /api/v1/permissions/catalog), SystemConfig (system info, reason options maintenance, approval mode switching simple/workflow). All 41 checks pass.
+Notes: UserList CRUD, RoleList (enable/disable, bind-users modal), PermissionConfig (directory tree + 19 permission checkboxes), SystemConfig (system info, reason options, approval mode switching).
+Sprint 19: AI Feature Integration and Dashboard
+Status: SPRINT PASS.
+Notes: MaterialAIModal wired (governance preview/import, add preview/confirm, match Top-3 with confidence badges), Dashboard (GET /api/v1/workflows/applications, loading/error/empty states), TraceDebugPage at /debug/trace. TypeScript/build/lint all pass. Accessibility verified.
