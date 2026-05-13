@@ -1,230 +1,164 @@
-import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Search, Eye, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Eye, Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router";
-import { apiClient, type Material, type WorkflowApplication } from "@/app/api/client";
+import { apiClient, type WorkflowApplication } from "@/app/api/client";
+import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { StatusBadge } from "../../common/StatusBadge";
+import {
+  applicationDepartment,
+  formatDate,
+  type FrontendWorkflowType,
+  WorkflowTypeNav,
+  workflowStatusLabel,
+  workflowStatusOptions,
+  workflowStatusTone,
+  workflowTypeLabels,
+  workflowTypeMap,
+} from "./workflowPageUtils";
 
-interface Application {
-  id: number;
-  code: string;
-  type: string;
-  applicant: string;
-  department: string;
-  applyDate: string;
-  status: 'draft' | 'pending' | 'approved' | 'rejected';
-}
-
-interface ApplicationListProps {
-  type: 'category' | 'material-code' | 'stop-purchase' | 'stop-use';
+type ApplicationListProps = {
+  type: FrontendWorkflowType;
   title: string;
-}
-
-const mockData: Record<string, Application[]> = {
-  category: [
-    { id: 1, code: "CAT2026042900001", type: "新增物料类目", applicant: "张三", department: "技术部", applyDate: "2026-04-29", status: "pending" },
-    { id: 2, code: "CAT2026042800001", type: "新增物料类目", applicant: "李四", department: "采购部", applyDate: "2026-04-28", status: "approved" },
-  ],
-  'material-code': [
-    { id: 1, code: "MAT2026042900002", type: "新增物料编码", applicant: "王五", department: "技术部", applyDate: "2026-04-29", status: "pending" },
-    { id: 2, code: "MAT2026042800002", type: "新增物料编码", applicant: "李四", department: "采购部", applyDate: "2026-04-28", status: "approved" },
-    { id: 3, code: "MAT2026042700001", type: "新增物料编码", applicant: "张三", department: "技术部", applyDate: "2026-04-27", status: "rejected" },
-  ],
-  'stop-purchase': [
-    { id: 1, code: "STP2026042900003", type: "物料停采", applicant: "赵六", department: "采购部", applyDate: "2026-04-29", status: "draft" },
-    { id: 2, code: "STP2026042800003", type: "物料停采", applicant: "王五", department: "技术部", applyDate: "2026-04-28", status: "approved" },
-  ],
-  'stop-use': [
-    { id: 1, code: "STU2026042900004", type: "物料停用", applicant: "李四", department: "采购部", applyDate: "2026-04-29", status: "pending" },
-    { id: 2, code: "STU2026042700004", type: "物料停用", applicant: "王五", department: "技术部", applyDate: "2026-04-27", status: "approved" },
-  ],
 };
 
-const statusMap = {
-  draft: { label: "草稿", status: "draft" as const },
-  pending: { label: "审批中", status: "pending" as const },
-  approved: { label: "已通过", status: "approved" as const },
-  rejected: { label: "已驳回", status: "rejected" as const },
+type ApplicationRow = {
+  id: number;
+  applicationNo: string;
+  typeLabel: string;
+  applicant: string;
+  department: string;
+  createdDate: string;
+  status: string;
+  raw: WorkflowApplication;
 };
 
 export function ApplicationList({ type, title }: ApplicationListProps) {
   const navigate = useNavigate();
+  const apiType = workflowTypeMap[type];
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
-  const [stopPurchaseReason, setStopPurchaseReason] = useState("停采申请草稿");
-  const [submissionMessage, setSubmissionMessage] = useState("");
-  const materialsQuery = useQuery({
-    queryKey: ["materials", "stop-purchase-selector"],
-    queryFn: apiClient.materials,
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const query = useQuery({
+    queryKey: ["workflow-applications", apiType, statusFilter],
+    queryFn: () => apiClient.workflowApplications({ type: apiType, status: statusFilter }),
     retry: false,
-    enabled: type === "stop-purchase",
-  });
-  const stopPurchaseMutation = useMutation<WorkflowApplication, Error>({
-    mutationFn: () =>
-      apiClient.submitStopPurchase({
-        type: "stop_purchase",
-        applicant: "super_admin",
-        business_reason: stopPurchaseReason,
-        material_id: selectedMaterialId,
-        reason: stopPurchaseReason,
-      }),
-    onSuccess: (application) => {
-      setSubmissionMessage(`已提交: ${application.application_no}`);
-    },
-    onError: (error) => {
-      setSubmissionMessage(`后端校验失败: ${error.message}`);
-    },
   });
 
-  const data = mockData[type] || [];
-  const filteredData = data.filter(item => {
-    const matchSearch = item.code.includes(searchTerm) || item.applicant.includes(searchTerm);
-    const matchStatus = statusFilter === "all" || item.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  const handleView = (id: number) => {
-    navigate(`/application/${type}/detail/${id}`);
-  };
+  const rows = useMemo<ApplicationRow[]>(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return (query.data ?? [])
+      .map((application) => ({
+        id: application.id,
+        applicationNo: application.application_no,
+        typeLabel: workflowTypeLabels[application.type as keyof typeof workflowTypeLabels] ?? application.type,
+        applicant: application.applicant,
+        department: applicationDepartment(application),
+        createdDate: formatDate(application.created_at),
+        status: application.status,
+        raw: application,
+      }))
+      .filter((row) => {
+        if (!term) {
+          return true;
+        }
+        return [row.applicationNo, row.applicant, row.department, row.typeLabel]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      });
+  }, [query.data, searchTerm]);
 
   const columns = [
-    { header: "申请单号", accessor: "code" as keyof Application, width: "180px" },
-    { header: "申请类型", accessor: "type" as keyof Application },
-    { header: "申请人", accessor: "applicant" as keyof Application },
-    { header: "所属部门", accessor: "department" as keyof Application },
-    { header: "申请日期", accessor: "applyDate" as keyof Application },
+    { header: "申请单号", accessor: "applicationNo" as keyof ApplicationRow, width: "190px" },
+    { header: "申请类型", accessor: "typeLabel" as keyof ApplicationRow },
+    { header: "申请人", accessor: "applicant" as keyof ApplicationRow },
+    { header: "所属部门", accessor: "department" as keyof ApplicationRow },
+    { header: "申请日期", accessor: "createdDate" as keyof ApplicationRow },
     {
       header: "状态",
-      accessor: (row: Application) => (
-        <StatusBadge status={statusMap[row.status].status}>
-          {statusMap[row.status].label}
+      accessor: (row: ApplicationRow) => (
+        <StatusBadge status={workflowStatusTone(row.status)}>
+          {workflowStatusLabel(row.status)}
         </StatusBadge>
       ),
-      width: "100px"
+      width: "120px",
     },
     {
       header: "操作",
-      accessor: (row: Application) => (
+      accessor: (row: ApplicationRow) => (
         <button
-          onClick={() => handleView(row.id)}
-          className="flex items-center gap-1 text-blue-600 hover:underline text-sm"
+          type="button"
+          onClick={() => navigate(`/application/${type}/detail/${row.id}`)}
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
         >
-          <Eye className="w-4 h-4" />
+          <Eye className="h-4 w-4" />
           查看
         </button>
       ),
-      width: "100px"
+      width: "110px",
     },
   ];
 
-  const handleCreate = () => {
-    navigate(`/application/${type}/detail/new`);
-  };
-
-  const selectableMaterials = (materialsQuery.data ?? []).filter(
-    (material: Material) => material.status === "normal",
-  );
-
-  const handleSubmitStopPurchase = () => {
-    setSubmissionMessage("");
-    void stopPurchaseMutation.mutate();
-  };
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl text-gray-900">{title}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl text-gray-900">{title}</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            当前接口类型: <span className="font-mono text-gray-700">{apiType}</span>
+          </p>
+        </div>
         <button
-          onClick={handleCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          type="button"
+          onClick={() => navigate(`/application/${type}/detail/new`)}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="h-4 w-4" />
           新建申请
         </button>
       </div>
 
-      {type === "stop-purchase" && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-medium text-blue-900">停采申请后端提交</h2>
-              <p className="text-xs text-blue-700">
-                可选物料来自 GET /api/v1/materials，提交发送 POST /api/v1/workflows/applications/stop-purchase。
-              </p>
-            </div>
-            <span className="text-xs text-blue-700">
-              {materialsQuery.isLoading ? "物料加载中" : `可选物料 ${selectableMaterials.length} 个`}
-            </span>
-          </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <select
-              value={selectedMaterialId ?? ""}
-              onChange={(event) => setSelectedMaterialId(event.target.value ? Number(event.target.value) : null)}
-              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-            >
-              <option value="">请选择正常状态物料</option>
-              {selectableMaterials.map((material) => (
-                <option key={material.id} value={material.id}>
-                  {material.code} - {material.name}
-                </option>
-              ))}
-            </select>
-            <input
-              value={stopPurchaseReason}
-              onChange={(event) => setStopPurchaseReason(event.target.value)}
-              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              placeholder="停采原因"
-            />
-            <button
-              type="button"
-              onClick={handleSubmitStopPurchase}
-              disabled={stopPurchaseMutation.isPending}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {stopPurchaseMutation.isPending ? "提交中" : "提交停采申请"}
-            </button>
-          </div>
-          {materialsQuery.isError && (
-            <p className="mt-3 text-sm text-red-700">物料列表加载失败，可重试刷新页面。</p>
-          )}
-          {submissionMessage && (
-            <p className="mt-3 text-sm text-blue-900">{submissionMessage}</p>
-          )}
-        </div>
-      )}
+      <WorkflowTypeNav />
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <Search className="w-5 h-5 text-gray-400" />
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex min-w-64 flex-1 items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
+            <Search className="h-5 w-5 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索申请单号或申请人..."
+              placeholder="搜索申请单号、申请人或部门"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 outline-none text-sm"
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="min-w-0 flex-1 text-sm outline-none"
             />
           </div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="all">全部状态</option>
-            <option value="draft">草稿</option>
-            <option value="pending">审批中</option>
-            <option value="approved">已通过</option>
-            <option value="rejected">已驳回</option>
+            {workflowStatusOptions.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-            搜索
-          </button>
         </div>
       </div>
 
-      <DataTable data={filteredData} columns={columns} />
+      <ApiState
+        isLoading={query.isLoading}
+        isError={query.isError}
+        isEmpty={rows.length === 0}
+        loadingLabel="正在加载申请列表..."
+        errorLabel="申请列表加载失败"
+        emptyLabel="后端暂无该类型申请"
+        onRetry={() => void query.refetch()}
+      >
+        <DataTable data={rows} columns={columns} emptyMessage="后端暂无该类型申请" />
+      </ApiState>
     </div>
   );
 }
