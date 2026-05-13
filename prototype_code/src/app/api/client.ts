@@ -175,6 +175,26 @@ export type User = {
   updated_at: string;
 };
 
+export type UserPayload = {
+  username: string;
+  display_name: string;
+  unit: string;
+  department: string;
+  team: string;
+  email: string;
+  status?: string;
+};
+
+export type UserUpdatePayload = Partial<Omit<UserPayload, "username">>;
+
+export type PasswordResetResult = {
+  user_id: number;
+  username: string;
+  reset_token: string;
+  temporary_password: string;
+  message: string;
+};
+
 export type PermissionEntry = {
   module: string;
   permission_type: string;
@@ -195,6 +215,13 @@ export type Role = {
   updated_at: string;
 };
 
+export type RolePayload = {
+  name: string;
+  code: string;
+  description: string;
+  enabled: boolean;
+};
+
 export type UserSummary = {
   id: number;
   username: string;
@@ -205,6 +232,42 @@ export type UserSummary = {
   account_ownership: string;
   status: string;
 };
+
+export type RolePermissions = {
+  role_id: number;
+  role_name: string;
+  permissions: PermissionEntry[];
+  catalog: PermissionEntry[];
+};
+
+export type ReasonOption = {
+  name: string;
+  enabled: boolean;
+};
+
+export type SystemIcon = {
+  filename: string;
+  content_type: string;
+  data_url: string;
+};
+
+export type SystemConfig = {
+  system_name: string;
+  icon: SystemIcon;
+  stop_purchase_reasons: ReasonOption[];
+  stop_use_reasons: ReasonOption[];
+  approval_mode: "simple" | "multi_node";
+  updated_by: string;
+  updated_at: string;
+};
+
+export type SystemConfigPayload = Partial<{
+  system_name: string;
+  icon: SystemIcon;
+  stop_purchase_reasons: ReasonOption[];
+  stop_use_reasons: ReasonOption[];
+  approval_mode: "simple" | "multi_node";
+}>;
 
 export type StopPurchasePayload = {
   type: "stop_purchase";
@@ -523,11 +586,62 @@ export const apiClient = {
   users() {
     return request<User[]>("/users");
   },
+  createUser(payload: UserPayload) {
+    return request<User>("/users", { method: "POST", body: payload });
+  },
+  updateUser(id: number, payload: UserUpdatePayload) {
+    return request<User>(`/users/${id}`, { method: "PUT", body: payload });
+  },
+  resetUserPassword(id: number) {
+    return request<PasswordResetResult>(`/users/${id}/password-reset`, { method: "POST" });
+  },
+  deleteUser(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/users/${id}`, { method: "DELETE" });
+  },
   roles() {
     return request<Role[]>("/roles");
   },
+  createRole(payload: RolePayload) {
+    return request<Role>("/roles", { method: "POST", body: payload });
+  },
+  updateRole(id: number, payload: Partial<RolePayload>) {
+    return request<Role>(`/roles/${id}`, { method: "PUT", body: payload });
+  },
+  enableRole(id: number) {
+    return request<Role>(`/roles/${id}/enable`, { method: "PATCH" });
+  },
+  disableRole(id: number) {
+    return request<Role>(`/roles/${id}/disable`, { method: "PATCH" });
+  },
+  deleteRole(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/roles/${id}`, { method: "DELETE" });
+  },
+  roleUsers(id: number) {
+    return request<UserSummary[]>(`/roles/${id}/users`);
+  },
+  addRoleUser(id: number, userId: number) {
+    return request<Role>(`/roles/${id}/users`, { method: "POST", body: { user_id: userId } });
+  },
+  removeRoleUser(id: number, userId: number) {
+    return request<Role>(`/roles/${id}/users/${userId}`, { method: "DELETE" });
+  },
   permissionsCatalog() {
     return request<PermissionEntry[]>("/permissions/catalog");
+  },
+  rolePermissions(id: number) {
+    return request<RolePermissions>(`/roles/${id}/permissions`);
+  },
+  saveRolePermissions(id: number, permissionKeys: string[]) {
+    return request<RolePermissions>(`/roles/${id}/permissions`, {
+      method: "PUT",
+      body: { permission_keys: permissionKeys },
+    });
+  },
+  systemConfig() {
+    return request<SystemConfig>("/system/config");
+  },
+  updateSystemConfig(payload: SystemConfigPayload) {
+    return request<SystemConfig>("/system/config", { method: "PUT", body: payload });
   },
   workflowApplications(params: WorkflowApplicationQuery) {
     return request<WorkflowApplication[]>(withQuery("/workflows/applications", params));
