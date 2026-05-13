@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Edit, Package, Plus, Search, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   apiClient,
   type MaterialLibrary,
@@ -40,6 +42,7 @@ function formToPayload(form: LibraryFormState): MaterialLibraryPayload {
 
 export function MaterialLibraryList() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<LibraryFormState>(emptyForm);
   const [editingLibrary, setEditingLibrary] = useState<MaterialLibrary | null>(null);
@@ -60,15 +63,19 @@ export function MaterialLibraryList() {
       setIsFormOpen(false);
       setEditingLibrary(null);
       setForm(emptyForm);
+      toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["material-libraries"] });
     },
+    onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiClient.deleteMaterialLibrary(id),
     onSuccess: async () => {
+      toast.success(t("toast.deleteSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["material-libraries"] });
     },
+    onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
 
   const data = useMemo(() => {
@@ -108,8 +115,8 @@ export function MaterialLibraryList() {
     <div className="flex flex-1 flex-col space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">物料库管理</h1>
-          <p className="mt-1 text-sm text-gray-500">物料库卡片来自后端 API，支持新增、编辑和空库删除。</p>
+          <h1 className="text-2xl text-gray-900">{t("page.materialLibraries")}</h1>
+          <p className="mt-1 text-sm text-gray-500">{t("page.materialLibrariesHelp")}</p>
         </div>
         <button
           type="button"
@@ -117,7 +124,7 @@ export function MaterialLibraryList() {
           className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
         >
           <Plus className="h-4 w-4" />
-          新建物料库
+          {t("action.addLibrary")}
         </button>
       </div>
 
@@ -126,7 +133,7 @@ export function MaterialLibraryList() {
           <Search className="h-5 w-5 text-gray-400" />
           <input
             type="search"
-            placeholder="搜索物料库名称、编码或描述..."
+            placeholder={t("field.searchLibraries")}
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             className="flex-1 outline-none"
@@ -138,7 +145,7 @@ export function MaterialLibraryList() {
         isLoading={query.isLoading}
         isError={query.isError}
         isEmpty={!query.isLoading && !query.isError && data.length === 0}
-        emptyLabel="后端暂无物料库数据"
+        emptyLabel={t("state.emptyLibraries")}
         onRetry={() => void query.refetch()}
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -152,7 +159,7 @@ export function MaterialLibraryList() {
                   variant="outline"
                   className={item.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-gray-50 text-gray-600"}
                 >
-                  {item.enabled ? "启用" : "停用"}
+                  {item.enabled ? t("status.enabled") : t("status.disabled")}
                 </Badge>
               </div>
               <h2 className="mb-1 text-lg font-medium text-gray-900">{item.name}</h2>
@@ -165,7 +172,7 @@ export function MaterialLibraryList() {
                   className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
                 >
                   <Edit className="h-3.5 w-3.5" />
-                  编辑
+                  {t("action.edit")}
                 </button>
                 <button
                   type="button"
@@ -174,7 +181,7 @@ export function MaterialLibraryList() {
                   className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  删除
+                  {t("action.delete")}
                 </button>
               </div>
             </article>
@@ -185,7 +192,7 @@ export function MaterialLibraryList() {
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        title={editingLibrary ? "编辑物料库" : "新建物料库"}
+        title={editingLibrary ? t("action.edit") : t("action.addLibrary")}
         size="lg"
         footer={
           <>
@@ -194,7 +201,7 @@ export function MaterialLibraryList() {
               onClick={() => setIsFormOpen(false)}
               className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
-              取消
+              {t("action.cancel")}
             </button>
             <button
               type="button"
@@ -202,14 +209,14 @@ export function MaterialLibraryList() {
               disabled={!form.name.trim() || saveMutation.isPending}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              {saveMutation.isPending ? "保存中..." : "保存"}
+              {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
           </>
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm text-gray-700">
-            <span>物料库名称</span>
+            <span>{t("field.name")}</span>
             <input
               type="text"
               value={form.name}
@@ -218,7 +225,7 @@ export function MaterialLibraryList() {
             />
           </label>
           <label className="space-y-1 text-sm text-gray-700">
-            <span>物料库编码</span>
+            <span>{t("field.code")}</span>
             <input
               type="text"
               value={editingLibrary?.code ?? "保存后自动生成"}
@@ -227,7 +234,7 @@ export function MaterialLibraryList() {
             />
           </label>
           <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
-            <span>描述</span>
+            <span>{t("field.description")}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
@@ -242,7 +249,7 @@ export function MaterialLibraryList() {
               onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
               className="h-4 w-4 rounded border-gray-300"
             />
-            启用
+            {t("status.enabled")}
           </label>
           {saveMutation.isError && (
             <p className="text-sm text-red-600 md:col-span-2">{saveMutation.error.message}</p>

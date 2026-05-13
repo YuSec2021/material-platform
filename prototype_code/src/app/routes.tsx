@@ -54,7 +54,9 @@ export const router = createBrowserRouter([
           { path: "standard/category", Component: CategoryList },
           { path: "standard/product-name", Component: ProductNameList },
           { path: "standard/attribute", Component: AttributeList },
+          { path: "standard/attributes", Component: AttributeList },
           { path: "standard/brand", Component: BrandList },
+          { path: "standard/brands", Component: BrandList },
 
           // 物料管理
           { path: "material/library", Component: MaterialLibraryList },
@@ -62,6 +64,10 @@ export const router = createBrowserRouter([
           { path: "materials", Component: MaterialList },
 
           // 申请流程
+          {
+            path: "applications",
+            element: <ApplicationList type="category" title="新增物料类目申请" />
+          },
           {
             path: "application/category",
             element: <ApplicationList type="category" title="新增物料类目申请" />

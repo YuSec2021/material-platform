@@ -12,6 +12,8 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   apiClient,
   type Attribute,
@@ -181,6 +183,7 @@ function TreeCategory({
 
 export function MaterialList() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
   const [expandedLibraryIds, setExpandedLibraryIds] = useState<number[]>([]);
@@ -266,15 +269,19 @@ export function MaterialList() {
       setEditingMaterial(null);
       setForm(emptyForm);
       setImageFeedback("");
+      toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
+    onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiClient.deleteMaterial(id),
     onSuccess: async () => {
+      toast.success(t("toast.deleteSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
+    onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
 
   const lifecycleMutation = useMutation({
@@ -284,10 +291,12 @@ export function MaterialList() {
         : apiClient.transitionMaterial(material.id, "stop_use", reason),
     onSuccess: async (_updated, variables) => {
       setLifecycleFeedback(`${variables.action === "stop_purchase" ? "停采" : "停用"}成功：${variables.reason}`);
+      toast.success(t("toast.lifecycleSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
     onError: (error) => {
       setLifecycleFeedback(`操作失败：${error.message}`);
+      toast.error(`${t("toast.lifecycleFailed")}: ${error.message}`);
     },
   });
 
@@ -395,8 +404,8 @@ export function MaterialList() {
     form.product_name_id !== "";
 
   return (
-    <div className="flex h-full gap-6">
-      <aside className="w-64 shrink-0 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4">
+    <div className="flex h-full flex-col gap-4 lg:flex-row lg:gap-6">
+      <aside className="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 lg:max-h-none lg:w-64 lg:shrink-0">
         <h2 className="mb-4 text-sm font-medium text-gray-900">物料库 / 类目</h2>
         <ApiState
           isLoading={librariesQuery.isLoading || categoriesQuery.isLoading}
@@ -447,8 +456,8 @@ export function MaterialList() {
       <main className="min-w-0 flex-1 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl text-gray-900">物料管理</h1>
-            <p className="mt-1 text-sm text-gray-500">物料列表、筛选、导出、建档和生命周期操作均连接后端 API。</p>
+            <h1 className="text-2xl text-gray-900">{t("page.materials")}</h1>
+            <p className="mt-1 text-sm text-gray-500">{t("page.materialsHelp")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {(["治理", "添加", "匹配"] as AiModalType[]).map((label) => (
@@ -463,7 +472,7 @@ export function MaterialList() {
                 className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
               >
                 <Sparkles className="h-4 w-4" />
-                {label}
+                {label === "治理" ? t("action.aiGovernance") : label === "添加" ? t("action.aiAdd") : t("action.aiMatch")}
               </button>
             ))}
             <button
@@ -472,7 +481,7 @@ export function MaterialList() {
               className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
               <Download className="h-4 w-4" />
-              导出
+              {t("action.export")}
             </button>
             <button
               type="button"
@@ -480,7 +489,7 @@ export function MaterialList() {
               className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
             >
               <Plus className="h-4 w-4" />
-              新增物料
+              {t("action.addMaterial")}
             </button>
           </div>
         </div>
@@ -491,7 +500,7 @@ export function MaterialList() {
               <Search className="h-5 w-5 text-gray-400" />
               <input
                 type="search"
-                placeholder="搜索物料名称、编码、描述或品名..."
+                placeholder={t("field.searchMaterials")}
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 className="flex-1 outline-none"
@@ -503,10 +512,10 @@ export function MaterialList() {
               className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               aria-label="状态筛选"
             >
-              <option value="">全部状态</option>
-              <option value="normal">正常</option>
-              <option value="stop_purchase">停采</option>
-              <option value="stop_use">停用</option>
+              <option value="">{t("status.all")}</option>
+              <option value="normal">{t("status.normal")}</option>
+              <option value="stop_purchase">{t("status.stopPurchase")}</option>
+              <option value="stop_use">{t("status.stopUse")}</option>
             </select>
           </div>
         </div>
@@ -515,7 +524,7 @@ export function MaterialList() {
           isLoading={materialsQuery.isLoading}
           isError={materialsQuery.isError}
           isEmpty={!materialsQuery.isLoading && !materialsQuery.isError && materialRows.length === 0}
-          emptyLabel="后端暂无物料数据"
+          emptyLabel={t("state.emptyMaterials")}
           onRetry={() => void materialsQuery.refetch()}
         >
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -523,7 +532,18 @@ export function MaterialList() {
               <table className="w-full min-w-[1120px]">
                 <thead className="border-b border-gray-200 bg-gray-50">
                   <tr>
-                    {["物料编码", "物料名称", "所属类目", "品名", "物料库", "单位", "品牌", "属性", "状态", "操作"].map((header) => (
+                    {[
+                      t("field.materialCode"),
+                      t("field.materialName"),
+                      t("field.category"),
+                      t("field.productName"),
+                      t("field.library"),
+                      t("field.unit"),
+                      t("field.brand"),
+                      t("field.attributes"),
+                      t("field.status"),
+                      t("action.operations"),
+                    ].map((header) => (
                       <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
                         {header}
                       </th>
@@ -563,7 +583,7 @@ export function MaterialList() {
                               className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
                             >
                               <Edit className="h-3.5 w-3.5" />
-                              编辑
+                              {t("action.edit")}
                             </button>
                             {status === "normal" && (
                               <button
@@ -571,7 +591,7 @@ export function MaterialList() {
                                 onClick={() => openLifecycle(material, "stop_purchase")}
                                 className="rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-700 hover:bg-orange-50"
                               >
-                                停采
+                                {t("action.stopPurchase")}
                               </button>
                             )}
                             {status === "stop_purchase" && (
@@ -580,7 +600,7 @@ export function MaterialList() {
                                 onClick={() => openLifecycle(material, "stop_use")}
                                 className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
                               >
-                                停用
+                                {t("action.stopUse")}
                               </button>
                             )}
                             <button
@@ -589,7 +609,7 @@ export function MaterialList() {
                               className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                              删除
+                              {t("action.delete")}
                             </button>
                           </div>
                         </td>
@@ -606,7 +626,7 @@ export function MaterialList() {
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        title={editingMaterial ? "编辑物料" : "新增物料"}
+        title={editingMaterial ? t("action.edit") : t("action.addMaterial")}
         size="xl"
         footer={
           <>
@@ -615,7 +635,7 @@ export function MaterialList() {
               onClick={() => setIsFormOpen(false)}
               className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
-              取消
+              {t("action.cancel")}
             </button>
             <button
               type="button"
@@ -623,7 +643,7 @@ export function MaterialList() {
               disabled={!formReady || saveMutation.isPending}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              {saveMutation.isPending ? "保存中..." : "保存"}
+              {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
           </>
         }
@@ -631,7 +651,7 @@ export function MaterialList() {
         <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1 text-sm text-gray-700">
-              <span>物料名称</span>
+              <span>{t("field.materialName")}</span>
               <input
                 type="text"
                 value={form.name}
@@ -640,7 +660,7 @@ export function MaterialList() {
               />
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>物料编码</span>
+              <span>{t("field.materialCode")}</span>
               <input
                 type="text"
                 value={editingMaterial?.code ?? "保存后自动生成"}
@@ -649,7 +669,7 @@ export function MaterialList() {
               />
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>物料库</span>
+              <span>{t("field.library")}</span>
               <select
                 value={form.material_library_id}
                 onChange={(event) =>
@@ -666,7 +686,7 @@ export function MaterialList() {
               </select>
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>类目级联选择</span>
+              <span>{t("field.category")}</span>
               <select
                 value={form.category_id}
                 onChange={(event) =>
@@ -683,7 +703,7 @@ export function MaterialList() {
               </select>
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>品名</span>
+              <span>{t("field.productName")}</span>
               <select
                 value={form.product_name_id}
                 onChange={(event) =>
@@ -700,7 +720,7 @@ export function MaterialList() {
               </select>
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>品牌</span>
+              <span>{t("field.brand")}</span>
               <select
                 value={form.brand_id}
                 onChange={(event) =>
@@ -717,7 +737,7 @@ export function MaterialList() {
               </select>
             </label>
             <label className="space-y-1 text-sm text-gray-700">
-              <span>计量单位</span>
+              <span>{t("field.unit")}</span>
               <input
                 type="text"
                 value={form.unit}
@@ -797,7 +817,7 @@ export function MaterialList() {
           </div>
 
           <label className="space-y-1 text-sm text-gray-700">
-            <span>描述</span>
+            <span>{t("field.description")}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}

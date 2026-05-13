@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Edit, ImageIcon, Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { apiClient, type Brand, type BrandLogo, type BrandPayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
@@ -63,6 +65,7 @@ function LogoCell({ brand }: { brand: Brand }) {
 
 export function BrandList() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<BrandFormState>(emptyForm);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
@@ -81,15 +84,19 @@ export function BrandList() {
       setIsFormOpen(false);
       setEditingBrand(null);
       setForm(emptyForm);
+      toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["brands"] });
     },
+    onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiClient.deleteBrand(id),
     onSuccess: async () => {
+      toast.success(t("toast.deleteSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["brands"] });
     },
+    onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
 
   const data = useMemo(() => {
@@ -165,7 +172,7 @@ export function BrandList() {
             className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
           >
             <Edit className="h-3.5 w-3.5" />
-            编辑
+                  {t("action.edit")}
           </button>
           <button
             type="button"
@@ -173,7 +180,7 @@ export function BrandList() {
             className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            删除
+            {t("action.delete")}
           </button>
         </div>
       ),
@@ -184,8 +191,8 @@ export function BrandList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">品牌管理</h1>
-          <p className="mt-1 text-sm text-gray-500">品牌数据来自后端 API，支持生成编码、Logo 缩略图和 CRUD 操作。</p>
+          <h1 className="text-2xl text-gray-900">{t("page.brands")}</h1>
+          <p className="mt-1 text-sm text-gray-500">{t("page.brandsHelp")}</p>
         </div>
         <button
           type="button"
@@ -193,17 +200,17 @@ export function BrandList() {
           className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
         >
           <Plus className="h-4 w-4" />
-          新增品牌
+          {t("action.addBrand")}
         </button>
       </div>
 
-      <SearchPanel value={searchTerm} onChange={setSearchTerm} placeholder="搜索品牌名称、编码或描述..." />
+      <SearchPanel value={searchTerm} onChange={setSearchTerm} placeholder={t("field.searchBrands")} />
 
       <ApiState
         isLoading={query.isLoading}
         isError={query.isError}
         isEmpty={!query.isLoading && !query.isError && data.length === 0}
-        emptyLabel="后端暂无品牌数据"
+        emptyLabel={t("state.emptyBrands")}
         onRetry={() => void query.refetch()}
       >
         <DataTable data={data} columns={columns} />
@@ -212,7 +219,7 @@ export function BrandList() {
       <Modal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
-        title={editingBrand ? "编辑品牌" : "新增品牌"}
+        title={editingBrand ? t("action.edit") : t("action.addBrand")}
         size="lg"
         footer={
           <>
@@ -221,7 +228,7 @@ export function BrandList() {
               onClick={() => setIsFormOpen(false)}
               className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
-              取消
+              {t("action.cancel")}
             </button>
             <button
               type="button"
@@ -229,14 +236,14 @@ export function BrandList() {
               disabled={!form.name.trim() || saveMutation.isPending}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              {saveMutation.isPending ? "保存中..." : "保存"}
+              {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
           </>
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm text-gray-700">
-            <span>品牌名称</span>
+            <span>{t("field.name")}</span>
             <input
               type="text"
               value={form.name}
@@ -245,7 +252,7 @@ export function BrandList() {
             />
           </label>
           <label className="space-y-1 text-sm text-gray-700">
-            <span>品牌编码</span>
+            <span>{t("field.code")}</span>
             <input
               type="text"
               value={editingBrand?.code ?? "保存后自动生成"}
@@ -254,7 +261,7 @@ export function BrandList() {
             />
           </label>
           <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
-            <span>描述</span>
+            <span>{t("field.description")}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
