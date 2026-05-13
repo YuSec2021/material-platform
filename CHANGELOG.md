@@ -25,3 +25,11 @@
 - Loading/error/empty states only visible when intercepting the frontend proxy URL (`localhost:5173/api/*`) not the backend URL (`localhost:8000/api/*`) -- the Vite dev server's proxy introduces timing that affects the test. The ApiState component is correctly implemented and works when tested with the correct interception target.
 
 ## v3.0.0 — Sprint 17 [MAJOR bump]
+
+## v4.0.0 — Sprint 18 [MAJOR bump]
+- All CRUD operations wired to real backend, HCM users protected from local mutations, confirmation dialog required before destructive delete.
+- Full role lifecycle (create, edit, toggle enable/disable, bind users, delete) all wired to backend endpoints.
+- Three-panel layout with module tree, role selector, and permission checkbox grid correctly wired to all required endpoints.
+- System info form with name input, icon upload zone, and save button all present and wired.
+- Dual independent sections with independent add/delete controls, both lists persisted through backend.
+- Two selectable mode cards with card highlighting and backend persistence.
