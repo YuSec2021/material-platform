@@ -33,3 +33,5 @@
 - System info form with name input, icon upload zone, and save button all present and wired.
 - Dual independent sections with independent add/delete controls, both lists persisted through backend.
 - Two selectable mode cards with card highlighting and backend persistence.
+
+## v4.1.0 — Sprint 19 [MINOR bump]
