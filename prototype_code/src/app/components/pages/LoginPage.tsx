@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { LogIn, PackageCheck } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/app/auth/AuthContext";
 
 type LoginLocationState = {
@@ -11,6 +12,7 @@ export function LoginPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
   const [username, setUsername] = useState("super_admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -31,7 +33,7 @@ export function LoginPage() {
       await auth.login(username);
       navigate(from, { replace: true });
     } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : "登录失败，请重试");
+      setError(loginError instanceof Error ? loginError.message : t("login.failed"));
     } finally {
       setIsSubmitting(false);
     }
@@ -45,15 +47,15 @@ export function LoginPage() {
             <PackageCheck className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">AI物料中台</h1>
-            <p className="text-sm text-gray-500">AI material platform login</p>
+            <h1 className="text-xl font-semibold text-gray-900">{t("app.name")}</h1>
+            <p className="text-sm text-gray-500">{t("login.subtitle")}</p>
           </div>
         </div>
 
         <form className="space-y-5" onSubmit={handleSubmit}>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700" htmlFor="username">
-              用户名
+              {t("login.username")}
             </label>
             <input
               id="username"
@@ -69,7 +71,7 @@ export function LoginPage() {
 
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700" htmlFor="password">
-              密码
+              {t("login.password")}
             </label>
             <input
               id="password"
@@ -79,7 +81,7 @@ export function LoginPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              placeholder="演示账号无需密码"
+              placeholder={t("login.passwordPlaceholder")}
             />
           </div>
 
@@ -95,7 +97,7 @@ export function LoginPage() {
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <LogIn className="h-4 w-4" />
-            {isSubmitting ? "登录中..." : "登录"}
+            {isSubmitting ? t("login.submitting") : t("login.submit")}
           </button>
         </form>
       </section>

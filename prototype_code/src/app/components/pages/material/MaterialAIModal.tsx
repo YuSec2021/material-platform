@@ -1,6 +1,8 @@
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, type QueryClient } from "@tanstack/react-query";
 import { CheckCircle2, FileInput, RefreshCcw, Search, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   apiClient,
   type ApiError,
@@ -125,6 +127,7 @@ function modalTitle(type: AiModalType) {
 }
 
 export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCategoryId, onClose, queryClient }: MaterialAIModalProps) {
+  const { t } = useTranslation();
   const [governanceFile, setGovernanceFile] = useState<File | null>(null);
   const [governancePreview, setGovernancePreview] = useState<MaterialGovernancePreviewResult | null>(null);
   const [governanceSuccess, setGovernanceSuccess] = useState("");
@@ -169,7 +172,9 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
     onSuccess: (result) => {
       setGovernancePreview(result);
       setGovernanceSuccess("");
+      toast.success(t("toast.aiPreviewSuccess"));
     },
+    onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
   const governanceImportMutation = useMutation({
@@ -187,8 +192,10 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
       setGovernanceSuccess("批量写入成功，物料列表已刷新。");
       setGovernancePreview(null);
       setGovernanceFile(null);
+      toast.success(t("toast.aiImportSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
+    onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
   const addPreviewMutation = useMutation({
@@ -206,7 +213,9 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
       setAddPreview(result);
       setDescriptionError("");
       setAddSuccess("");
+      toast.success(t("toast.aiPreviewSuccess"));
     },
+    onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
   const addConfirmMutation = useMutation({
@@ -220,8 +229,10 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
       setAddSuccess("物料创建成功，物料列表已刷新。");
       setAddPreview(null);
       setDescription("");
+      toast.success(t("toast.aiCreateSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
+    onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
   const matchMutation = useMutation<unknown, ApiError, void>({
@@ -235,12 +246,16 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
         top_k: 3,
       });
     },
-    onSuccess: (result) => setMatchResult(result),
+    onSuccess: (result) => {
+      setMatchResult(result);
+      toast.success(t("toast.aiMatchSuccess"));
+    },
+    onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
   const analyzeDescription = () => {
     if (!description.trim()) {
-      setDescriptionError("请输入物料描述后再分析。");
+      setDescriptionError(t("validation.requiredDescription"));
       return;
     }
     addPreviewMutation.mutate();

@@ -1,88 +1,191 @@
-import { Outlet, Link, useLocation, useNavigate } from "react-router";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import {
-  LayoutDashboard,
-  Database,
-  Package,
-  FileText,
-  Settings,
-  ChevronDown,
   Bug,
-  User
+  ChevronDown,
+  Database,
+  FileText,
+  Languages,
+  LayoutDashboard,
+  Menu,
+  Package,
+  Settings,
+  User,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/app/auth/AuthContext";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/app/components/ui/sheet";
 
 interface MenuItem {
+  key: string;
   title: string;
-  icon: React.ReactNode;
-  path?: string;
-  children?: {
+  icon: ReactNode;
+  children: {
+    key: string;
     title: string;
     path: string;
   }[];
 }
 
-const menuItems: MenuItem[] = [
-  {
-    title: "标准管理",
-    icon: <Database className="w-5 h-5" />,
-    children: [
-      { title: "类目库管理", path: "/standard/category-library" },
-      { title: "类目管理", path: "/standard/category" },
-      { title: "品名管理", path: "/standard/product-name" },
-      { title: "属性管理", path: "/standard/attribute" },
-      { title: "品牌管理", path: "/standard/brand" },
-    ],
-  },
-  {
-    title: "物料管理",
-    icon: <Package className="w-5 h-5" />,
-    children: [
-      { title: "物料库管理", path: "/material/library" },
-      { title: "物料管理", path: "/materials" },
-    ],
-  },
-  {
-    title: "申请流程",
-    icon: <FileText className="w-5 h-5" />,
-    children: [
-      { title: "新增物料类目申请", path: "/application/category" },
-      { title: "新增物料编码申请", path: "/application/material-code" },
-      { title: "物料停采申请", path: "/application/stop-purchase" },
-      { title: "物料停用申请", path: "/application/stop-use" },
-    ],
-  },
-  {
-    title: "系统管理",
-    icon: <Settings className="w-5 h-5" />,
-    children: [
-      { title: "用户管理", path: "/system/users" },
-      { title: "角色管理", path: "/system/roles" },
-      { title: "权限配置", path: "/system/permissions" },
-      { title: "系统信息配置", path: "/system/info" },
-      { title: "原因选项维护", path: "/system/reason-options" },
-      { title: "审批模式切换", path: "/system/approval-mode" },
-    ],
-  },
-];
+function buildMenuItems(t: (key: string) => string): MenuItem[] {
+  const items: MenuItem[] = [
+    {
+      key: "standard",
+      title: t("nav.standard"),
+      icon: <Database className="h-5 w-5" />,
+      children: [
+        { key: "categoryLibrary", title: t("nav.categoryLibrary"), path: "/standard/category-library" },
+        { key: "category", title: t("nav.category"), path: "/standard/category" },
+        { key: "productName", title: t("nav.productName"), path: "/standard/product-name" },
+        { key: "attribute", title: t("nav.attribute"), path: "/standard/attribute" },
+        { key: "brand", title: t("nav.brand"), path: "/standard/brand" },
+      ],
+    },
+    {
+      key: "material",
+      title: t("nav.material"),
+      icon: <Package className="h-5 w-5" />,
+      children: [
+        { key: "materialLibrary", title: t("nav.materialLibrary"), path: "/material/library" },
+        { key: "materials", title: t("nav.material"), path: "/materials" },
+      ],
+    },
+    {
+      key: "applications",
+      title: t("nav.applications"),
+      icon: <FileText className="h-5 w-5" />,
+      children: [
+        { key: "categoryApplication", title: t("nav.categoryApplication"), path: "/application/category" },
+        { key: "materialCodeApplication", title: t("nav.materialCodeApplication"), path: "/application/material-code" },
+        { key: "stopPurchaseApplication", title: t("nav.stopPurchaseApplication"), path: "/application/stop-purchase" },
+        { key: "stopUseApplication", title: t("nav.stopUseApplication"), path: "/application/stop-use" },
+      ],
+    },
+    {
+      key: "system",
+      title: t("nav.system"),
+      icon: <Settings className="h-5 w-5" />,
+      children: [
+        { key: "users", title: t("nav.users"), path: "/system/users" },
+        { key: "roles", title: t("nav.roles"), path: "/system/roles" },
+        { key: "permissions", title: t("nav.permissions"), path: "/system/permissions" },
+        { key: "systemInfo", title: t("nav.systemInfo"), path: "/system/info" },
+        { key: "reasons", title: t("nav.reasons"), path: "/system/reason-options" },
+        { key: "approvalMode", title: t("nav.approvalMode"), path: "/system/approval-mode" },
+      ],
+    },
+  ];
 
-if (import.meta.env.DEV) {
-  menuItems.push({
-    title: "调试",
-    icon: <Bug className="w-5 h-5" />,
-    children: [{ title: "AI链路追踪", path: "/debug/trace" }],
-  });
+  if (import.meta.env.DEV) {
+    items.push({
+      key: "debug",
+      title: t("nav.debug"),
+      icon: <Bug className="h-5 w-5" />,
+      children: [{ key: "trace", title: t("nav.trace"), path: "/debug/trace" }],
+    });
+  }
+
+  return items;
+}
+
+function LanguageSwitcher() {
+  const { t, i18n } = useTranslation();
+  const nextLanguage = i18n.language === "en-US" ? "zh-CN" : "en-US";
+
+  return (
+    <button
+      type="button"
+      aria-label={t("app.language")}
+      onClick={() => void i18n.changeLanguage(nextLanguage)}
+      className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.98]"
+    >
+      <Languages className="h-4 w-4" />
+      {i18n.language === "en-US" ? t("app.chinese") : t("app.english")}
+    </button>
+  );
+}
+
+function NavigationTree({
+  menuItems,
+  expandedMenus,
+  onToggle,
+  onNavigate,
+}: {
+  menuItems: MenuItem[];
+  expandedMenus: string[];
+  onToggle: (key: string) => void;
+  onNavigate?: () => void;
+}) {
+  const location = useLocation();
+
+  return (
+    <nav className="flex-1 overflow-y-auto p-4" aria-label="Primary">
+      {menuItems.map((item) => (
+        <div key={item.key} className="mb-2">
+          <button
+            type="button"
+            onClick={() => onToggle(item.key)}
+            aria-expanded={expandedMenus.includes(item.key)}
+            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-gray-700 transition hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.99]"
+          >
+            <span className="flex items-center gap-3">
+              {item.icon}
+              <span>{item.title}</span>
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 transition-transform ${
+                expandedMenus.includes(item.key) ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+
+          {expandedMenus.includes(item.key) && (
+            <div className="ml-8 mt-1 space-y-1">
+              {item.children.map((child) => (
+                <Link
+                  key={child.path}
+                  to={child.path}
+                  onClick={onNavigate}
+                  className={`block rounded-lg px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.99] ${
+                    location.pathname === child.path
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                  }`}
+                >
+                  {child.title}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </nav>
+  );
 }
 
 export function MainLayout() {
-  const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
-  const [expandedMenus, setExpandedMenus] = useState<string[]>(["标准管理", "物料管理", "申请流程", "系统管理", "调试"]);
+  const { t } = useTranslation();
+  const [expandedMenus, setExpandedMenus] = useState<string[]>([
+    "standard",
+    "material",
+    "applications",
+    "system",
+    "debug",
+  ]);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const menuItems = buildMenuItems(t);
 
-  const toggleMenu = (title: string) => {
-    setExpandedMenus(prev =>
-      prev.includes(title) ? prev.filter(item => item !== title) : [...prev, title]
+  const toggleMenu = (key: string) => {
+    setExpandedMenus((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
     );
   };
 
@@ -96,68 +199,54 @@ export function MainLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* 侧边栏 */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        <div className="p-6 border-b border-gray-200">
-          <Link to="/" className="flex items-center gap-2">
-            <LayoutDashboard className="w-8 h-8 text-blue-600" />
-            <h1 className="text-xl font-bold text-gray-900">AI物料中台</h1>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-gray-200 bg-white md:flex">
+        <div className="border-b border-gray-200 p-6">
+          <Link
+            to="/"
+            className="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+          >
+            <LayoutDashboard className="h-8 w-8 text-blue-600" />
+            <h1 className="text-xl font-bold text-gray-900">{t("app.name")}</h1>
           </Link>
         </div>
-
-        <nav className="flex-1 overflow-y-auto p-4">
-          {menuItems.map((item) => (
-            <div key={item.title} className="mb-2">
-              <button
-                onClick={() => toggleMenu(item.title)}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-700 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  {item.icon}
-                  <span>{item.title}</span>
-                </div>
-                <ChevronDown
-                  className={`w-4 h-4 transition-transform ${
-                    expandedMenus.includes(item.title) ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-
-              {expandedMenus.includes(item.title) && item.children && (
-                <div className="ml-8 mt-1 space-y-1">
-                  {item.children.map((child) => (
-                    <Link
-                      key={child.path}
-                      to={child.path}
-                      className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
-                        location.pathname === child.path
-                          ? "bg-blue-50 text-blue-600"
-                          : "text-gray-600 hover:bg-gray-100"
-                      }`}
-                    >
-                      {child.title}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </nav>
+        <NavigationTree menuItems={menuItems} expandedMenus={expandedMenus} onToggle={toggleMenu} />
       </aside>
 
-      {/* 主内容区 */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 顶部栏 */}
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h2 className="text-lg text-gray-900">AI物料中台管理系统</h2>
+      <Sheet open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
+        <SheetContent side="left" className="w-80 max-w-[86vw]">
+          <SheetHeader>
+            <SheetTitle>{t("app.name")}</SheetTitle>
+            <SheetDescription>{t("app.system")}</SheetDescription>
+          </SheetHeader>
+          <NavigationTree
+            menuItems={menuItems}
+            expandedMenus={expandedMenus}
+            onToggle={toggleMenu}
+            onNavigate={() => setIsMobileNavOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="border-b border-gray-200 bg-white px-4 py-3 md:px-6 md:py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                aria-label={t("app.menu")}
+                onClick={() => setIsMobileNavOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 md:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              <h2 className="truncate text-base font-semibold text-gray-900 md:text-lg">{t("app.system")}</h2>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
-                <User className="w-5 h-5 text-gray-600" />
-                <span className="text-sm text-gray-700">{auth.user?.display_name}</span>
+            <div className="flex shrink-0 items-center gap-2 md:gap-3">
+              <LanguageSwitcher />
+              <div className="hidden items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 sm:flex">
+                <User className="h-5 w-5 text-gray-600" />
+                <span className="max-w-28 truncate text-sm text-gray-700">{auth.user?.display_name}</span>
                 <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
                   {roleLabel}
                 </span>
@@ -165,17 +254,16 @@ export function MainLayout() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.98]"
               >
-                退出登录
+                {t("app.logout")}
               </button>
             </div>
           </div>
         </header>
 
-        {/* 页面内容 */}
-        <main className="flex-1 overflow-auto p-6 flex flex-col">
-          <div className="flex-1 flex flex-col">
+        <main className="flex-1 overflow-auto p-4 md:p-6">
+          <div className="flex min-h-full flex-col">
             <Outlet />
           </div>
         </main>
