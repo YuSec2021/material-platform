@@ -37,3 +37,9 @@
 ## v4.1.0 — Sprint 19 [MINOR bump]
 
 ## v4.2.0 — Sprint 20 [MINOR bump]
+
+## v4.3.0 — Sprint 21 [MINOR bump]
+- The rebranding is correctly applied to the primary app shell. The old name "AI物料中台" appears only in sub-text descriptions, not as the main app name.
+- The About button is correctly placed in the top bar, next to the user avatar.
+- All three required data points are present in the About dialog. Modal is a native browser dialog component.
+- Both routes load correctly with full content. Brand update did not break any existing navigation flows.
