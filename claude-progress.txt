@@ -1,25 +1,10 @@
-Project summary: Sprint 12 PASS. Frontend redesign re-planned using prototype_code/ (React/Vite/shadcn-ui SPA). Sprints 13-20 replace old 13-16. Backend unchanged (FastAPI + PostgreSQL + Qdrant).
-Sprint 12: Deployment, Integration Testing, and Polish
-Status: SPRINT PASS.
-Notes: Docker Compose, Nginx, Playwright E2E smoke tests, Postgres DATABASE_URL, offline Playwright adapter, README deployment docs.
-Sprint 13: Frontend Scaffolding and Dev Environment
-Status: SPRINT PASS.
-Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes, strict TS, ESLint, build+lint scripts.
-Sprint 14: API Client Layer and Auth Integration
-Status: SPRINT PASS.
-Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth, all mock-data pages wired to real API endpoints.
-Sprint 15: Standard Management React Pages
-Status: SPRINT PASS.
-Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails), CategoryList/ProductNameList/CategoryLibraryList (read-only GET + disabled controls).
-Sprint 16: Material Management React Pages
-Status: SPRINT PASS.
-Notes: MaterialList split-pane (category tree + right table), search/status filter, export CSV, AI action buttons, MaterialLibraryList CRUD, Material create/edit with dynamic selectors, lifecycle badges and stop-purchase/stop-use.
-Sprint 17: Application Workflow React Pages
-Status: SPRINT PASS.
-Notes: ApplicationList (4-type tabs), CategoryApplication (cascade selectors, ApprovalTimeline), MaterialCodeApplication, StopPurchaseApplication, StopUseApplication (pre-filtered).
+Project summary: All sprints 12-20 PASS. Frontend redesign complete using prototype_code/ (React/Vite/shadcn-ui SPA). Backend unchanged (FastAPI + PostgreSQL + Qdrant). Current version: v4.2.0.
 Sprint 18: System Admin React Pages
 Status: SPRINT PASS.
 Notes: UserList CRUD, RoleList (enable/disable, bind-users modal), PermissionConfig (directory tree + 19 permission checkboxes), SystemConfig (system info, reason options, approval mode switching).
 Sprint 19: AI Feature Integration and Dashboard
 Status: SPRINT PASS.
-Notes: MaterialAIModal wired (governance preview/import, add preview/confirm, match Top-3 with confidence badges), Dashboard (GET /api/v1/workflows/applications, loading/error/empty states), TraceDebugPage at /debug/trace. TypeScript/build/lint all pass. Accessibility verified.
+Notes: MaterialAIModal wired (governance preview/import, add preview/confirm, match Top-3 with confidence badges), Dashboard, TraceDebugPage at /debug/trace. TypeScript/build/lint all pass.
+Sprint 20: Visual Polish, i18n, and E2E Testing
+Status: SPRINT PASS.
+Notes: i18n with zh-CN/en-US + localStorage persistence, sonner toasts, skeleton loaders, empty/error states, ErrorBoundary, responsive design (desktop/tablet/mobile), Playwright E2E smoke tests, WCAG AA accessibility. v4.2.0.
