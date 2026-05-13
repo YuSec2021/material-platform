@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Eye, Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { apiClient, type WorkflowApplication } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
@@ -36,6 +37,7 @@ type ApplicationRow = {
 
 export function ApplicationList({ type, title }: ApplicationListProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const apiType = workflowTypeMap[type];
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -105,9 +107,19 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">{title}</h1>
+          <h1 className="text-2xl text-gray-900">
+            {type === "category"
+              ? t("nav.categoryApplication")
+              : type === "material-code"
+                ? t("nav.materialCodeApplication")
+                : type === "stop-purchase"
+                  ? t("nav.stopPurchaseApplication")
+                  : type === "stop-use"
+                    ? t("nav.stopUseApplication")
+                    : title}
+          </h1>
           <p className="mt-1 text-sm text-gray-500">
-            当前接口类型: <span className="font-mono text-gray-700">{apiType}</span>
+            {t("page.applicationsHelp", { type: apiType })}
           </p>
         </div>
         <button
@@ -116,7 +128,7 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
           className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
         >
           <Plus className="h-4 w-4" />
-          新建申请
+          {t("action.addMaterial")}
         </button>
       </div>
 
@@ -152,9 +164,9 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
         isLoading={query.isLoading}
         isError={query.isError}
         isEmpty={rows.length === 0}
-        loadingLabel="正在加载申请列表..."
-        errorLabel="申请列表加载失败"
-        emptyLabel="后端暂无该类型申请"
+        loadingLabel={t("state.loadingApplications")}
+        errorLabel={t("state.errorApplications")}
+        emptyLabel={t("state.emptyApplications")}
         onRetry={() => void query.refetch()}
       >
         <DataTable data={rows} columns={columns} emptyMessage="后端暂无该类型申请" />

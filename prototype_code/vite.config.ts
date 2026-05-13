@@ -26,6 +26,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   resolve: {
+    preserveSymlinks: true,
     alias: {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
