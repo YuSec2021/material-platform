@@ -154,6 +154,86 @@ export type MaterialQueryParams = {
   product_name_id?: number | null;
 };
 
+export type MaterialGovernancePreviewPayload = {
+  product_name_id?: number | null;
+  product_name?: string | null;
+  material_library_id?: number | null;
+  category_id?: number | null;
+  rows?: string | string[] | Record<string, unknown>[] | null;
+  file_name?: string;
+  file_content?: string;
+};
+
+export type MaterialGovernanceImportPayload = {
+  product_name_id?: number | null;
+  product_name?: string | null;
+  material_library_id?: number | null;
+  category_id?: number | null;
+  items: Record<string, unknown>[];
+};
+
+export type MaterialGovernancePreviewResult = {
+  capability?: string;
+  items?: Record<string, unknown>[];
+  rows?: Record<string, unknown>[];
+  changes?: Record<string, unknown>[];
+  count?: number;
+};
+
+export type MaterialAddPreviewPayload = {
+  input_text: string;
+  material_library_id: number;
+  category_id?: number | null;
+  product_name_id?: number | null;
+  brand_id?: number | null;
+  unit?: string | null;
+  attachments?: Record<string, unknown>[];
+};
+
+export type MaterialAddPreviewResult = Record<string, unknown> & {
+  category?: string;
+  category_path?: string | string[];
+  product_name?: string;
+  attributes?: Record<string, unknown>;
+  recommended_attributes?: Record<string, unknown> | { name: string; value: unknown }[];
+  proposed_material?: Record<string, unknown>;
+};
+
+export type MaterialAddConfirmPayload = {
+  preview: MaterialAddPreviewResult;
+  allow_duplicate?: boolean;
+};
+
+export type MaterialMatchPayload = {
+  material_library_id: number;
+  query?: string | null;
+  name?: string | null;
+  brand?: string | null;
+  brand_id?: number | null;
+  attributes?: Record<string, unknown>;
+  description?: string;
+  top_k?: number;
+};
+
+export type MaterialMatch = Record<string, unknown> & {
+  material_id?: number;
+  id?: number;
+  code?: string;
+  material_code?: string;
+  name?: string;
+  material_name?: string;
+  product_name?: string;
+  brand?: string;
+  score?: number;
+  confidence?: number;
+};
+
+export type MaterialMatchResult = {
+  matches?: MaterialMatch[];
+  top_matches?: MaterialMatch[];
+  results?: MaterialMatch[];
+};
+
 type QueryFunctionContextLike = {
   queryKey: unknown;
 };
@@ -313,6 +393,32 @@ export type WorkflowApplicationQuery = {
   status?: string;
   applicant?: string;
   material_id?: number | null;
+};
+
+export type TraceSpan = Record<string, unknown> & {
+  span_id?: string;
+  id?: string;
+  parent_span_id?: string | null;
+  parent_id?: string | null;
+  operation_name?: string;
+  name?: string;
+  span_type?: string;
+  type?: string;
+  status?: string;
+  duration_ms?: number;
+  children?: TraceSpan[];
+};
+
+export type TraceSummary = Record<string, unknown> & {
+  trace_id: string;
+  operation_name?: string;
+  name?: string;
+  capability?: string;
+  status?: string;
+  duration_ms?: number;
+  span_count?: number;
+  spans?: TraceSpan[];
+  children?: TraceSpan[];
 };
 
 export type ReferenceImagePayload = {
@@ -583,6 +689,36 @@ export const apiClient = {
       body: { target_status: targetStatus, reason },
     });
   },
+  previewMaterialGovernance(payload: MaterialGovernancePreviewPayload) {
+    return request<MaterialGovernancePreviewResult>("/ai/material-governance/preview", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  importMaterialGovernance(payload: MaterialGovernanceImportPayload) {
+    return request<Material[] | Record<string, unknown>>("/ai/material-governance/import", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  previewMaterialAdd(payload: MaterialAddPreviewPayload) {
+    return request<MaterialAddPreviewResult>("/ai/material-add/preview", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  confirmMaterialAdd(payload: MaterialAddConfirmPayload) {
+    return request<Record<string, unknown>>("/ai/material-add/confirm", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  matchMaterials(payload: MaterialMatchPayload) {
+    return request<MaterialMatchResult>("/ai/material-match", {
+      method: "POST",
+      body: payload,
+    });
+  },
   users() {
     return request<User[]>("/users");
   },
@@ -643,7 +779,7 @@ export const apiClient = {
   updateSystemConfig(payload: SystemConfigPayload) {
     return request<SystemConfig>("/system/config", { method: "PUT", body: payload });
   },
-  workflowApplications(params: WorkflowApplicationQuery) {
+  workflowApplications(params: WorkflowApplicationQuery = {}) {
     return request<WorkflowApplication[]>(withQuery("/workflows/applications", params));
   },
   workflowApplication(id: number) {
@@ -678,6 +814,9 @@ export const apiClient = {
       method: "POST",
       body: payload,
     });
+  },
+  debugTrace() {
+    return request<TraceSummary[]>("/debug/trace");
   },
 };
 

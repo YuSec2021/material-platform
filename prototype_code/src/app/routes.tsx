@@ -6,6 +6,7 @@ import { LoginPage } from "./components/pages/LoginPage";
 import { ApiClientHealth } from "./components/pages/dev/ApiClientHealth";
 import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
+import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
 
 // 标准管理
 import { CategoryLibraryList } from "./components/pages/standard/CategoryLibraryList";
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
           // 物料管理
           { path: "material/library", Component: MaterialLibraryList },
           { path: "material/list", Component: MaterialList },
+          { path: "materials", Component: MaterialList },
 
           // 申请流程
           {
@@ -93,6 +95,7 @@ export const router = createBrowserRouter([
           { path: "dev/frontend-health", Component: FrontendHealth },
           { path: "dev/api-client-health", Component: ApiClientHealth },
           { path: "dev/component-smoke", Component: ComponentSmoke },
+          { path: "debug/trace", Component: TraceDebugPage },
         ],
       },
     ],
