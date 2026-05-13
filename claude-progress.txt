@@ -7,10 +7,13 @@ Status: SPRINT PASS.
 Notes: React 18/Vite/Tailwind v4/shadcn-ui scaffolded in prototype_code/, API client, Auth context, React Query, Zustand, Vite proxy, dev routes (/dev/frontend-health, /dev/component-smoke), strict TS, ESLint, build+lint scripts.
 Sprint 14: API Client Layer and Auth Integration
 Status: SPRINT PASS.
-Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth (Seeded Administrator, role badge, logout), all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health.
+Notes: Typed axios API client with interceptors, JWT auth context with login page, ProtectedRoute guards, MainLayout header wired to auth, all mock-data pages wired to real API endpoints, React Query loading/error/empty states, /dev/api-client-health.
 Sprint 15: Standard Management React Pages
 Status: SPRINT PASS.
-Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList/ProductNameList (read-only GET + disabled controls with tooltip), CategoryLibraryList (read-only empty state + disabled controls).
+Notes: AttributeList (full CRUD + type badges + change log timeline), BrandList (full CRUD + logo thumbnails + read-only code), CategoryList/ProductNameList (read-only GET + disabled controls), CategoryLibraryList (read-only empty state + disabled controls).
 Sprint 16: Material Management React Pages
 Status: SPRINT PASS.
-Notes: MaterialList split-pane (category tree ~256px + right table), search/status filter debounced GET, export CSV, AI action buttons (治理/添加/匹配) UI-only, MaterialLibraryList full CRUD, Material create/edit with dynamic selectors, image upload max 3, lifecycle badges and stop-purchase/stop-use actions. All 5 criteria pass.
+Notes: MaterialList split-pane (category tree + right table), search/status filter, export CSV, AI action buttons, MaterialLibraryList CRUD, Material create/edit with dynamic selectors, lifecycle badges and stop-purchase/stop-use actions.
+Sprint 17: Application Workflow React Pages
+Status: SPRINT PASS.
+Notes: ApplicationList (4-type tabs wired to /api/v1/workflows/applications?type=X), CategoryApplication (cascade selectors, ApprovalTimeline, save-draft/submit), MaterialCodeApplication (3 required images, submit), StopPurchaseApplication (material selection modal, per-row reason), StopUseApplication (pre-filtered to stop-purchased materials). All 6 criteria pass.

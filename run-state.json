@@ -1,14 +1,14 @@
 {
   "mode": "planning",
-  "current_sprint": 16,
+  "current_sprint": 17,
   "retry_count": 0,
-  "last_successful_sprint": 16,
+  "last_successful_sprint": 17,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-16-material-management",
+  "active_branch": "codex/sprint-17-application-workflow",
   "base_branch": "main",
-  "last_run_at": "2026-05-12T14:12:52.121970Z",
+  "last_run_at": "2026-05-13T06:26:59.459577Z",
   "request_kind": "",
   "sprint_origin": "feature",
-  "current_version": "2.2.0"
+  "current_version": "3.0.0"
 }

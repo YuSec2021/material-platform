@@ -23,3 +23,5 @@
 - All selector endpoints wired. Attribute selector lazy-loads on product name selection (`enabled: isFormOpen && selectedProductNameId !== null`).
 - Status normalization handles both `stop-purchase` and `stop_purchase` backend values (normalizeStatus function, lines 58-66).
 - Loading/error/empty states only visible when intercepting the frontend proxy URL (`localhost:5173/api/*`) not the backend URL (`localhost:8000/api/*`) -- the Vite dev server's proxy introduces timing that affects the test. The ApiState component is correctly implemented and works when tested with the correct interception target.
+
+## v3.0.0 — Sprint 17 [MAJOR bump]
