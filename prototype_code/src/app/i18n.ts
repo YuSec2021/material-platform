@@ -5,8 +5,13 @@ const resources = {
   "zh-CN": {
     translation: {
       app: {
-        name: "AI物料中台",
-        system: "AI物料中台管理系统",
+        name: "智料通",
+        system: "专属于企业的AI物料中台",
+        about: "关于",
+        aboutTitle: "关于智料通",
+        aboutName: "名称：智料通",
+        aboutVersion: "版本：v4.2.0",
+        aboutDescription: "描述：专属于企业的AI物料中台",
         retry: "重试",
         reload: "重新加载",
         menu: "打开导航",
@@ -137,6 +142,11 @@ const resources = {
       app: {
         name: "AI Material Hub",
         system: "AI Material Management System",
+        about: "About",
+        aboutTitle: "About AI Material Hub",
+        aboutName: "Name: AI Material Hub",
+        aboutVersion: "Version: v4.2.0",
+        aboutDescription: "Description: Enterprise AI material management platform",
         retry: "Retry",
         reload: "Reload",
         menu: "Open navigation",
