@@ -35,3 +35,5 @@
 - Two selectable mode cards with card highlighting and backend persistence.
 
 ## v4.1.0 — Sprint 19 [MINOR bump]
+
+## v4.2.0 — Sprint 20 [MINOR bump]
