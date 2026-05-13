@@ -16,4 +16,7 @@ Status: SPRINT PASS.
 Notes: MaterialList split-pane (category tree + right table), search/status filter, export CSV, AI action buttons, MaterialLibraryList CRUD, Material create/edit with dynamic selectors, lifecycle badges and stop-purchase/stop-use actions.
 Sprint 17: Application Workflow React Pages
 Status: SPRINT PASS.
-Notes: ApplicationList (4-type tabs wired to /api/v1/workflows/applications?type=X), CategoryApplication (cascade selectors, ApprovalTimeline, save-draft/submit), MaterialCodeApplication (3 required images, submit), StopPurchaseApplication (material selection modal, per-row reason), StopUseApplication (pre-filtered to stop-purchased materials). All 6 criteria pass.
+Notes: ApplicationList (4-type tabs wired to /api/v1/workflows/applications?type=X), CategoryApplication (cascade selectors, ApprovalTimeline), MaterialCodeApplication (3 required images), StopPurchaseApplication (material selection modal), StopUseApplication (pre-filtered to stop-purchased materials).
+Sprint 18: System Admin React Pages
+Status: SPRINT PASS.
+Notes: UserList CRUD (username/unit/department/team, password reset, HCM-protected), RoleList (enable/disable toggle, bind-users modal), PermissionConfig (directory tree + 19 permission checkboxes wired to /api/v1/permissions/catalog), SystemConfig (system info, reason options maintenance, approval mode switching simple/workflow). All 41 checks pass.
