@@ -6,6 +6,7 @@ import {
   FileText,
   Settings,
   ChevronDown,
+  Bug,
   User
 } from "lucide-react";
 import { useState } from "react";
@@ -38,7 +39,7 @@ const menuItems: MenuItem[] = [
     icon: <Package className="w-5 h-5" />,
     children: [
       { title: "物料库管理", path: "/material/library" },
-      { title: "物料管理", path: "/material/list" },
+      { title: "物料管理", path: "/materials" },
     ],
   },
   {
@@ -65,11 +66,19 @@ const menuItems: MenuItem[] = [
   },
 ];
 
+if (import.meta.env.DEV) {
+  menuItems.push({
+    title: "调试",
+    icon: <Bug className="w-5 h-5" />,
+    children: [{ title: "AI链路追踪", path: "/debug/trace" }],
+  });
+}
+
 export function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
-  const [expandedMenus, setExpandedMenus] = useState<string[]>(["标准管理", "物料管理", "申请流程", "系统管理"]);
+  const [expandedMenus, setExpandedMenus] = useState<string[]>(["标准管理", "物料管理", "申请流程", "系统管理", "调试"]);
 
   const toggleMenu = (title: string) => {
     setExpandedMenus(prev =>
