@@ -1,14 +1,14 @@
 {
   "mode": "complete",
-  "current_sprint": 21,
+  "current_sprint": 22,
   "retry_count": 0,
-  "last_successful_sprint": 21,
+  "last_successful_sprint": 22,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-21-brand-update",
+  "active_branch": "codex/sprint-22-modal-overlay",
   "base_branch": "main",
-  "last_run_at": "2026-05-13T20:30:00Z",
+  "last_run_at": "2026-05-14T09:20:00Z",
   "request_kind": "",
   "sprint_origin": "minor_feature",
-  "current_version": "4.3.0"
+  "current_version": "4.4.0"
 }
