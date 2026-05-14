@@ -40,6 +40,8 @@ from .models import (
     MaterialLibrary,
     ModelConfig,
     ProductName,
+    Rule,
+    RuleCategory,
     Role,
     RoleUser,
     SystemConfig,
@@ -86,6 +88,9 @@ from .schemas import (
     RecommendIn,
     PermissionEntry,
     PasswordResetOut,
+    EvaluateRequest,
+    EvaluateResponse,
+    EvaluateResult,
     RoleIn,
     RoleOut,
     RolePermissionsIn,
@@ -93,6 +98,12 @@ from .schemas import (
     RoleUpdate,
     RoleUserBindingIn,
     RoleUserReplaceIn,
+    RuleCategoryRead,
+    RuleCreate,
+    RuleListResponse,
+    RuleRead,
+    RuleToggle,
+    RuleUpdate,
     ReasonOption,
     SystemConfigIn,
     SystemIcon,
@@ -204,6 +215,184 @@ HCM_SEED_USERS = [
         "department": "资产管理部",
         "team": "物料治理组",
         "email": "lisi@example.com",
+    },
+]
+DEFAULT_RULE_CATEGORIES = [
+    {
+        "slug": "unit_normalization",
+        "display_name_zh": "单位标准化",
+        "display_name_en": "Unit Normalization",
+        "description_zh": "将物料单位统一为标准写法。",
+        "description_en": "Normalizes material units to standard values.",
+        "icon": "ruler",
+        "sort_order": 10,
+    },
+    {
+        "slug": "brand_alias",
+        "display_name_zh": "品牌别名归一",
+        "display_name_en": "Brand Alias Normalization",
+        "description_zh": "将品牌别名统一为标准品牌名称。",
+        "description_en": "Maps brand aliases to canonical brand names.",
+        "icon": "badge",
+        "sort_order": 20,
+    },
+    {
+        "slug": "title_cleaning",
+        "display_name_zh": "标题格式清洗",
+        "display_name_en": "Title Cleaning",
+        "description_zh": "清理物料标题中的多余空格和非法格式。",
+        "description_en": "Cleans extra whitespace and invalid title formatting.",
+        "icon": "text-cursor-input",
+        "sort_order": 30,
+    },
+    {
+        "slug": "enum_validation",
+        "display_name_zh": "枚举值校验",
+        "display_name_en": "Enum Validation",
+        "description_zh": "校验属性值是否位于允许枚举范围内。",
+        "description_en": "Validates attribute values against allowed enum sets.",
+        "icon": "list-checks",
+        "sort_order": 40,
+    },
+    {
+        "slug": "required_field_check",
+        "display_name_zh": "必填字段检查",
+        "display_name_en": "Required Field Check",
+        "description_zh": "检查物料必填属性是否已填写。",
+        "description_en": "Checks that required material attributes are present.",
+        "icon": "asterisk",
+        "sort_order": 50,
+    },
+    {
+        "slug": "blackwhite_list",
+        "display_name_zh": "黑白名单过滤",
+        "display_name_en": "Blacklist and Whitelist",
+        "description_zh": "根据关键词黑名单或白名单过滤物料。",
+        "description_en": "Filters materials with blacklist or whitelist keywords.",
+        "icon": "shield-check",
+        "sort_order": 60,
+    },
+]
+DEFAULT_RULES = [
+    {
+        "category_slug": "unit_normalization",
+        "name": "KG 转 kg",
+        "description": "将 KG 统一为 kg。",
+        "pattern": "KG",
+        "value": "kg",
+        "options": {"match": "exact_ignore_case"},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "unit_normalization",
+        "name": "公斤 转 kg",
+        "description": "将中文公斤统一为 kg。",
+        "pattern": "公斤",
+        "value": "kg",
+        "options": {"match": "exact"},
+        "priority": 20,
+        "enabled": True,
+    },
+    {
+        "category_slug": "brand_alias",
+        "name": "苹果 转 Apple",
+        "description": "将苹果品牌别名统一为 Apple。",
+        "pattern": "苹果",
+        "value": "Apple",
+        "options": {"match": "exact"},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "brand_alias",
+        "name": "APPLE 转 Apple",
+        "description": "将全大写 APPLE 统一为 Apple。",
+        "pattern": "APPLE",
+        "value": "Apple",
+        "options": {"match": "exact_ignore_case"},
+        "priority": 20,
+        "enabled": True,
+    },
+    {
+        "category_slug": "title_cleaning",
+        "name": "压缩标题空格",
+        "description": "将连续空白压缩为单个空格。",
+        "pattern": "\\s+",
+        "value": " ",
+        "options": {"strip": True},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "title_cleaning",
+        "name": "清理标题首尾标点",
+        "description": "移除标题首尾多余标点。",
+        "pattern": "^[,，。.;；\\s]+|[,，。.;；\\s]+$",
+        "value": "",
+        "options": {"strip": True},
+        "priority": 20,
+        "enabled": True,
+    },
+    {
+        "category_slug": "enum_validation",
+        "name": "颜色枚举校验",
+        "description": "颜色必须为 red 或 blue。",
+        "pattern": "color",
+        "value": "red",
+        "options": {"field": "color", "allowed": ["red", "blue"]},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "enum_validation",
+        "name": "状态枚举校验",
+        "description": "状态必须为 normal 或 spare。",
+        "pattern": "status",
+        "value": "normal",
+        "options": {"field": "status", "allowed": ["normal", "spare"]},
+        "priority": 20,
+        "enabled": True,
+    },
+    {
+        "category_slug": "required_field_check",
+        "name": "电压必填",
+        "description": "电压属性必须填写。",
+        "pattern": "voltage",
+        "value": "",
+        "options": {"field": "voltage"},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "required_field_check",
+        "name": "功率必填",
+        "description": "功率属性必须填写。",
+        "pattern": "power",
+        "value": "",
+        "options": {"field": "power"},
+        "priority": 20,
+        "enabled": True,
+    },
+    {
+        "category_slug": "blackwhite_list",
+        "name": "禁用关键词拦截",
+        "description": "标题中不得包含禁用关键词。",
+        "pattern": "禁用",
+        "value": "",
+        "options": {"mode": "blacklist", "keywords": ["禁用", "FORBIDDEN"]},
+        "priority": 10,
+        "enabled": True,
+    },
+    {
+        "category_slug": "blackwhite_list",
+        "name": "淘汰关键词拦截",
+        "description": "标题中不得包含淘汰关键词。",
+        "pattern": "淘汰",
+        "value": "",
+        "options": {"mode": "blacklist", "keywords": ["淘汰", "obsolete"]},
+        "priority": 20,
+        "enabled": True,
     },
 ]
 PERMISSION_CATALOG = [
@@ -321,6 +510,7 @@ def startup() -> None:
         ensure_provider_configs(db)
         ensure_system_config(db)
         ensure_hcm_seed_users(db)
+        ensure_rule_engine_seed(db)
     finally:
         db.close()
 
@@ -594,6 +784,70 @@ def ensure_hcm_seed_users(db: Session) -> None:
             user.account_ownership = "HCM"
             user.status = user.status or "active"
             changed = True
+    if changed:
+        db.commit()
+
+
+def json_options(value: Any) -> dict[str, Any] | list[Any]:
+    if isinstance(value, dict) or isinstance(value, list):
+        return value
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) or isinstance(loaded, list) else {}
+
+
+def options_as_dict(value: Any) -> dict[str, Any]:
+    loaded = json_options(value)
+    return loaded if isinstance(loaded, dict) else {"values": loaded}
+
+
+def ensure_rule_engine_seed(db: Session) -> None:
+    Base.metadata.create_all(bind=engine)
+    changed = False
+    categories_by_slug: dict[str, RuleCategory] = {}
+    for item in DEFAULT_RULE_CATEGORIES:
+        category = db.query(RuleCategory).filter(RuleCategory.slug == item["slug"]).first()
+        if not category:
+            category = RuleCategory(**item)
+            db.add(category)
+            changed = True
+        else:
+            for field in [
+                "display_name_zh",
+                "display_name_en",
+                "description_zh",
+                "description_en",
+                "icon",
+                "sort_order",
+            ]:
+                if getattr(category, field) != item[field]:
+                    setattr(category, field, item[field])
+                    changed = True
+        categories_by_slug[item["slug"]] = category
+    if changed:
+        db.flush()
+    for item in DEFAULT_RULES:
+        category = categories_by_slug[item["category_slug"]]
+        existing = db.query(Rule).filter(Rule.category_id == category.id, Rule.name == item["name"]).first()
+        if existing:
+            continue
+        db.add(
+            Rule(
+                category_id=category.id,
+                name=item["name"],
+                description=item["description"],
+                pattern=item["pattern"],
+                value=item["value"],
+                options=json.dumps(item["options"], ensure_ascii=False),
+                priority=item["priority"],
+                enabled=item["enabled"],
+            )
+        )
+        changed = True
     if changed:
         db.commit()
 
@@ -1162,6 +1416,11 @@ def require_button_permission(auth: AuthContext, permission_key: str) -> None:
         raise HTTPException(status_code=403, detail=f"Missing permission: {permission_key}")
 
 
+def require_super_admin(auth: AuthContext) -> None:
+    if not auth.is_super_admin:
+        raise HTTPException(status_code=403, detail="super_admin role is required")
+
+
 def is_library_in_scope(auth: AuthContext, library_id: int) -> bool:
     return auth.is_super_admin or auth.library_scope_ids is None or library_id in auth.library_scope_ids
 
@@ -1408,6 +1667,40 @@ def category_to_out(category: Category) -> CategoryOut:
         name=category.name,
         description=category.description,
         enabled=category.enabled,
+    )
+
+
+def rule_category_to_out(category: RuleCategory, rule_count: int | None = None) -> RuleCategoryRead:
+    count = len(category.rules) if rule_count is None else rule_count
+    return RuleCategoryRead(
+        id=category.id,
+        slug=category.slug,
+        display_name_zh=category.display_name_zh,
+        display_name_en=category.display_name_en,
+        description_zh=category.description_zh,
+        description_en=category.description_en,
+        icon=category.icon,
+        sort_order=category.sort_order,
+        created_at=category.created_at.isoformat(),
+        rule_count=count,
+    )
+
+
+def rule_to_out(rule: Rule) -> RuleRead:
+    return RuleRead(
+        id=rule.id,
+        category_id=rule.category_id,
+        category_slug=rule.category.slug,
+        category=rule_category_to_out(rule.category),
+        name=rule.name,
+        description=rule.description,
+        pattern=rule.pattern,
+        value=rule.value,
+        options=json_options(rule.options),
+        priority=rule.priority,
+        enabled=rule.enabled,
+        created_at=rule.created_at.isoformat(),
+        updated_at=rule.updated_at.isoformat(),
     )
 
 
@@ -1896,6 +2189,115 @@ def attributes_from_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def compact_space(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" ，,。.;；")
+
+
+def text_matches(value: str, pattern: str, options: dict[str, Any]) -> bool:
+    if not pattern:
+        return False
+    mode = str(options.get("match") or "regex").strip()
+    if mode == "exact":
+        return value == pattern
+    if mode == "exact_ignore_case":
+        return value.casefold() == pattern.casefold()
+    try:
+        return re.search(pattern, value, flags=re.IGNORECASE) is not None
+    except re.error:
+        return pattern.casefold() in value.casefold()
+
+
+def attr_field(options: dict[str, Any], pattern: str, value: str = "") -> str:
+    return str(options.get("field") or options.get("attribute") or pattern or value).strip()
+
+
+def allowed_values(options: dict[str, Any], value: str) -> list[str]:
+    raw = options.get("allowed") or options.get("values") or options.get("options")
+    if isinstance(raw, list):
+        return [str(item) for item in raw if str(item)]
+    if isinstance(raw, str):
+        return normalize_options(raw)
+    return normalize_options(value)
+
+
+def evaluate_rule(rule: Rule, payload: EvaluateRequest) -> EvaluateResult:
+    options = options_as_dict(rule.options)
+    slug = rule.category.slug
+    passed = True
+    message = "规则校验通过"
+    suggestion = ""
+
+    if slug == "unit_normalization":
+        unit = payload.unit.strip()
+        if text_matches(unit, rule.pattern, options) and unit != rule.value:
+            passed = False
+            suggestion = rule.value
+            message = f"单位「{unit}」应标准化为「{rule.value}」。"
+
+    elif slug == "brand_alias":
+        brand = payload.brand.strip()
+        if text_matches(brand, rule.pattern, options) and brand != rule.value:
+            passed = False
+            suggestion = rule.value
+            message = f"品牌「{brand}」应归一为「{rule.value}」。"
+
+    elif slug == "title_cleaning":
+        name = payload.name
+        try:
+            cleaned = re.sub(rule.pattern or r"\s+", rule.value, name)
+        except re.error:
+            cleaned = name.replace(rule.pattern, rule.value)
+        if options.get("strip", True):
+            cleaned = compact_space(cleaned)
+        if cleaned != name:
+            passed = False
+            suggestion = cleaned
+            message = "物料标题存在多余空格或非法格式，建议使用清洗后的名称。"
+
+    elif slug == "enum_validation":
+        field = attr_field(options, rule.pattern)
+        allowed = allowed_values(options, rule.value)
+        actual = payload.attributes.get(field)
+        if allowed and str(actual) not in allowed:
+            passed = False
+            suggestion = allowed[0]
+            message = f"属性「{field}」的值「{actual}」不在允许范围：{', '.join(allowed)}。"
+
+    elif slug == "required_field_check":
+        field = attr_field(options, rule.pattern, rule.value)
+        actual = payload.attributes.get(field)
+        if actual is None or str(actual).strip() == "":
+            passed = False
+            suggestion = field
+            message = f"缺少必填属性「{field}」，请补充该字段。"
+
+    elif slug == "blackwhite_list":
+        text = " ".join([payload.name, payload.brand, payload.unit, json.dumps(payload.attributes, ensure_ascii=False)])
+        keywords = options.get("keywords")
+        if isinstance(keywords, str):
+            keyword_list = normalize_options(keywords)
+        elif isinstance(keywords, list):
+            keyword_list = [str(item) for item in keywords if str(item)]
+        else:
+            keyword_list = normalize_options(rule.pattern)
+        mode = str(options.get("mode") or "blacklist")
+        if mode == "whitelist":
+            if keyword_list and not any(keyword.casefold() in text.casefold() for keyword in keyword_list):
+                passed = False
+                suggestion = "补充白名单关键词或调整物料描述"
+                message = "物料未命中白名单关键词，请确认是否允许入库。"
+        elif any(keyword.casefold() in text.casefold() for keyword in keyword_list):
+            passed = False
+            hit = next(keyword for keyword in keyword_list if keyword.casefold() in text.casefold())
+            suggestion = f"移除或替换受限关键词「{hit}」"
+            message = f"物料命中黑名单关键词「{hit}」，请移除或提交人工复核。"
+
+    return EvaluateResult(
+        category_slug=slug,
+        rule_id=rule.id,
+        rule_name=rule.name,
+        passed=passed,
+        message=message,
+        suggestion=suggestion,
+    )
 
 
 def infer_product_category(text: str) -> tuple[str, str, str]:
@@ -2404,6 +2806,204 @@ def login(payload: AuthLoginIn, db: Session = Depends(get_db)) -> AuthUserOut:
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return auth_to_out(effective_auth_for_user(user, db))
+
+
+def get_rule_or_404(db: Session, rule_id: int) -> Rule:
+    rule = db.get(Rule, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return rule
+
+
+def get_rule_category_or_404(db: Session, category_id: int) -> RuleCategory:
+    category = db.get(RuleCategory, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Rule category not found")
+    return category
+
+
+@app.get("/api/v1/rules/categories", response_model=list[RuleCategoryRead])
+def list_rule_categories(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[RuleCategoryRead]:
+    current_auth(request, db)
+    ensure_rule_engine_seed(db)
+    count_rows = (
+        db.query(Rule.category_id, func.count(Rule.id))
+        .group_by(Rule.category_id)
+        .all()
+    )
+    counts = {category_id: count for category_id, count in count_rows}
+    categories = db.query(RuleCategory).order_by(RuleCategory.sort_order, RuleCategory.id).all()
+    return [rule_category_to_out(category, counts.get(category.id, 0)) for category in categories]
+
+
+@app.get("/api/v1/rules", response_model=RuleListResponse)
+def list_rules(
+    request: Request,
+    category_id: int | None = None,
+    search: str = "",
+    enabled: bool | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> RuleListResponse:
+    current_auth(request, db)
+    ensure_rule_engine_seed(db)
+    query = db.query(Rule).join(RuleCategory)
+    if category_id is not None:
+        query = query.filter(Rule.category_id == category_id)
+    if search.strip():
+        like = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Rule.name.like(like),
+                Rule.description.like(like),
+                Rule.pattern.like(like),
+                Rule.value.like(like),
+            )
+        )
+    if enabled is not None:
+        query = query.filter(Rule.enabled.is_(enabled))
+    total = query.count()
+    pages = (total + page_size - 1) // page_size if total else 0
+    rules = (
+        query.order_by(RuleCategory.sort_order, Rule.priority, Rule.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return RuleListResponse(
+        items=[rule_to_out(rule) for rule in rules],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+    )
+
+
+@app.post("/api/v1/rules", response_model=RuleRead)
+def create_rule(
+    payload: RuleCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RuleRead:
+    require_super_admin(current_auth(request, db))
+    ensure_rule_engine_seed(db)
+    category = get_rule_category_or_404(db, payload.category_id)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Rule name is required")
+    rule = Rule(
+        category_id=category.id,
+        name=name,
+        description=payload.description.strip(),
+        pattern=payload.pattern.strip(),
+        value=payload.value.strip(),
+        options=json.dumps(payload.options, ensure_ascii=False),
+        priority=payload.priority,
+        enabled=payload.enabled,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule_to_out(rule)
+
+
+@app.post("/api/v1/rules/evaluate", response_model=EvaluateResponse)
+def evaluate_rules(
+    payload: EvaluateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> EvaluateResponse:
+    current_auth(request, db)
+    ensure_rule_engine_seed(db)
+    rules = (
+        db.query(Rule)
+        .join(RuleCategory)
+        .filter(Rule.enabled.is_(True))
+        .order_by(RuleCategory.sort_order, Rule.priority, Rule.id)
+        .all()
+    )
+    return EvaluateResponse(results=[evaluate_rule(rule, payload) for rule in rules])
+
+
+@app.get("/api/v1/rules/{rule_id}", response_model=RuleRead)
+def get_rule(
+    rule_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RuleRead:
+    current_auth(request, db)
+    ensure_rule_engine_seed(db)
+    return rule_to_out(get_rule_or_404(db, rule_id))
+
+
+@app.put("/api/v1/rules/{rule_id}", response_model=RuleRead)
+def update_rule(
+    rule_id: int,
+    payload: RuleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RuleRead:
+    require_super_admin(current_auth(request, db))
+    ensure_rule_engine_seed(db)
+    rule = get_rule_or_404(db, rule_id)
+    if payload.category_id is not None:
+        rule.category_id = get_rule_category_or_404(db, payload.category_id).id
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Rule name is required")
+        rule.name = name
+    if payload.description is not None:
+        rule.description = payload.description.strip()
+    if payload.pattern is not None:
+        rule.pattern = payload.pattern.strip()
+    if payload.value is not None:
+        rule.value = payload.value.strip()
+    if payload.options is not None:
+        rule.options = json.dumps(payload.options, ensure_ascii=False)
+    if payload.priority is not None:
+        rule.priority = payload.priority
+    if payload.enabled is not None:
+        rule.enabled = payload.enabled
+    rule.updated_at = now()
+    db.commit()
+    db.refresh(rule)
+    return rule_to_out(rule)
+
+
+@app.patch("/api/v1/rules/{rule_id}/toggle", response_model=RuleRead)
+def toggle_rule(
+    rule_id: int,
+    payload: RuleToggle,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RuleRead:
+    require_super_admin(current_auth(request, db))
+    ensure_rule_engine_seed(db)
+    rule = get_rule_or_404(db, rule_id)
+    rule.enabled = payload.enabled
+    rule.updated_at = now()
+    db.commit()
+    db.refresh(rule)
+    return rule_to_out(rule)
+
+
+@app.delete("/api/v1/rules/{rule_id}")
+def delete_rule(
+    rule_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    require_super_admin(current_auth(request, db))
+    ensure_rule_engine_seed(db)
+    rule = get_rule_or_404(db, rule_id)
+    db.delete(rule)
+    db.commit()
+    return {"deleted": True, "id": rule_id}
 
 
 @app.get("/api/v1/product-names", response_model=list[ProductNameOut])

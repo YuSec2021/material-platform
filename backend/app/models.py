@@ -352,3 +352,40 @@ class FeaturePermission(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     role: Mapped[Role] = relationship(back_populates="permissions")
+
+
+class RuleCategory(Base):
+    __tablename__ = "rule_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name_zh: Mapped[str] = mapped_column(String(160), default="")
+    display_name_en: Mapped[str] = mapped_column(String(160), default="")
+    description_zh: Mapped[str] = mapped_column(Text, default="")
+    description_en: Mapped[str] = mapped_column(Text, default="")
+    icon: Mapped[str] = mapped_column(String(80), default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    rules: Mapped[list["Rule"]] = relationship(
+        back_populates="category",
+        cascade="all, delete-orphan",
+    )
+
+
+class Rule(Base):
+    __tablename__ = "rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("rule_categories.id"), index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    pattern: Mapped[str] = mapped_column(Text, default="")
+    value: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[str] = mapped_column(Text, default="{}")
+    priority: Mapped[int] = mapped_column(Integer, default=100, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    category: Mapped[RuleCategory] = relationship(back_populates="rules")

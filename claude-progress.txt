@@ -1,13 +1,10 @@
-Project summary: Sprints 12-21 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI with SQLite fallback when Docker is unavailable. Current version: v4.3.0.
+Project summary: Sprints 12-23 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLite/PostgreSQL + Qdrant. Current version: v4.5.0.
 
-Sprint 20: Visual Polish, i18n, and E2E Testing
-Status: SPRINT PASS.
-Notes: i18n, toasts, skeleton/empty/error states, ErrorBoundary, responsive design, Playwright smoke tests, WCAG AA accessibility.
-
-Sprint 21: Brand Update: 智料通 and About Dialog
-Status: SPRINT PASS.
-Notes: Branding updated to 智料通, app system copy set to 专属于企业的AI物料中台, About dialog added in MainLayout.
+Sprint 21: Brand Update — 智料通 + About Dialog
+Status: SPRINT PASS. Notes: App renamed to 智料通; About dialog shows version and description.
 
 Sprint 22: Modal Overlay Brightness Optimization
-Status: Implemented and committed for Evaluator CHECK.
-Notes: Shared Modal/Dialog/Sheet/AlertDialog/Drawer overlays use translucent slate dimming; Sprint 22 overlay smoke test added.
+Status: SPRINT PASS. Notes: All shared overlays (Dialog/Sheet/Drawer) use translucent slate dimming instead of opaque black.
+
+Sprint 23: AI Management UI — super_admin only
+Status: SPRINT PASS. Notes: /ai/providers CRUD, /ai/capability-mappings, /ai/token-usage; SuperAdminRoute guard; i18n zh-CN/en-US.
