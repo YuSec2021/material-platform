@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import {
+  BrainCircuit,
   Bug,
   ChevronDown,
   Database,
@@ -41,7 +42,7 @@ interface MenuItem {
   }[];
 }
 
-function buildMenuItems(t: (key: string) => string): MenuItem[] {
+function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): MenuItem[] {
   const items: MenuItem[] = [
     {
       key: "standard",
@@ -89,6 +90,19 @@ function buildMenuItems(t: (key: string) => string): MenuItem[] {
       ],
     },
   ];
+
+  if (isSuperAdmin) {
+    items.push({
+      key: "ai",
+      title: t("nav.aiManagement"),
+      icon: <BrainCircuit className="h-5 w-5" />,
+      children: [
+        { key: "aiProviders", title: t("nav.aiProviders"), path: "/ai/providers" },
+        { key: "aiCapabilityMappings", title: t("nav.aiCapabilityMappings"), path: "/ai/capability-mappings" },
+        { key: "aiTokenUsage", title: t("nav.aiTokenUsage"), path: "/ai/token-usage" },
+      ],
+    });
+  }
 
   if (import.meta.env.DEV) {
     items.push({
@@ -185,12 +199,13 @@ export function MainLayout() {
     "standard",
     "material",
     "applications",
+    "ai",
     "system",
     "debug",
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const menuItems = buildMenuItems(t);
+  const menuItems = buildMenuItems(t, Boolean(auth.user?.is_super_admin));
 
   const toggleMenu = (key: string) => {
     setExpandedMenus((prev) =>

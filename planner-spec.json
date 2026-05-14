@@ -362,6 +362,40 @@
         "OSS file storage integration (SaaS)",
         "Final bug fixes and UX polish"
       ]
+    },
+    {
+      "id": 21,
+      "title": "Brand Update: 智料通 and About Dialog",
+      "features": [
+        "Update frontend i18n app branding from AI物料中台 to 智料通",
+        "Update app.system copy to 专属于企业的AI物料中台",
+        "Add a top-bar 关于 button next to the user avatar in MainLayout",
+        "Show an About modal or alert dialog with name 智料通, version v4.2.0, and description 专属于企业的AI物料中台",
+        "Restrict implementation to prototype_code/src/ with no backend API changes"
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Modal Overlay Brightness Optimization",
+      "features": [
+        "Adjust shared Dialog/Sheet/Modal overlay styling so modal backgrounds are semi-transparent instead of fully black",
+        "Preserve visual page context behind create/edit dialogs while dimming the background",
+        "Apply the overlay behavior consistently to all frontend create/edit dialogs such as 新增品牌 and 新建物料库",
+        "Restrict implementation to prototype_code/src/ style or component files with no backend API changes"
+      ]
+    },
+    {
+      "id": 23,
+      "title": "AI Management UI: Model Gateway and Capability Mapping",
+      "features": [
+        "Add a super_admin-only AI管理 navigation module with routes for model providers, capability mappings, and token usage statistics",
+        "Implement /ai/providers frontend CRUD for ModelConfig fields including display name, provider, model_name, base_url, API key password input, timeout, enabled state, connection status, and test connection actions",
+        "Implement /ai/capability-mappings UI for configuring primary and fallback models for material_add, material_match, category_match, material_analysis, attr_recommend, and material_governance",
+        "Implement /ai/token-usage as a simple statistics dashboard aggregating call count, capability distribution, and model distribution from existing /api/v1/debug/trace data",
+        "Restrict AI management navigation and routes to super_admin users, redirecting non-super_admin users to the home page",
+        "Follow existing shadcn-ui layout and zh-CN/en-US i18n patterns, with status badges for ok, error, and untested connection states",
+        "Restrict implementation to frontend code under prototype_code/src/ with no backend API changes"
+      ]
     }
   ]
 }
