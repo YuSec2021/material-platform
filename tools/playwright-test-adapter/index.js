@@ -30,6 +30,9 @@ function globalPackageDir() {
 function resolvePlaywrightTest() {
   const candidates = [
     process.env.PLAYWRIGHT_PACKAGE_DIR || "",
+    path.resolve(__dirname, "../../node_modules/playwright"),
+    path.resolve(process.cwd(), "node_modules/playwright"),
+    path.resolve(process.cwd(), "../node_modules/playwright"),
     packageDirFromBinary(process.argv[1]),
     packageDirFromBinary(childProcess.spawnSync("which", ["playwright"], { encoding: "utf8" }).stdout?.trim()),
     globalPackageDir()
