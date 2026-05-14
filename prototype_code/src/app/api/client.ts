@@ -421,6 +421,79 @@ export type TraceSummary = Record<string, unknown> & {
   children?: TraceSpan[];
 };
 
+export type TraceDetail = {
+  trace_id: string;
+  spans: TraceSpan[];
+  storage_table: string;
+};
+
+export type AiCapability =
+  | "material_add"
+  | "material_match"
+  | "category_match"
+  | "material_analysis"
+  | "attr_recommend"
+  | "material_governance";
+
+export type AiProviderConfig = {
+  id: number;
+  display_name: string;
+  provider: string;
+  model: string;
+  model_name: string;
+  endpoint: string;
+  base_url: string;
+  api_key_masked: string;
+  capabilities: AiCapability[];
+  active: boolean;
+  enabled: boolean;
+  timeout_seconds: number;
+  fallback_model_id: number | null;
+  connection_status: "ok" | "error" | "untested" | string;
+  last_test_message: string;
+  last_test_at: string | null;
+  updated_at: string;
+};
+
+export type AiProviderPayload = {
+  display_name: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  api_key?: string;
+  timeout_seconds: number;
+  enabled: boolean;
+  capabilities?: AiCapability[];
+  fallback_model_id?: number | null;
+};
+
+export type AiProviderTestResult = {
+  ok: boolean;
+  provider: string;
+  model: string;
+  capabilities?: AiCapability[];
+  status: "ok" | "error" | "untested" | string;
+  message: string;
+};
+
+export type AiCapabilityMapping = {
+  id: number;
+  capability: AiCapability;
+  primary_model_id: number;
+  primary_model_name: string;
+  fallback_model_id: number | null;
+  fallback_model_name: string;
+  enabled: boolean;
+  updated_at: string;
+};
+
+export type AiCapabilityMappingPayload = {
+  capability: AiCapability;
+  primary_model_id: number;
+  fallback_model_id: number | null;
+  enabled: boolean;
+};
+
 export type ReferenceImagePayload = {
   filename: string;
   content_type: string;
@@ -815,8 +888,38 @@ export const apiClient = {
       body: payload,
     });
   },
+  aiProviders() {
+    return request<AiProviderConfig[]>("/ai/providers");
+  },
+  createAiProvider(payload: AiProviderPayload) {
+    return request<AiProviderConfig>("/ai/providers", { method: "POST", body: payload });
+  },
+  updateAiProvider(id: number, payload: AiProviderPayload) {
+    return request<AiProviderConfig>(`/ai/providers/${id}`, { method: "PUT", body: payload });
+  },
+  deleteAiProvider(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/ai/providers/${id}`, { method: "DELETE" });
+  },
+  disableAiProvider(id: number) {
+    return request<AiProviderConfig>(`/ai/providers/${id}/disable`, { method: "PATCH" });
+  },
+  testAiProviderDraft(payload: AiProviderPayload) {
+    return request<AiProviderTestResult>("/ai/providers/test", { method: "POST", body: payload });
+  },
+  testAiProvider(id: number) {
+    return request<AiProviderTestResult>(`/ai/providers/${id}/test`, { method: "POST" });
+  },
+  aiCapabilityMappings() {
+    return request<AiCapabilityMapping[]>("/ai/capability-mappings");
+  },
+  updateAiCapabilityMapping(capability: AiCapability, payload: AiCapabilityMappingPayload) {
+    return request<AiCapabilityMapping>(`/ai/capability-mappings/${capability}`, { method: "PUT", body: payload });
+  },
   debugTrace() {
     return request<TraceSummary[]>("/debug/trace");
+  },
+  debugTraceDetail(traceId: string) {
+    return request<TraceDetail>(`/debug/trace/${encodeURIComponent(traceId)}`);
   },
 };
 

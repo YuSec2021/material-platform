@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { SuperAdminRoute } from "./auth/SuperAdminRoute";
 import { MainLayout } from "./components/layouts/MainLayout";
 import { Dashboard } from "./components/pages/Dashboard";
 import { LoginPage } from "./components/pages/LoginPage";
@@ -7,6 +8,7 @@ import { ApiClientHealth } from "./components/pages/dev/ApiClientHealth";
 import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
 import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
+import { AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
 
 // 标准管理
 import { CategoryLibraryList } from "./components/pages/standard/CategoryLibraryList";
@@ -96,6 +98,17 @@ export const router = createBrowserRouter([
           { path: "system/info", Component: SystemInfo },
           { path: "system/reason-options", Component: ReasonOptions },
           { path: "system/approval-mode", Component: ApprovalMode },
+
+          // AI管理
+          {
+            path: "ai",
+            Component: SuperAdminRoute,
+            children: [
+              { path: "providers", Component: AiProvidersPage },
+              { path: "capability-mappings", Component: AiCapabilityMappingsPage },
+              { path: "token-usage", Component: AiTokenUsagePage },
+            ],
+          },
 
           // Sprint 13 and 14 dev verification
           { path: "dev/frontend-health", Component: FrontendHealth },
