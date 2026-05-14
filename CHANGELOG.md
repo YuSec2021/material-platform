@@ -43,3 +43,5 @@
 - The About button is correctly placed in the top bar, next to the user avatar.
 - All three required data points are present in the About dialog. Modal is a native browser dialog component.
 - Both routes load correctly with full content. Brand update did not break any existing navigation flows.
+
+## v4.4.0 — Sprint 22 [MINOR bump]
