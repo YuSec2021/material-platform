@@ -45,3 +45,11 @@
 - Both routes load correctly with full content. Brand update did not break any existing navigation flows.
 
 ## v4.4.0 — Sprint 22 [MINOR bump]
+
+## v4.5.0 — Sprint 23 [MINOR bump]
+- All three AI management pages load without errors and display expected titles and content areas.
+- CRUD dialog renders all contracted fields. Password masking confirmed on both input and display. Connection test executes.
+- All six AI capability domains listed with primary and fallback model selectors.
+- All three summary sections render. Page handles empty state gracefully.
+- Non-super_admin user is fully blocked from AI management routes at both navigation and route guard levels.
+- Both Chinese and English translations render correctly. Existing routes unaffected.
