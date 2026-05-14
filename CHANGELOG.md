@@ -53,3 +53,5 @@
 - All three summary sections render. Page handles empty state gracefully.
 - Non-super_admin user is fully blocked from AI management routes at both navigation and route guard levels.
 - Both Chinese and English translations render correctly. Existing routes unaffected.
+
+## v5.0.0 — Sprint 24 [MAJOR bump]

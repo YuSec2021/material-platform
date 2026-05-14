@@ -230,6 +230,13 @@
       "module": "system_admin",
       "description": "All write operations logged: user/resource/action/before_value/after_value/timestamp/source (human/AI/system). Log list with filters (time range, type, resource, user). Change detail with before/after diff. Role-based visibility. Export to Excel for compliance.",
       "priority": "P0"
+    },
+    {
+      "id": "F21",
+      "name": "Rule Engine (Layer 2 Deterministic Rules)",
+      "module": "ai_infrastructure",
+      "description": "Deterministic rule engine for material governance, executed before AI models to reduce LLM cost. Six rule categories: unit standardization (kg/KG/公斤 -> kg), brand alias normalization (苹果/Apple/APPLE -> Apple), title format cleaning (strip special chars, extra spaces, illegal prefixes), enum value validation (check attribute values against allowed options), required field check (verify mandatory attributes are filled), and blacklist/whitelist filtering (keyword-based block or pass). Each rule has category, pattern/value/options fields, priority ordering, and enabled/disabled state. Evaluate endpoint accepts material fields and returns per-rule pass/fail results. Backend CRUD APIs for categories and rules. Frontend management UI with super_admin-only editing, read-only access for regular users, and zh-CN/en-US i18n.",
+      "priority": "P0"
     }
   ],
   "sprints": [
@@ -395,6 +402,46 @@
         "Restrict AI management navigation and routes to super_admin users, redirecting non-super_admin users to the home page",
         "Follow existing shadcn-ui layout and zh-CN/en-US i18n patterns, with status badges for ok, error, and untested connection states",
         "Restrict implementation to frontend code under prototype_code/src/ with no backend API changes"
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Backend Rule Engine: DB Tables, CRUD APIs, and Evaluate Endpoint",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl / httpx against /api/v1/rules endpoints"
+      },
+      "features": [
+        "F21-RuleCategory model: id, slug (unit_normalization, brand_alias, title_cleaning, enum_validation, required_field_check, blackwhite_list), display_name_zh, display_name_en, description_zh, description_en, icon, sort_order, created_at",
+        "F21-Rule model: id, category_id (FK to RuleCategory), name, description, pattern (regex or keyword), value (replacement or target), options (JSON for enum lists, whitelist/blacklist arrays), priority (integer for execution order), enabled (boolean), created_at, updated_at",
+        "F21-Seed migration: auto-populate all 6 RuleCategory rows on first startup, plus at least 2 default Rule examples per category (12+ seeded rules total covering kg normalization, Apple brand alias, title whitespace strip, sample enum options, sample required fields, sample blacklist keywords)",
+        "F21-GET /api/v1/rules/categories: list all rule categories with rule counts, sorted by sort_order",
+        "F21-CRUD /api/v1/rules: GET (list with ?category_id filter, ?search query, ?enabled filter, pagination), POST (create), GET /:id (detail), PUT /:id (update), DELETE /:id",
+        "F21-PATCH /api/v1/rules/:id/toggle: toggle enabled/disabled state for a single rule",
+        "F21-POST /api/v1/rules/evaluate: accept a JSON body with material fields (name, brand, unit, attributes dict), run all enabled rules in priority order grouped by category, return structured result array with category_slug, rule_id, rule_name, passed (boolean), message (human-readable zh-CN explanation), and suggestion (corrected value if applicable)",
+        "F21-Pydantic v2 schemas: RuleCategoryRead, RuleCreate, RuleUpdate, RuleRead, RuleToggle, EvaluateRequest, EvaluateResult, EvaluateResponse",
+        "F21-All rule write endpoints (POST, PUT, DELETE, PATCH toggle) require super_admin role check via existing auth middleware"
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Frontend Rule Engine UI: Management Pages with i18n and Access Control",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F21-Add navigation entry for Rule Engine module (规则引擎 / Rule Engine) in sidebar, positioned after AI管理, with a Shield or Cog icon consistent with the design language",
+        "F21-Route /rules/categories: rule category list page showing all 6 categories as cards or table rows with icon, display name (i18n), description, and rule count badge; clicking a category navigates to the filtered rule list",
+        "F21-Route /rules: rule list page with DataTable showing columns for name, category, pattern/value preview, priority, enabled toggle switch, and actions; supports filtering by category_id dropdown, search by name/pattern, and pagination",
+        "F21-Enabled/disabled toggle: inline Switch component in the rule list that calls PATCH /api/v1/rules/:id/toggle; only visible to super_admin, disabled for regular users",
+        "F21-Route /rules/new: create rule form with fields for category (select), name, description, pattern, value, options (JSON editor or tag input depending on category), priority (number), and enabled (checkbox); form validation with required fields",
+        "F21-Route /rules/:id/edit: edit rule form pre-populated from GET /api/v1/rules/:id; same layout as create form",
+        "F21-Super admin access control: all create/edit/delete/toggle actions wrapped with SuperAdminRoute guard or conditional rendering using existing auth context; regular users see read-only rule list without action buttons",
+        "F21-zh-CN and en-US i18n keys added to existing i18n.ts: module name, page titles, table column headers, form labels, validation messages, toast notifications, and empty state messages",
+        "F21-Confirmation dialog before rule deletion with rule name displayed"
       ]
     }
   ]

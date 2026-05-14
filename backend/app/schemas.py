@@ -550,3 +550,86 @@ class AuthUserOut(BaseModel):
     permissions: list[str] = Field(default_factory=list)
     material_library_scope_ids: list[int] | None = None
     roles: list[RoleSummaryOut] = Field(default_factory=list)
+
+
+class RuleCategoryRead(BaseModel):
+    id: int
+    slug: str
+    display_name_zh: str
+    display_name_en: str
+    description_zh: str
+    description_en: str
+    icon: str
+    sort_order: int
+    created_at: str
+    rule_count: int
+
+
+class RuleCreate(BaseModel):
+    category_id: int
+    name: str
+    description: str = ""
+    pattern: str = ""
+    value: str = ""
+    options: dict[str, Any] | list[Any] = Field(default_factory=dict)
+    priority: int = 100
+    enabled: bool = True
+
+
+class RuleUpdate(BaseModel):
+    category_id: int | None = None
+    name: str | None = None
+    description: str | None = None
+    pattern: str | None = None
+    value: str | None = None
+    options: dict[str, Any] | list[Any] | None = None
+    priority: int | None = None
+    enabled: bool | None = None
+
+
+class RuleRead(BaseModel):
+    id: int
+    category_id: int
+    category_slug: str
+    category: RuleCategoryRead
+    name: str
+    description: str
+    pattern: str
+    value: str
+    options: dict[str, Any] | list[Any]
+    priority: int
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class RuleListResponse(BaseModel):
+    items: list[RuleRead]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
+class RuleToggle(BaseModel):
+    enabled: bool
+
+
+class EvaluateRequest(BaseModel):
+    name: str = ""
+    brand: str = ""
+    unit: str = ""
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvaluateResult(BaseModel):
+    category_slug: str
+    rule_id: int
+    rule_name: str
+    passed: bool
+    message: str
+    suggestion: str
+
+
+class EvaluateResponse(BaseModel):
+    results: list[EvaluateResult]
