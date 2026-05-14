@@ -55,3 +55,11 @@
 - Both Chinese and English translations render correctly. Existing routes unaffected.
 
 ## v5.0.0 — Sprint 24 [MAJOR bump]
+
+## v5.1.0 — Sprint 25 [MINOR bump]
+- All steps pass cleanly.
+- Category-to-filtered-list navigation works with category_id query parameter.
+- Core table functionality verified.
+- Create form properly structured with validation controls.
+- The fix correctly wrapped the sidebar entry in the isSuperAdmin guard. Regular users are fully blocked from mutation routes while retaining read-only access.
+- i18n works in both locales, existing routes unaffected.
