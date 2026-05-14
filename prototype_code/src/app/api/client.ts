@@ -494,6 +494,62 @@ export type AiCapabilityMappingPayload = {
   enabled: boolean;
 };
 
+export type RuleCategory = {
+  id: number;
+  slug: string;
+  display_name_zh: string;
+  display_name_en: string;
+  description_zh: string;
+  description_en: string;
+  icon: string;
+  sort_order: number;
+  created_at: string;
+  rule_count: number;
+};
+
+export type Rule = {
+  id: number;
+  category_id: number;
+  category_slug: string;
+  category: RuleCategory;
+  name: string;
+  description: string;
+  pattern: string;
+  value: string;
+  options: Record<string, unknown> | unknown[];
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RuleListResponse = {
+  items: Rule[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+};
+
+export type RuleQueryParams = {
+  category_id?: number | null;
+  search?: string;
+  enabled?: boolean | null;
+  page?: number;
+  page_size?: number;
+};
+
+export type RulePayload = {
+  category_id: number;
+  name: string;
+  description: string;
+  pattern: string;
+  value: string;
+  options: Record<string, unknown> | unknown[];
+  priority: number;
+  enabled: boolean;
+};
+
 export type ReferenceImagePayload = {
   filename: string;
   content_type: string;
@@ -628,7 +684,7 @@ function pathToUrl(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
 }
 
-function withQuery(path: string, params: Record<string, string | number | null | undefined>): string {
+function withQuery(path: string, params: Record<string, string | number | boolean | null | undefined>): string {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {
@@ -914,6 +970,27 @@ export const apiClient = {
   },
   updateAiCapabilityMapping(capability: AiCapability, payload: AiCapabilityMappingPayload) {
     return request<AiCapabilityMapping>(`/ai/capability-mappings/${capability}`, { method: "PUT", body: payload });
+  },
+  ruleCategories() {
+    return request<RuleCategory[]>("/rules/categories");
+  },
+  rules(params: RuleQueryParams = {}) {
+    return request<RuleListResponse>(withQuery("/rules", params));
+  },
+  rule(id: number) {
+    return request<Rule>(`/rules/${id}`);
+  },
+  createRule(payload: RulePayload) {
+    return request<Rule>("/rules", { method: "POST", body: payload });
+  },
+  updateRule(id: number, payload: Partial<RulePayload>) {
+    return request<Rule>(`/rules/${id}`, { method: "PUT", body: payload });
+  },
+  toggleRule(id: number, enabled: boolean) {
+    return request<Rule>(`/rules/${id}/toggle`, { method: "PATCH", body: { enabled } });
+  },
+  deleteRule(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/rules/${id}`, { method: "DELETE" });
   },
   debugTrace() {
     return request<TraceSummary[]>("/debug/trace");

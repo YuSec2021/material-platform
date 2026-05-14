@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Menu,
   Package,
+  ShieldCheck,
   Settings,
   User,
 } from "lucide-react";
@@ -100,6 +101,18 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
         { key: "aiProviders", title: t("nav.aiProviders"), path: "/ai/providers" },
         { key: "aiCapabilityMappings", title: t("nav.aiCapabilityMappings"), path: "/ai/capability-mappings" },
         { key: "aiTokenUsage", title: t("nav.aiTokenUsage"), path: "/ai/token-usage" },
+      ],
+    });
+  }
+
+  if (isSuperAdmin) {
+    items.push({
+      key: "rules",
+      title: t("nav.ruleEngine"),
+      icon: <ShieldCheck className="h-5 w-5" />,
+      children: [
+        { key: "ruleCategories", title: t("nav.ruleCategories"), path: "/rules/categories" },
+        { key: "rules", title: t("nav.rules"), path: "/rules" },
       ],
     });
   }
@@ -200,6 +213,7 @@ export function MainLayout() {
     "material",
     "applications",
     "ai",
+    "rules",
     "system",
     "debug",
   ]);

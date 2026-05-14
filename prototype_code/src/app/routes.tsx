@@ -9,6 +9,7 @@ import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
 import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
 import { AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
+import { RuleCategoryListPage, RuleFormPage, RuleListPage } from "./components/pages/rules/RuleEnginePages";
 
 // 标准管理
 import { CategoryLibraryList } from "./components/pages/standard/CategoryLibraryList";
@@ -107,6 +108,18 @@ export const router = createBrowserRouter([
               { path: "providers", Component: AiProvidersPage },
               { path: "capability-mappings", Component: AiCapabilityMappingsPage },
               { path: "token-usage", Component: AiTokenUsagePage },
+            ],
+          },
+
+          // 规则引擎
+          { path: "rules/categories", Component: RuleCategoryListPage },
+          { path: "rules", Component: RuleListPage },
+          {
+            path: "rules",
+            Component: SuperAdminRoute,
+            children: [
+              { path: "new", Component: RuleFormPage },
+              { path: ":id/edit", Component: RuleFormPage },
             ],
           },
 
