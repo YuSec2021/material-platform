@@ -1,13 +1,13 @@
 {
   "mode": "contract",
-  "current_sprint": 26,
+  "current_sprint": 28,
   "retry_count": 0,
-  "last_successful_sprint": 25,
+  "last_successful_sprint": 27,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-26-code-rule-backend",
+  "active_branch": "main",
   "base_branch": "main",
   "last_run_at": "2026-05-15T00:00:00Z",
-  "sprint_origin": "major_feature",
-  "current_version": "5.1.0"
+  "sprint_origin": "feature",
+  "current_version": "7.0.0"
 }

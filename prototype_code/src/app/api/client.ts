@@ -105,6 +105,15 @@ export type MaterialLibrary = {
   name: string;
   description: string;
   enabled: boolean;
+  auto_code_enabled?: boolean;
+  current_rule_version_id?: number | null;
+  code_rule_summary?: {
+    version?: number;
+    version_no?: number;
+    version_label?: string;
+    status?: string;
+    rule_name?: string;
+  } | null;
 };
 
 export type Material = {
@@ -133,6 +142,8 @@ export type MaterialLibraryPayload = {
   name: string;
   description: string;
   enabled?: boolean;
+  auto_code_enabled?: boolean;
+  code_rule?: Record<string, unknown> | null;
 };
 
 export type MaterialPayload = {

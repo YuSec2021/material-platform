@@ -1,10 +1,7 @@
-Project summary: Sprints 12-24 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy rule engine APIs from Sprint 24. Current version: v5.0.0.
+Project summary: Sprints 12-27 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v7.0.0 (major bump after Sprint 27 batch recoding).
 
-Sprint 23: AI Management UI — super_admin only
-Status: SPRINT PASS. Notes: /ai/providers CRUD, /ai/capability-mappings, /ai/token-usage; SuperAdminRoute guard; i18n zh-CN/en-US.
+Sprint 27: Batch Recoding — Preview, Execution, and Rollback APIs
+Status: SPRINT PASS. Notes: POST recode-preview (all/selected), GET batch, GET preview rows, POST execute, POST rollback, GET code-mappings with CSV export; 3 API tests pass.
 
-Sprint 24: Backend Rule Engine
-Status: SPRINT PASS. Notes: RuleCategory/Rule persistence, seeded categories and rules, CRUD/toggle/evaluate APIs, super_admin write checks.
-
-Sprint 25: Frontend Rule Engine UI
-Status: implemented and committed for evaluator. Notes: added sidebar module, /rules/categories, /rules list, create/edit forms, super_admin-only write controls, delete confirmation, i18n, and focused Playwright spec. Checks: type-check, lint, and build pass; pytest unavailable on Python 3.12 and Python 3.9 runner cannot import backend syntax; local Vite E2E run blocked by sandbox port bind EPERM.
+Sprint 28: Frontend: Create Material Library with Code Rule Configuration
+Status: ready for contract. Next to implement.
