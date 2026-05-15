@@ -71,3 +71,12 @@
 - All validation paths return appropriate error codes and messages. Failed material does not appear in search results.
 - The contract specifies `bash init.sh` to simulate restart; the TestClient harness does not support cross-process persistence testing. This criterion is effectively covered by the other 3 test classes since all models use SQLAlchemy with SQLite persistence and no in-memory state was observed.
 - Authorization gate confirmed for write operations.
+
+## v7.0.0 — Sprint 27 [MAJOR bump]
+- All preview API steps executed correctly. New codes generated with V2 rule fixed text + serial.
+- Validation correctly identifies missing attributes and does not mutate material data.
+- Full execute chain works end-to-end: codes updated, code chain preserved, mapping records created, audit logged.
+- Execution guard works correctly. Idempotency enforced.
+- Rollback chain works correctly with idempotency.
+- All filtering, pagination, and CSV export work correctly.
+- All mutation endpoints properly require super_admin role. Unauthorized requests blocked at 403.
