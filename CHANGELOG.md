@@ -80,3 +80,5 @@
 - Rollback chain works correctly with idempotency.
 - All filtering, pagination, and CSV export work correctly.
 - All mutation endpoints properly require super_admin role. Unauthorized requests blocked at 403.
+
+## v8.0.0 — Sprint 28 [MAJOR bump]
