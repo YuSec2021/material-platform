@@ -1,14 +1,13 @@
 {
-  "mode": "complete",
-  "current_sprint": 25,
+  "mode": "contract",
+  "current_sprint": 26,
   "retry_count": 0,
   "last_successful_sprint": 25,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-25-rule-engine-ui",
+  "active_branch": "codex/sprint-26-code-rule-backend",
   "base_branch": "main",
-  "last_run_at": "2026-05-14T04:54:37Z",
-  "request_kind": "",
+  "last_run_at": "2026-05-15T00:00:00Z",
   "sprint_origin": "major_feature",
   "current_version": "5.1.0"
 }

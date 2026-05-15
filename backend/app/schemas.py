@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -117,18 +119,59 @@ class MaterialLibraryOut(BaseModel):
     name: str
     description: str
     enabled: bool
+    auto_code_enabled: bool = False
+    recode_enabled: bool = False
+    current_rule_version_id: int | None = None
+    code_rule_summary: dict[str, Any] | None = None
+    material_count: int = 0
 
 
 class MaterialLibraryIn(BaseModel):
     name: str
     description: str = ""
     enabled: bool = True
+    auto_code_enabled: bool = False
+    recode_enabled: bool = False
+    code_rule: dict[str, Any] | None = None
 
 
 class MaterialLibraryUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     enabled: bool | None = None
+
+
+class MaterialCodeRuleVersionIn(BaseModel):
+    rule_name: str
+    rule_config: dict[str, Any] | None = None
+    separator: str | None = None
+    segments: list[dict[str, Any]] | None = None
+    change_reason: str = ""
+
+
+class MaterialCodeRuleVersionOut(BaseModel):
+    id: int
+    library_id: int
+    version_no: int
+    version: int
+    version_label: str
+    rule_name: str
+    rule_config: dict[str, Any]
+    segments: list[dict[str, Any]]
+    separator: str
+    status: str
+    change_reason: str
+    created_by: str
+    effective_time: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class MaterialCodeRuleVersionListOut(BaseModel):
+    items: list[MaterialCodeRuleVersionOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class CategoryOut(BaseModel):
@@ -193,6 +236,11 @@ class MaterialOut(BaseModel):
     description: str
     attributes: dict[str, Any]
     lifecycle_history: list[dict[str, Any]] = Field(default_factory=list)
+    original_code: str = ""
+    previous_code: str = ""
+    code_rule_version_id: int | None = None
+    code_change_count: int = 0
+    code_status: str = "manual"
     enabled: bool
     created_at: str
     updated_at: str

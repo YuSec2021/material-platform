@@ -37,6 +37,8 @@ from .models import (
     FeaturePermission,
     LLMProviderConfig,
     Material,
+    MaterialCodeRuleVersion,
+    MaterialCodeSerial,
     MaterialLibrary,
     ModelConfig,
     ProductName,
@@ -75,6 +77,9 @@ from .schemas import (
     MaterialGovernancePreviewIn,
     MaterialMatchIn,
     MaterialIn,
+    MaterialCodeRuleVersionIn,
+    MaterialCodeRuleVersionListOut,
+    MaterialCodeRuleVersionOut,
     MaterialLibraryIn,
     MaterialLibraryOut,
     MaterialLibraryUpdate,
@@ -503,6 +508,7 @@ PERMISSION_CATALOG = [
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_audit_log_schema()
+    ensure_material_code_rule_schema()
     db = next(get_db())
     try:
         ensure_seed_product(db)
@@ -533,6 +539,33 @@ def ensure_audit_log_schema() -> None:
                     for index in legacy_indexes:
                         connection.exec_driver_sql(f"DROP INDEX IF EXISTS {index[0]}")
         AuditLog.__table__.create(bind=connection, checkfirst=True)
+
+
+def ensure_material_code_rule_schema() -> None:
+    if engine.dialect.name != "sqlite":
+        Base.metadata.create_all(bind=engine)
+        return
+    table_columns = {
+        "material_libraries": {
+            "auto_code_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "recode_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "current_rule_version_id": "INTEGER",
+        },
+        "materials": {
+            "original_code": "VARCHAR(64) DEFAULT '' NOT NULL",
+            "previous_code": "VARCHAR(64) DEFAULT '' NOT NULL",
+            "code_rule_version_id": "INTEGER",
+            "code_change_count": "INTEGER DEFAULT 0 NOT NULL",
+            "code_status": "VARCHAR(40) DEFAULT 'manual' NOT NULL",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, columns in table_columns.items():
+            existing = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+            for column_name, ddl in columns.items():
+                if column_name not in existing:
+                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
+        Base.metadata.create_all(bind=connection)
 
 
 def ensure_seed_product(db: Session) -> ProductName:
@@ -1650,13 +1683,206 @@ def brand_to_out(brand: Brand) -> BrandOut:
     )
 
 
-def library_to_out(library: MaterialLibrary) -> MaterialLibraryOut:
+CODE_RULE_ALLOWED_RE = re.compile(r"^[A-Z0-9_-]+$")
+CODE_RULE_SEGMENT_TYPES = {"fixed", "fixed_text", "category_path", "attribute_code", "date", "serial", "serial_number"}
+
+
+def normalize_segment_type(segment: dict[str, Any]) -> str:
+    raw = str(segment.get("type") or segment.get("segment_type") or "").strip().lower()
+    if raw == "fixed_text":
+        return "fixed"
+    if raw == "serial_number":
+        return "serial"
+    if raw in CODE_RULE_SEGMENT_TYPES:
+        return raw
+    raise HTTPException(status_code=422, detail=f"Unsupported code rule segment type: {raw or '<empty>'}")
+
+
+def normalize_code_rule_config(payload: dict[str, Any] | MaterialCodeRuleVersionIn | None) -> dict[str, Any]:
+    if payload is None:
+        raise HTTPException(status_code=422, detail="code_rule is required when auto_code_enabled is true")
+    data = payload.model_dump(exclude_none=True) if isinstance(payload, MaterialCodeRuleVersionIn) else dict(payload)
+    nested = data.get("rule_config") if isinstance(data.get("rule_config"), dict) else {}
+    separator = str(data.get("separator", nested.get("separator", "")) or "")
+    segments = data.get("segments", nested.get("segments", []))
+    if not isinstance(segments, list) or not segments:
+        raise HTTPException(status_code=422, detail="code rule must include at least one segment")
+    normalized_segments: list[dict[str, Any]] = []
+    for index, item in enumerate(segments):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="code rule segments must be objects")
+        segment = dict(item)
+        segment["type"] = normalize_segment_type(segment)
+        segment.setdefault("order", index + 1)
+        normalized_segments.append(segment)
+    return {"separator": separator, "segments": normalized_segments}
+
+
+def code_rule_name(payload: dict[str, Any] | MaterialCodeRuleVersionIn | None, fallback: str = "Material code rule") -> str:
+    if payload is None:
+        return fallback
+    data = payload.model_dump(exclude_none=True) if isinstance(payload, MaterialCodeRuleVersionIn) else dict(payload)
+    return str(data.get("rule_name") or fallback).strip() or fallback
+
+
+def validate_separator(separator: str) -> None:
+    if not separator:
+        return
+    if len(separator) > 1 or not CODE_RULE_ALLOWED_RE.fullmatch(separator):
+        raise HTTPException(status_code=422, detail="Code format only allows uppercase letters, digits, hyphen, and underscore")
+
+
+def validate_code_rule_config(config: dict[str, Any]) -> None:
+    separator = str(config.get("separator") or "")
+    validate_separator(separator)
+    segments = config.get("segments") or []
+    has_uniqueness_segment = False
+    estimated_length = 0
+    for segment in segments:
+        segment_type = normalize_segment_type(segment)
+        if estimated_length and separator:
+            estimated_length += len(separator)
+        if segment_type == "fixed":
+            literal = str(segment.get("value") or segment.get("text") or segment.get("literal") or "")
+            if not literal or not CODE_RULE_ALLOWED_RE.fullmatch(literal):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Code format only allows uppercase letters, digits, hyphen, and underscore",
+                )
+            estimated_length += len(literal)
+        elif segment_type == "date":
+            fmt = str(segment.get("format") or "YYYYMMDD").upper()
+            if fmt not in {"YYYY", "YYMM", "YYYYMM", "YYYYMMDD"}:
+                raise HTTPException(status_code=422, detail="Unsupported date format")
+            estimated_length += len(fmt.replace("Y", "0").replace("M", "0").replace("D", "0"))
+        elif segment_type == "serial":
+            has_uniqueness_segment = True
+            length = int(segment.get("length") or segment.get("padding_length") or 3)
+            if length < 1 or length > 10:
+                raise HTTPException(status_code=422, detail="Serial length must be between 1 and 10")
+            step = int(segment.get("step") or 1)
+            if step < 1:
+                raise HTTPException(status_code=422, detail="Serial step must be at least 1")
+            estimated_length += length
+        elif segment_type == "category_path":
+            has_uniqueness_segment = True
+            estimated_length += int(segment.get("length") or segment.get("max_length") or 8)
+        elif segment_type == "attribute_code":
+            has_uniqueness_segment = True
+            attribute_name = str(segment.get("attribute") or segment.get("attribute_name") or segment.get("name") or "")
+            if not attribute_name:
+                raise HTTPException(status_code=422, detail="Attribute-code segment requires an attribute name")
+            estimated_length += int(segment.get("length") or segment.get("max_length") or 8)
+    if not has_uniqueness_segment:
+        raise HTTPException(status_code=422, detail="At least one uniqueness-producing segment is required")
+    if estimated_length > 64:
+        raise HTTPException(status_code=422, detail="Generated material code maximum length is 64 characters")
+
+
+def rule_config_dict(rule_version: MaterialCodeRuleVersion) -> dict[str, Any]:
+    try:
+        loaded = json.loads(rule_version.rule_config or "{}")
+    except json.JSONDecodeError:
+        loaded = {}
+    if not isinstance(loaded, dict):
+        loaded = {}
+    return normalize_code_rule_config(loaded)
+
+
+def code_rule_summary(rule_version: MaterialCodeRuleVersion | None) -> dict[str, Any] | None:
+    if not rule_version:
+        return None
+    return {
+        "id": rule_version.id,
+        "version_no": rule_version.version_no,
+        "version": rule_version.version_no,
+        "version_label": f"V{rule_version.version_no}",
+        "rule_name": rule_version.rule_name,
+        "status": rule_version.status,
+        "created_by": rule_version.created_by,
+        "effective_time": rule_version.effective_time.isoformat() if rule_version.effective_time else None,
+    }
+
+
+def active_rule_for_library(db: Session, library: MaterialLibrary) -> MaterialCodeRuleVersion | None:
+    if library.current_rule_version_id:
+        rule = db.get(MaterialCodeRuleVersion, library.current_rule_version_id)
+        if rule and rule.library_id == library.id:
+            return rule
+    return (
+        db.query(MaterialCodeRuleVersion)
+        .filter(MaterialCodeRuleVersion.library_id == library.id, MaterialCodeRuleVersion.status == "active")
+        .order_by(MaterialCodeRuleVersion.version_no.desc(), MaterialCodeRuleVersion.id.desc())
+        .first()
+    )
+
+
+def code_rule_version_to_out(rule_version: MaterialCodeRuleVersion) -> MaterialCodeRuleVersionOut:
+    config = rule_config_dict(rule_version)
+    return MaterialCodeRuleVersionOut(
+        id=rule_version.id,
+        library_id=rule_version.library_id,
+        version_no=rule_version.version_no,
+        version=rule_version.version_no,
+        version_label=f"V{rule_version.version_no}",
+        rule_name=rule_version.rule_name,
+        rule_config=config,
+        segments=list(config.get("segments") or []),
+        separator=str(config.get("separator") or ""),
+        status=rule_version.status,
+        change_reason=rule_version.change_reason,
+        created_by=rule_version.created_by,
+        effective_time=rule_version.effective_time.isoformat() if rule_version.effective_time else None,
+        created_at=rule_version.created_at.isoformat(),
+        updated_at=rule_version.updated_at.isoformat(),
+    )
+
+
+def create_code_rule_version(
+    db: Session,
+    library: MaterialLibrary,
+    payload: dict[str, Any] | MaterialCodeRuleVersionIn,
+    status: str,
+    created_by: str,
+) -> MaterialCodeRuleVersion:
+    config = normalize_code_rule_config(payload)
+    validate_code_rule_config(config)
+    latest = (
+        db.query(func.max(MaterialCodeRuleVersion.version_no))
+        .filter(MaterialCodeRuleVersion.library_id == library.id)
+        .scalar()
+        or 0
+    )
+    data = payload.model_dump(exclude_none=True) if isinstance(payload, MaterialCodeRuleVersionIn) else dict(payload)
+    rule_version = MaterialCodeRuleVersion(
+        library_id=library.id,
+        version_no=int(latest) + 1,
+        rule_name=code_rule_name(payload, f"{library.name} code rule"),
+        rule_config=json.dumps(config, ensure_ascii=False),
+        status=status,
+        change_reason=str(data.get("change_reason") or "").strip(),
+        created_by=created_by,
+        effective_time=now() if status == "active" else None,
+    )
+    db.add(rule_version)
+    db.flush()
+    return rule_version
+
+
+def library_to_out(library: MaterialLibrary, db: Session | None = None) -> MaterialLibraryOut:
+    active_rule = active_rule_for_library(db, library) if db is not None else None
+    material_count = db.query(Material).filter(Material.material_library_id == library.id).count() if db is not None else len(library.materials)
     return MaterialLibraryOut(
         id=library.id,
         code=library.code,
         name=library.name,
         description=library.description,
         enabled=library.enabled,
+        auto_code_enabled=library.auto_code_enabled,
+        recode_enabled=library.recode_enabled,
+        current_rule_version_id=library.current_rule_version_id,
+        code_rule_summary=code_rule_summary(active_rule),
+        material_count=material_count,
     )
 
 
@@ -1716,6 +1942,158 @@ def material_attributes(value: str | dict[str, Any] | None) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def sanitize_code_part(value: str, field_name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "", str(value or "")).upper()
+    if not cleaned or not CODE_RULE_ALLOWED_RE.fullmatch(cleaned):
+        raise HTTPException(status_code=422, detail=f"Code format invalid for {field_name}")
+    return cleaned
+
+
+def render_date_segment(fmt: str) -> str:
+    today = datetime.now()
+    normalized = fmt.upper()
+    if normalized == "YYYY":
+        return today.strftime("%Y")
+    if normalized == "YYMM":
+        return today.strftime("%y%m")
+    if normalized == "YYYYMM":
+        return today.strftime("%Y%m")
+    if normalized == "YYYYMMDD":
+        return today.strftime("%Y%m%d")
+    raise HTTPException(status_code=422, detail="Unsupported date format")
+
+
+def attribute_mapping(segment: dict[str, Any]) -> dict[str, str]:
+    mapping = (
+        segment.get("value_to_code")
+        or segment.get("value_to_code_mapping")
+        or segment.get("mapping")
+        or segment.get("mappings")
+        or {}
+    )
+    if isinstance(mapping, list):
+        result: dict[str, str] = {}
+        for item in mapping:
+            if isinstance(item, dict):
+                key = str(item.get("value") or item.get("name") or "").strip()
+                code = str(item.get("code") or "").strip()
+                if key and code:
+                    result[key] = code
+        return result
+    if isinstance(mapping, dict):
+        return {str(key): str(value) for key, value in mapping.items()}
+    return {}
+
+
+def serial_scope_key(segment: dict[str, Any], material_data: dict[str, Any]) -> str:
+    scope = str(segment.get("scope") or "global").strip().lower()
+    if scope == "global":
+        base = "global"
+    elif scope == "category":
+        base = f"category:{material_data['category'].id}"
+    elif scope == "category_attribute":
+        attribute_name = str(segment.get("scope_attribute") or segment.get("attribute") or segment.get("attribute_name") or "")
+        value = material_data["attributes"].get(attribute_name, "")
+        base = f"category_attribute:{material_data['category'].id}:{attribute_name}:{value}"
+    elif scope == "year":
+        base = f"year:{datetime.now().strftime('%Y')}"
+    elif scope == "month":
+        base = f"month:{datetime.now().strftime('%Y%m')}"
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported serial scope")
+    reset = str(segment.get("reset") or segment.get("reset_by") or "").strip().lower()
+    if reset == "year" and not base.startswith("year:"):
+        base = f"{base}:year:{datetime.now().strftime('%Y')}"
+    if reset == "month" and not base.startswith("month:"):
+        base = f"{base}:month:{datetime.now().strftime('%Y%m')}"
+    return base
+
+
+def next_serial_value(
+    db: Session,
+    library_id: int,
+    rule_version_id: int,
+    segment: dict[str, Any],
+    material_data: dict[str, Any],
+) -> str:
+    length = int(segment.get("length") or segment.get("padding_length") or 3)
+    start = int(segment.get("start") or segment.get("start_value") or 1)
+    step = int(segment.get("step") or 1)
+    scope_key = serial_scope_key(segment, material_data)
+    serial = (
+        db.query(MaterialCodeSerial)
+        .filter(
+            MaterialCodeSerial.library_id == library_id,
+            MaterialCodeSerial.rule_version_id == rule_version_id,
+            MaterialCodeSerial.scope_key == scope_key,
+        )
+        .first()
+    )
+    if not serial:
+        serial = MaterialCodeSerial(
+            library_id=library_id,
+            rule_version_id=rule_version_id,
+            scope_key=scope_key,
+            current_value=start - step,
+        )
+        db.add(serial)
+        db.flush()
+    serial.current_value += step
+    serial.updated_at = now()
+    rendered = str(serial.current_value)
+    if bool(segment.get("padding", True)) and str(segment.get("padding")) != "none":
+        rendered = rendered.zfill(length)
+    if len(rendered) > length:
+        raise HTTPException(status_code=422, detail="Serial value exceeds configured serial length")
+    return rendered
+
+
+def generate_material_code(
+    db: Session,
+    tenant_id: str,
+    library_id: int,
+    material: dict[str, Any],
+    rule_version: MaterialCodeRuleVersion,
+) -> str:
+    del tenant_id
+    config = rule_config_dict(rule_version)
+    validate_code_rule_config(config)
+    parts: list[str] = []
+    for segment in config["segments"]:
+        segment_type = normalize_segment_type(segment)
+        if segment_type == "fixed":
+            parts.append(sanitize_code_part(str(segment.get("value") or segment.get("text") or segment.get("literal") or ""), "fixed segment"))
+        elif segment_type == "date":
+            parts.append(render_date_segment(str(segment.get("format") or "YYYYMMDD")))
+        elif segment_type == "category_path":
+            category = material["category"]
+            source = str(segment.get("source") or "code")
+            raw = category.name if source == "name" else category.code
+            value = sanitize_code_part(raw, "category path")
+            length = int(segment.get("length") or segment.get("max_length") or 0)
+            parts.append(value[:length] if length else value)
+        elif segment_type == "attribute_code":
+            attribute_name = str(segment.get("attribute") or segment.get("attribute_name") or segment.get("name") or "")
+            attributes = material["attributes"]
+            if attribute_name not in attributes or attributes.get(attribute_name) in (None, ""):
+                raise HTTPException(status_code=422, detail=f"Missing attribute for code generation: {attribute_name}")
+            attribute_value = str(attributes[attribute_name])
+            mapping = attribute_mapping(segment)
+            raw = mapping.get(attribute_value) or mapping.get(attribute_value.strip()) or attribute_value
+            parts.append(sanitize_code_part(raw, f"attribute {attribute_name}"))
+        elif segment_type == "serial":
+            parts.append(next_serial_value(db, library_id, rule_version.id, segment, material))
+    code = str(config.get("separator") or "").join(parts)
+    if len(code) > 64:
+        raise HTTPException(status_code=422, detail="Generated material code maximum length is 64 characters")
+    if not CODE_RULE_ALLOWED_RE.fullmatch(code):
+        raise HTTPException(status_code=422, detail="Generated code format only allows uppercase letters, digits, hyphen, and underscore")
+    duplicate = db.query(Material).filter(Material.code == code).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Generated material code must be unique")
+    return code
+
+
 def material_to_out(material: Material) -> MaterialOut:
     attributes = material_attributes(material.attributes)
     lifecycle_history = attributes.get("_lifecycle_history", [])
@@ -1738,6 +2116,11 @@ def material_to_out(material: Material) -> MaterialOut:
         description=material.description,
         attributes=attributes,
         lifecycle_history=lifecycle_history,
+        original_code=material.original_code,
+        previous_code=material.previous_code,
+        code_rule_version_id=material.code_rule_version_id,
+        code_change_count=material.code_change_count,
+        code_status=material.code_status,
         enabled=material.enabled,
         created_at=material.created_at.isoformat(),
         updated_at=material.updated_at.isoformat(),
@@ -3026,7 +3409,7 @@ def list_material_libraries(
     if not auth.is_super_admin and auth.library_scope_ids is not None:
         query = query.filter(MaterialLibrary.id.in_(auth.library_scope_ids or {-1}))
     libraries = query.order_by(MaterialLibrary.id).all()
-    return [library_to_out(library) for library in libraries]
+    return [library_to_out(library, db) for library in libraries]
 
 
 @app.post("/api/v1/material-libraries", response_model=MaterialLibraryOut)
@@ -3036,21 +3419,31 @@ def create_material_library(
     auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
 ) -> MaterialLibraryOut:
     require_button_permission(auth, "button.material_library.create")
+    if payload.auto_code_enabled or payload.code_rule is not None:
+        require_super_admin(auth)
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Material library name is required")
     if db.query(MaterialLibrary).filter(MaterialLibrary.name == name).first():
         raise HTTPException(status_code=409, detail="Material library name must be unique")
+    if payload.auto_code_enabled:
+        normalize_code_rule_config(payload.code_rule)
     library = MaterialLibrary(
         code=next_unique_code(db, MaterialLibrary, "MLIB", f"{name}:{now().isoformat()}"),
         name=name,
         description=payload.description.strip(),
         enabled=payload.enabled,
+        auto_code_enabled=payload.auto_code_enabled,
+        recode_enabled=payload.recode_enabled,
     )
     db.add(library)
+    db.flush()
+    if payload.auto_code_enabled:
+        rule_version = create_code_rule_version(db, library, payload.code_rule or {}, "active", auth.username)
+        library.current_rule_version_id = rule_version.id
     db.commit()
     db.refresh(library)
-    return library_to_out(library)
+    return library_to_out(library, db)
 
 
 @app.get("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
@@ -3063,7 +3456,7 @@ def get_material_library(
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
     require_library_scope(auth, library.id)
-    return library_to_out(library)
+    return library_to_out(library, db)
 
 
 @app.put("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
@@ -3093,7 +3486,86 @@ def update_material_library(
     library.updated_at = now()
     db.commit()
     db.refresh(library)
-    return library_to_out(library)
+    return library_to_out(library, db)
+
+
+@app.get("/api/v1/material-libraries/{library_id}/code-rules/current", response_model=MaterialCodeRuleVersionOut)
+def get_current_code_rule(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialCodeRuleVersionOut:
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    rule_version = active_rule_for_library(db, library)
+    if not rule_version:
+        raise HTTPException(status_code=404, detail="Active code rule not found")
+    return code_rule_version_to_out(rule_version)
+
+
+@app.get("/api/v1/material-libraries/{library_id}/code-rules/versions", response_model=MaterialCodeRuleVersionListOut)
+def list_code_rule_versions(
+    library_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialCodeRuleVersionListOut:
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    query = db.query(MaterialCodeRuleVersion).filter(MaterialCodeRuleVersion.library_id == library.id)
+    total = query.count()
+    versions = (
+        query.order_by(MaterialCodeRuleVersion.version_no.desc(), MaterialCodeRuleVersion.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return MaterialCodeRuleVersionListOut(
+        items=[code_rule_version_to_out(rule_version) for rule_version in versions],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@app.post("/api/v1/material-libraries/{library_id}/code-rules/versions", response_model=MaterialCodeRuleVersionOut)
+def create_code_rule_version_endpoint(
+    library_id: int,
+    payload: MaterialCodeRuleVersionIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
+) -> MaterialCodeRuleVersionOut:
+    require_super_admin(auth)
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    rule_version = create_code_rule_version(db, library, payload, "draft", auth.username)
+    db.commit()
+    db.refresh(rule_version)
+    return code_rule_version_to_out(rule_version)
+
+
+@app.get("/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}", response_model=MaterialCodeRuleVersionOut)
+def get_code_rule_version(
+    library_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialCodeRuleVersionOut:
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    rule_version = db.get(MaterialCodeRuleVersion, version_id)
+    if not rule_version or rule_version.library_id != library.id:
+        raise HTTPException(status_code=404, detail="Code rule version not found")
+    return code_rule_version_to_out(rule_version)
 
 
 @app.delete("/api/v1/material-libraries/{library_id}")
@@ -3967,8 +4439,22 @@ def create_material(
     brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
     if payload.brand_id and not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
+    active_rule = active_rule_for_library(db, library) if library.auto_code_enabled else None
+    material_code = next_unique_code(db, Material, "MAT", f"{product.id}:{payload.name}:{now().isoformat()}")
+    code_status = "manual"
+    if library.auto_code_enabled:
+        if not active_rule:
+            raise HTTPException(status_code=422, detail="Active code rule is required for auto-code material library")
+        material_code = generate_material_code(
+            db,
+            "default",
+            library.id,
+            {"product": product, "library": library, "category": category, "attributes": payload.attributes},
+            active_rule,
+        )
+        code_status = "active"
     material = Material(
-        code=next_unique_code(db, Material, "MAT", f"{product.id}:{payload.name}:{now().isoformat()}"),
+        code=material_code,
         name=payload.name,
         product_name_id=product.id,
         material_library_id=library.id,
@@ -3978,6 +4464,9 @@ def create_material(
         status=status,
         description=payload.description,
         attributes=json.dumps(payload.attributes, ensure_ascii=False),
+        code_rule_version_id=active_rule.id if active_rule else None,
+        code_change_count=0,
+        code_status=code_status,
         enabled=payload.enabled,
     )
     db.add(material)

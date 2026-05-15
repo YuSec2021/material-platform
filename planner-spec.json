@@ -237,6 +237,20 @@
       "module": "ai_infrastructure",
       "description": "Deterministic rule engine for material governance, executed before AI models to reduce LLM cost. Six rule categories: unit standardization (kg/KG/公斤 -> kg), brand alias normalization (苹果/Apple/APPLE -> Apple), title format cleaning (strip special chars, extra spaces, illegal prefixes), enum value validation (check attribute values against allowed options), required field check (verify mandatory attributes are filled), and blacklist/whitelist filtering (keyword-based block or pass). Each rule has category, pattern/value/options fields, priority ordering, and enabled/disabled state. Evaluate endpoint accepts material fields and returns per-rule pass/fail results. Backend CRUD APIs for categories and rules. Frontend management UI with super_admin-only editing, read-only access for regular users, and zh-CN/en-US i18n.",
       "priority": "P0"
+    },
+    {
+      "id": "F22",
+      "name": "Material Library Code Rule Management (Backend)",
+      "module": "material_management",
+      "description": "Material library-level custom material code rule management. Enables defining per-library code generation rules composed of multiple segments (fixed text, category path, attribute codes, date, serial number). Supports rule version management (edit generates new version, never overwrites history), code generation engine with serial number strategies (length, start, step, scope), batch recoding preview and execution with conflict detection, code mapping persistence, and batch rollback with operation logging. 6 new tables: material_library (extended with auto_code_enabled, recode_enabled), material_code_rule_version, material_code_serial, material_code_change_batch, material_code_change_detail, material_code_mapping. 12+ new API endpoints covering library CRUD with code rule config, rule version CRUD, recode preview, recode execute, mapping query, and rollback.",
+      "priority": "P0"
+    },
+    {
+      "id": "F23",
+      "name": "Material Library Code Rule Management (Frontend)",
+      "module": "material_management",
+      "description": "Frontend pages for material library-level code rule management. New material library creation page with code rule configuration wizard (segment builder with fixed text, category path, attribute codes, date, serial number segments), live preview showing generated example codes, and serial number strategy settings. Material library detail tabs: current code rule view, version history list with status (draft, active, deprecated), edit rule form generating new version with change reason, recode preview table (old code, new code, status, error reason), recode execution confirmation, code mapping history list with filters, batch rollback UI with risk warnings, and Excel export for code mappings. zh-CN/en-US i18n throughout.",
+      "priority": "P0"
     }
   ],
   "sprints": [
@@ -442,6 +456,126 @@
         "F21-Super admin access control: all create/edit/delete/toggle actions wrapped with SuperAdminRoute guard or conditional rendering using existing auth context; regular users see read-only rule list without action buttons",
         "F21-zh-CN and en-US i18n keys added to existing i18n.ts: module name, page titles, table column headers, form labels, validation messages, toast notifications, and empty state messages",
         "F21-Confirmation dialog before rule deletion with rule name displayed"
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Material Code Rule: Data Models, Backend APIs, and Code Generation Engine",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "pytest -q or curl/httpx against /api/v1/material-libraries and /api/v1/code-rules endpoints"
+      },
+      "features": [
+        "F22-Database tables: material_code_rule_version (id, library_id, version_no, rule_name, rule_config JSON with segments, separator, status, change_reason), material_code_serial (id, library_id, rule_version_id, scope_key, current_value), material_code_change_batch (id, library_id, old_rule_version_id, new_rule_version_id, change_mode, total_count, success_count, failed_count, status), material_code_change_detail (id, batch_id, material_id, old_code, new_code, status, error_message), material_code_mapping (id, library_id, material_id, old_code, new_code, old_rule_version_id, new_rule_version_id, batch_id, status)",
+        "F22-Extend material_library table: add auto_code_enabled, recode_enabled, current_rule_version_id fields",
+        "F22-Extend material_master table: add original_code, previous_code, code_rule_version_id, code_change_count, code_status fields",
+        "F22-POST /api/v1/material-libraries: create library with embedded code rule config, auto-generates rule version V1 as active",
+        "F22-GET /api/v1/material-libraries: list with code rule summary columns",
+        "F22-GET /api/v1/material-libraries/:id: detail including current_rule_version_id and library stats",
+        "F22-PUT /api/v1/material-libraries/:id: update library basic info (code rule not editable here)",
+        "F22-GET /api/v1/material-libraries/:id/code-rules/current: return active rule version with parsed segments",
+        "F22-GET /api/v1/material-libraries/:id/code-rules/versions: paginated version list with status, created_by, effective_time",
+        "F22-POST /api/v1/material-libraries/:id/code-rules/versions: create new rule version (draft) with rule_name, rule_config JSON, change_reason",
+        "F22-GET /api/v1/material-libraries/:id/code-rules/versions/:versionId: full rule version detail with segments",
+        "F22-Code generation engine: generate_material_code(tenant_id, library_id, material, rule_version) function handling fixed text, category_path (multi-level concatenation), attribute codes (with value-to-code mapping), date formatting, serial number (with scope, padding, concurrency-safe row-level lock)",
+        "F22-Serial number strategy: configurable length (1-10), start value, step, padding (left_zero), scope (global/category/category_attribute/year/month), reset by year/month",
+        "F22-Code validation: format check (uppercase letters, digits, hyphen, underscore), uniqueness check (tenant_id + material_code unique index), attribute completeness check, max length check (64 chars)"
+      ]
+    },
+    {
+      "id": 27,
+      "title": "Batch Recoding: Preview, Execution, and Rollback APIs",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "pytest -q or curl against recode and rollback endpoints"
+      },
+      "features": [
+        "F22-POST /api/v1/material-libraries/:id/code-rules/versions/:versionId/recode-preview: generate preview mapping for all or selected materials, return batch_id with total_count, success_count, failed_count, and error list (material_id, old_code, new_code, error_message); validates attribute completeness and code uniqueness per new rule",
+        "F22-GET /api/v1/material-code-change-batches/:batchId: get batch status and summary",
+        "F22-GET /api/v1/material-code-change-batches/:batchId/preview: get detailed preview rows (material_id, material_name, old_code, new_code, status, error_message)",
+        "F22-POST /api/v1/material-code-change-batches/:batchId/execute: execute the batch recode -- update material_master with new_code, save original_code/previous_code chain, update code_rule_version_id, increment code_change_count, persist material_code_mapping records, update material_code_serial as needed; use row-level lock for serial number; batch-mode for large datasets (500 per transaction)",
+        "F22-POST /api/v1/material-code-change-batches/:batchId/rollback: revert batch -- restore material_code from previous_code, shift previous_code to original_code, decrement code_change_count, mark mapping records as rolled_back; require confirmation; warn if new_code may be referenced externally",
+        "F22-GET /api/v1/material-libraries/:id/code-mappings: paginated mapping list with filters (old_code, new_code, batch_id, time_range); supports export",
+        "F22-Concurrency safety: row-level locking on material_code_serial with FOR UPDATE; unique index on (tenant_id, material_code) as final safety net; recoding lock on library (status=recoding blocks new material creation and rule editing)",
+        "F22-All code change operations logged to audit_log with before/after values"
+      ]
+    },
+    {
+      "id": 28,
+      "title": "Frontend: Create Material Library with Code Rule Configuration",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F23-Update /materials/libraries (or /material-libraries) create dialog/page to include code rule configuration section, visible only when auto_code_enabled is on",
+        "F23-Code rule segment builder: visual interface to add/remove/reorder segments; each segment has type selector (固定文本, 类目路径编码, 属性编码, 日期, 流水号) and type-specific config inputs",
+        "F23-Segment types: fixed text (literal value input), category path (level selector 1/2/3, per-level length input), attribute code (attribute name + value-to-code mapping table with add/remove rows), date (format selector: YYYY, YYMM, YYYYMMDD), serial number (length, start, scope selector: 全局/按类目/按类目+属性/按年/按月)",
+        "F23-Separator configuration: optional single-character separator between segments",
+        "F23-Live code preview: real-time example code generation as user configures segments, using mock material data (e.g., category path, test attribute values); shows error if required attributes missing",
+        "F23-Form validation: at least one unique-generating segment required (category_path or serial); max total length 64; no duplicate segment types that cause ambiguity",
+        "F23-zh-CN/en-US i18n for all labels, placeholder text, validation messages, and button text",
+        "F23-On save: POST /api/v1/material-libraries with library data including embedded rule_config, then display the created library with its V1 rule version"
+      ]
+    },
+    {
+      "id": 29,
+      "title": "Frontend: Material Library Detail - Code Rule View, Version Management, and Edit",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F23-Material library detail page with tabbed layout: 基础信息, 编码规则, 规则版本, 物料列表, 重编码记录, 编码映射",
+        "F23-编码规则 tab: display current active rule version with parsed segments visualization, serial number strategy summary, effective time, created_by; action buttons: 编辑规则, 查看历史版本, 导出编码映射",
+        "F23-规则版本 tab: paginated table of rule versions (version_no, rule_name, status badge, effective_time, created_by, change_reason); click version to view full segment detail",
+        "F23-编辑规则 page: load current rule segments into segment builder; user can modify/add/remove segments; must fill change_reason; select effective mode (仅新增物料生效 / 全部物料重编码 / 选中物料重编码); preview button generates example code",
+        "F23-Effective mode logic: 仅新增生效 just creates and activates new version; 全部重编码/选中重编码 creates draft version and prompts for preview",
+        "F23-Rule version status badges: 草稿 (gray), 启用 (green), 已停用 (red), 启用失败 (orange)",
+        "F23-Permission: only super_admin or library admin can edit rules; regular users see read-only view",
+        "F23-zh-CN/en-US i18n throughout all tabs, forms, and messages"
+      ]
+    },
+    {
+      "id": 30,
+      "title": "Frontend: Batch Recoding Preview, Execution, and Code Mapping",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F23-重编码预览 page: triggered after editing rule and selecting 全部重编码/选中重编码; displays summary header (total materials, expected success count, expected failure count) with error breakdown by type (缺少属性, 编码冲突, 类目编码缺失)",
+        "F23-Preview data table: columns for material_name, specification, category_path, old_code, new_code, status (通过/失败), failure_reason; paginated with 50 rows per page; status-colored rows (green for pass, red for fail)",
+        "F23-Download preview: export preview results as CSV with all columns",
+        "F23-Execution confirmation: prominent confirm button with library-name and material-count; show warning about external system impact",
+        "F23-重编码记录 tab: list of code change batches with batch_id, old_version, new_version, change_mode, total/success/failed counts, status, created_by, created_at; click to view batch detail with all change details",
+        "F23-编码映射 tab: search/filterable table of code mappings (old_code, new_code, material_name, batch_id, change_time); pagination; export to Excel",
+        "F23-Rollback: per-batch rollback button with confirmation dialog showing risk warning about external system references",
+        "F23-Loading states and progress indication during recode execution (especially for large batches)"
+      ]
+    },
+    {
+      "id": 31,
+      "title": "Frontend: Recode Integration and Code Rule Wizard Polish",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F23-Integrate code generation into material creation flow: when creating a material in a library with auto_code_enabled, automatically call the code generation engine to assign material_code; show the generated code in the material form before save",
+        "F23-Code rule segment builder UX polish: drag-to-reorder segments; segment type icons; inline help tooltips explaining each segment type; validation error highlighting on specific segments",
+        "F23-Attribute code mapping table: autocomplete for attribute names from existing attributes, value-to-code mapping with bulk import from CSV",
+        "F23-Serial number scope preview: show current serial values for each scope key before creation",
+        "F23-Conflict detection UX: when code conflict is detected during recode preview, highlight affected rows in red with specific conflict details; block execution if conflicts exist unless user explicitly forces (with extra confirmation)",
+        "F23-Code mapping export: full-featured export with date range filter, batch filter, old_code/new_code search, and format selection (CSV/Excel)",
+        "F23-i18n complete coverage: zh-CN and en-US for every label, button, message, table header, validation error, status badge, and empty state in all code rule and recode pages",
+        "F23-Responsive layout and mobile-friendly considerations for list views"
       ]
     }
   ]

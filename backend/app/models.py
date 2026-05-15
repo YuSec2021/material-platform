@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -92,10 +94,18 @@ class MaterialLibrary(Base):
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_code_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    recode_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    current_rule_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     materials: Mapped[list["Material"]] = relationship(back_populates="material_library")
+    code_rule_versions: Mapped[list["MaterialCodeRuleVersion"]] = relationship(
+        back_populates="library",
+        cascade="all, delete-orphan",
+        foreign_keys="MaterialCodeRuleVersion.library_id",
+    )
 
 
 class Category(Base):
@@ -127,6 +137,15 @@ class Material(Base):
     status: Mapped[str] = mapped_column(String(40), default="normal", index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     attributes: Mapped[str] = mapped_column(Text, default="{}")
+    original_code: Mapped[str] = mapped_column(String(64), default="")
+    previous_code: Mapped[str] = mapped_column(String(64), default="")
+    code_rule_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_code_rule_versions.id"),
+        nullable=True,
+        index=True,
+    )
+    code_change_count: Mapped[int] = mapped_column(Integer, default=0)
+    code_status: Mapped[str] = mapped_column(String(40), default="manual", index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -135,6 +154,89 @@ class Material(Base):
     material_library: Mapped[MaterialLibrary] = relationship(back_populates="materials")
     category: Mapped[Category] = relationship(back_populates="materials")
     brand: Mapped[Brand | None] = relationship()
+    code_rule_version: Mapped["MaterialCodeRuleVersion | None"] = relationship(
+        foreign_keys=[code_rule_version_id],
+    )
+
+
+class MaterialCodeRuleVersion(Base):
+    __tablename__ = "material_code_rule_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
+    version_no: Mapped[int] = mapped_column(Integer, index=True)
+    rule_name: Mapped[str] = mapped_column(String(180), default="")
+    rule_config: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    change_reason: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80), default="super_admin")
+    effective_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    library: Mapped[MaterialLibrary] = relationship(
+        back_populates="code_rule_versions",
+        foreign_keys=[library_id],
+    )
+
+
+class MaterialCodeSerial(Base):
+    __tablename__ = "material_code_serials"
+    __table_args__ = (
+        UniqueConstraint("library_id", "rule_version_id", "scope_key", name="uq_material_code_serial_scope"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
+    rule_version_id: Mapped[int] = mapped_column(ForeignKey("material_code_rule_versions.id"), index=True)
+    scope_key: Mapped[str] = mapped_column(String(240), index=True)
+    current_value: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialCodeChangeBatch(Base):
+    __tablename__ = "material_code_change_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
+    old_rule_version_id: Mapped[int | None] = mapped_column(ForeignKey("material_code_rule_versions.id"), nullable=True)
+    new_rule_version_id: Mapped[int | None] = mapped_column(ForeignKey("material_code_rule_versions.id"), nullable=True)
+    change_mode: Mapped[str] = mapped_column(String(40), default="manual")
+    total_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="preview", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialCodeChangeDetail(Base):
+    __tablename__ = "material_code_change_details"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("material_code_change_batches.id"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id"), index=True)
+    old_code: Mapped[str] = mapped_column(String(64), default="")
+    new_code: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialCodeMapping(Base):
+    __tablename__ = "material_code_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id"), index=True)
+    old_code: Mapped[str] = mapped_column(String(64), default="")
+    new_code: Mapped[str] = mapped_column(String(64), default="")
+    old_rule_version_id: Mapped[int | None] = mapped_column(ForeignKey("material_code_rule_versions.id"), nullable=True)
+    new_rule_version_id: Mapped[int | None] = mapped_column(ForeignKey("material_code_rule_versions.id"), nullable=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("material_code_change_batches.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class LLMProviderConfig(Base):
