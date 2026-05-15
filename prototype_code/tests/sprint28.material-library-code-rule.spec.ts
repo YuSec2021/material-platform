@@ -113,7 +113,7 @@ test("material library create flow builds and saves an automatic code rule", asy
   await page.getByLabel("分隔符").fill("-");
 
   await page.getByRole("button", { name: "固定文本" }).click();
-  await page.getByLabel("固定文本").fill("MAT");
+  await page.getByRole("textbox", { name: "固定文本" }).fill("MAT");
 
   await page.getByRole("button", { name: "类目路径编码" }).click();
   await control(page.getByLabel("类目层级")).selectOption("2");
@@ -122,11 +122,11 @@ test("material library create flow builds and saves an automatic code rule", asy
 
   await page.getByRole("button", { name: "属性编码" }).click();
   await page.getByLabel("属性名称").fill("color");
-  await page.getByLabel("属性值").first().fill("red");
-  await page.getByLabel("属性编码").first().fill("R");
+  await page.getByRole("textbox", { name: "属性值" }).first().fill("red");
+  await page.getByRole("textbox", { name: "属性编码" }).first().fill("R");
   await page.getByRole("button", { name: "新增映射行" }).click();
-  await control(page.getByLabel("属性值")).nth(1).fill("blue");
-  await control(page.getByLabel("属性编码")).nth(1).fill("B");
+  await control(page.getByRole("textbox", { name: "属性值" })).nth(1).fill("blue");
+  await control(page.getByRole("textbox", { name: "属性编码" })).nth(1).fill("B");
 
   await page.getByRole("button", { name: "日期" }).click();
   await control(page.getByLabel("日期格式")).selectOption("YYMM");
@@ -144,7 +144,7 @@ test("material library create flow builds and saves an automatic code rule", asy
   if (fourthSegmentType !== "serial") {
     throw new Error(`Expected serial segment to move before date, received ${fourthSegmentType}`);
   }
-  if ((await control(page.getByLabel("固定文本")).inputValue()) !== "MAT") {
+  if ((await control(page.getByRole("textbox", { name: "固定文本" })).inputValue()) !== "MAT") {
     throw new Error("Fixed text value was lost after reorder");
   }
   if ((await control(page.getByLabel("属性名称")).inputValue()) !== "color") {
@@ -155,7 +155,7 @@ test("material library create flow builds and saves an automatic code rule", asy
   if ((await page.getByLabel("属性名称").count()) !== 0) {
     throw new Error("Attribute segment should be removed");
   }
-  if ((await control(page.getByLabel("固定文本")).inputValue()) !== "MAT") {
+  if ((await control(page.getByRole("textbox", { name: "固定文本" })).inputValue()) !== "MAT") {
     throw new Error("Fixed text value was lost after remove");
   }
   if ((await control(page.getByLabel("流水号长度")).inputValue()) !== "4") {
@@ -200,7 +200,7 @@ test("live preview and validation reject missing unique segments, long codes, an
   await page.getByLabel("分隔符").fill("_");
 
   await page.getByRole("button", { name: "固定文本" }).click();
-  await page.getByLabel("固定文本").fill("MAT");
+  await page.getByRole("textbox", { name: "固定文本" }).fill("MAT");
   await page.getByRole("button", { name: "日期" }).click();
   await control(page.getByLabel("日期格式")).selectOption("YYMM");
   await expect(page.getByText(/MAT_\d{4}/)).toBeVisible();
@@ -210,7 +210,9 @@ test("live preview and validation reject missing unique segments, long codes, an
     throw new Error(`Expected unique segment validation, received ${firstAlert}`);
   }
 
-  await page.getByLabel("固定文本").fill("MATERIALCODETHATISLONGERTHANSIXTYFOURCHARACTERSWHENCOMBINEDWITHSERIAL");
+  await page
+    .getByRole("textbox", { name: "固定文本" })
+    .fill("MATERIALCODETHATISLONGERTHANSIXTYFOURCHARACTERSWHENCOMBINEDWITHSERIAL");
   await page.getByRole("button", { name: "流水号" }).click();
   await page.getByLabel("流水号长度").fill("10");
   await page.getByRole("button", { name: "保存" }).click();
@@ -222,5 +224,78 @@ test("live preview and validation reject missing unique segments, long codes, an
   await page.getByRole("button", { name: "属性编码" }).click();
   await page.getByLabel("属性名称").fill("color");
   await expect(page.getByText("预览缺少 mock 属性值或映射，请为 color=red 添加编码映射。")).toBeVisible();
+  await context.close();
+});
+
+test("material library code rule create flow switches languages without losing form state", async () => {
+  const { page, context } = await pageForTest();
+  await login(page);
+  await page.route("**/api/v1/material-libraries", async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto("/material/library");
+  await page.getByRole("button", { name: /新建物料库|New Library/ }).click();
+  await control(page.getByLabel("自动编码")).check();
+
+  await expect(page.getByText("编码规则配置")).toBeVisible();
+  await expect(page.getByLabel("分隔符")).toBeVisible();
+  await expect(page.getByText("实时预览")).toBeVisible();
+  await expect(page.getByRole("button", { name: "固定文本" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "类目路径编码" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "属性编码" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "日期" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "流水号" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "取消" })).toBeVisible();
+  await page.getByRole("button", { name: "固定文本" }).click();
+  await page.getByRole("button", { name: "流水号" }).click();
+  await expect(page.getByText("片段类型").first()).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "固定文本" })).toBeVisible();
+  await expect(page.getByLabel("流水号长度")).toBeVisible();
+
+  await page.getByLabel("名称").fill("Sprint 28 Localized Library");
+  await page.getByLabel("分隔符").fill("-");
+  await page.getByRole("textbox", { name: "固定文本" }).fill("LOC");
+  await page.getByLabel("流水号长度").fill("3");
+  await page.getByLabel("起始值").fill("1");
+
+  await page.getByRole("button", { name: "语言" }).evaluate((element) => (element as HTMLElement).click());
+  await expect(page.getByText("Code Rule Configuration")).toBeVisible();
+  await expect(page.getByText("Segment Type").first()).toBeVisible();
+  await expect(page.getByLabel("Separator")).toBeVisible();
+  await expect(page.getByText("Live Preview")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Fixed Text" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Category Path Code" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Attribute Code" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Date" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Serial Number" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+
+  if ((await control(page.getByLabel("Name")).inputValue()) !== "Sprint 28 Localized Library") {
+    throw new Error("Library name was not preserved after switching to English");
+  }
+  if ((await control(page.getByRole("textbox", { name: "Fixed Text" })).inputValue()) !== "LOC") {
+    throw new Error("Fixed text value was not preserved after switching to English");
+  }
+  if ((await control(page.getByLabel("Separator")).inputValue()) !== "-") {
+    throw new Error("Separator was not preserved after switching to English");
+  }
+  if ((await control(page.getByLabel("Serial Length")).inputValue()) !== "3") {
+    throw new Error("Serial length was not preserved after switching to English");
+  }
+  if ((await control(page.getByLabel("Start Value")).inputValue()) !== "1") {
+    throw new Error("Serial start was not preserved after switching to English");
+  }
+
+  await control(page.locator('button[aria-label="Remove segment"]')).nth(1).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByText("At least one unique-generating segment is required: category path or serial number."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Language" }).evaluate((element) => (element as HTMLElement).click());
+  await expect(page.getByText("至少需要一个唯一生成片段：类目路径编码或流水号。")).toBeVisible();
   await context.close();
 });
