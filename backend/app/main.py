@@ -37,6 +37,9 @@ from .models import (
     FeaturePermission,
     LLMProviderConfig,
     Material,
+    MaterialCodeChangeBatch,
+    MaterialCodeChangeDetail,
+    MaterialCodeMapping,
     MaterialCodeRuleVersion,
     MaterialCodeSerial,
     MaterialLibrary,
@@ -73,6 +76,12 @@ from .schemas import (
     GatewayInvokeIn,
     GovernanceImportIn,
     GovernancePreviewIn,
+    BatchActionIn,
+    MaterialCodeChangeBatchOut,
+    MaterialCodeChangePreviewListOut,
+    MaterialCodeChangeRowOut,
+    MaterialCodeMappingListOut,
+    MaterialCodeMappingOut,
     MaterialGovernanceImportIn,
     MaterialGovernancePreviewIn,
     MaterialMatchIn,
@@ -91,6 +100,7 @@ from .schemas import (
     ProviderConfigIn,
     ProviderConfigOut,
     RecommendIn,
+    RecodePreviewIn,
     PermissionEntry,
     PasswordResetOut,
     EvaluateRequest,
@@ -2094,6 +2104,147 @@ def generate_material_code(
     return code
 
 
+def preview_serial_value(
+    db: Session,
+    library_id: int,
+    rule_version_id: int,
+    segment: dict[str, Any],
+    material_data: dict[str, Any],
+    serial_state: dict[tuple[int, str], int],
+) -> str:
+    length = int(segment.get("length") or segment.get("padding_length") or 3)
+    start = int(segment.get("start") or segment.get("start_value") or 1)
+    step = int(segment.get("step") or 1)
+    scope_key = serial_scope_key(segment, material_data)
+    key = (rule_version_id, scope_key)
+    if key not in serial_state:
+        serial = (
+            db.query(MaterialCodeSerial)
+            .filter(
+                MaterialCodeSerial.library_id == library_id,
+                MaterialCodeSerial.rule_version_id == rule_version_id,
+                MaterialCodeSerial.scope_key == scope_key,
+            )
+            .first()
+        )
+        serial_state[key] = serial.current_value if serial else start - step
+    serial_state[key] += step
+    rendered = str(serial_state[key])
+    if bool(segment.get("padding", True)) and str(segment.get("padding")) != "none":
+        rendered = rendered.zfill(length)
+    if len(rendered) > length:
+        raise HTTPException(status_code=422, detail="Serial value exceeds configured serial length")
+    return rendered
+
+
+def generate_material_code_candidate(
+    db: Session,
+    library_id: int,
+    material_model: Material,
+    rule_version: MaterialCodeRuleVersion,
+    serial_state: dict[tuple[int, str], int],
+) -> str:
+    config = rule_config_dict(rule_version)
+    validate_code_rule_config(config)
+    material_data = {
+        "product": material_model.product_name,
+        "library": material_model.material_library,
+        "category": material_model.category,
+        "attributes": material_attributes(material_model.attributes),
+    }
+    parts: list[str] = []
+    for segment in config["segments"]:
+        segment_type = normalize_segment_type(segment)
+        if segment_type == "fixed":
+            parts.append(sanitize_code_part(str(segment.get("value") or segment.get("text") or segment.get("literal") or ""), "fixed segment"))
+        elif segment_type == "date":
+            parts.append(render_date_segment(str(segment.get("format") or "YYYYMMDD")))
+        elif segment_type == "category_path":
+            category = material_data["category"]
+            source = str(segment.get("source") or "code")
+            raw = category.name if source == "name" else category.code
+            value = sanitize_code_part(raw, "category path")
+            length = int(segment.get("length") or segment.get("max_length") or 0)
+            parts.append(value[:length] if length else value)
+        elif segment_type == "attribute_code":
+            attribute_name = str(segment.get("attribute") or segment.get("attribute_name") or segment.get("name") or "")
+            attributes = material_data["attributes"]
+            if attribute_name not in attributes or attributes.get(attribute_name) in (None, ""):
+                raise HTTPException(status_code=422, detail=f"Missing attribute for code generation: {attribute_name}")
+            attribute_value = str(attributes[attribute_name])
+            mapping = attribute_mapping(segment)
+            raw = mapping.get(attribute_value) or mapping.get(attribute_value.strip()) or attribute_value
+            parts.append(sanitize_code_part(raw, f"attribute {attribute_name}"))
+        elif segment_type == "serial":
+            parts.append(preview_serial_value(db, library_id, rule_version.id, segment, material_data, serial_state))
+    code = str(config.get("separator") or "").join(parts)
+    if len(code) > 64:
+        raise HTTPException(status_code=422, detail="Generated material code maximum length is 64 characters")
+    if not CODE_RULE_ALLOWED_RE.fullmatch(code):
+        raise HTTPException(status_code=422, detail="Generated code format only allows uppercase letters, digits, hyphen, and underscore")
+    duplicate = db.query(Material).filter(Material.code == code, Material.id != material_model.id).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Generated material code must be unique")
+    return code
+
+
+def code_change_row_to_out(detail: MaterialCodeChangeDetail, material: Material | None = None) -> MaterialCodeChangeRowOut:
+    return MaterialCodeChangeRowOut(
+        id=detail.id,
+        batch_id=detail.batch_id,
+        material_id=detail.material_id,
+        material_name=material.name if material else "",
+        old_code=detail.old_code,
+        new_code=detail.new_code,
+        status=detail.status,
+        error_message=detail.error_message,
+    )
+
+
+def code_change_batch_to_out(db: Session, batch: MaterialCodeChangeBatch, include_rows: bool = False) -> MaterialCodeChangeBatchOut:
+    rows: list[MaterialCodeChangeRowOut] = []
+    if include_rows:
+        details = (
+            db.query(MaterialCodeChangeDetail)
+            .filter(MaterialCodeChangeDetail.batch_id == batch.id)
+            .order_by(MaterialCodeChangeDetail.id)
+            .all()
+        )
+        materials = {item.id: item for item in db.query(Material).filter(Material.id.in_([detail.material_id for detail in details] or [-1])).all()}
+        rows = [code_change_row_to_out(detail, materials.get(detail.material_id)) for detail in details]
+    return MaterialCodeChangeBatchOut(
+        batch_id=batch.id,
+        id=batch.id,
+        library_id=batch.library_id,
+        old_rule_version_id=batch.old_rule_version_id,
+        new_rule_version_id=batch.new_rule_version_id,
+        change_mode=batch.change_mode,
+        total_count=batch.total_count,
+        success_count=batch.success_count,
+        failed_count=batch.failed_count,
+        status=batch.status,
+        rows=rows,
+        created_at=batch.created_at.isoformat(),
+        updated_at=batch.updated_at.isoformat(),
+    )
+
+
+def code_mapping_to_out(mapping: MaterialCodeMapping, material: Material | None = None) -> MaterialCodeMappingOut:
+    return MaterialCodeMappingOut(
+        id=mapping.id,
+        library_id=mapping.library_id,
+        material_id=mapping.material_id,
+        material_name=material.name if material else "",
+        old_code=mapping.old_code,
+        new_code=mapping.new_code,
+        old_rule_version_id=mapping.old_rule_version_id,
+        new_rule_version_id=mapping.new_rule_version_id,
+        batch_id=mapping.batch_id,
+        status=mapping.status,
+        created_at=mapping.created_at.isoformat(),
+    )
+
+
 def material_to_out(material: Material) -> MaterialOut:
     attributes = material_attributes(material.attributes)
     lifecycle_history = attributes.get("_lifecycle_history", [])
@@ -3566,6 +3717,369 @@ def get_code_rule_version(
     if not rule_version or rule_version.library_id != library.id:
         raise HTTPException(status_code=404, detail="Code rule version not found")
     return code_rule_version_to_out(rule_version)
+
+
+@app.post(
+    "/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview",
+    response_model=MaterialCodeChangeBatchOut,
+)
+def create_recode_preview(
+    library_id: int,
+    version_id: int,
+    payload: RecodePreviewIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
+) -> MaterialCodeChangeBatchOut:
+    require_super_admin(auth)
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    if not library.recode_enabled:
+        raise HTTPException(status_code=409, detail="Material library recoding is not enabled")
+    new_rule = db.get(MaterialCodeRuleVersion, version_id)
+    if not new_rule or new_rule.library_id != library.id:
+        raise HTTPException(status_code=404, detail="Code rule version not found")
+    old_rule = active_rule_for_library(db, library)
+    scope = payload.scope.strip().lower()
+    query = db.query(Material).filter(Material.material_library_id == library.id).order_by(Material.id)
+    if scope == "selected":
+        if not payload.material_ids:
+            raise HTTPException(status_code=422, detail="material_ids are required when scope is selected")
+        requested_ids = list(dict.fromkeys(payload.material_ids))
+        materials = query.filter(Material.id.in_(requested_ids)).all()
+        found_ids = {item.id for item in materials}
+        missing_ids = [item_id for item_id in requested_ids if item_id not in found_ids]
+        if missing_ids:
+            raise HTTPException(status_code=404, detail=f"Selected materials not found in library: {missing_ids}")
+        materials.sort(key=lambda item: requested_ids.index(item.id))
+    elif scope == "all":
+        materials = query.all()
+    else:
+        raise HTTPException(status_code=422, detail="scope must be all or selected")
+
+    batch = MaterialCodeChangeBatch(
+        library_id=library.id,
+        old_rule_version_id=old_rule.id if old_rule else None,
+        new_rule_version_id=new_rule.id,
+        change_mode=scope,
+        total_count=len(materials),
+        status="preview",
+    )
+    db.add(batch)
+    db.flush()
+
+    serial_state: dict[tuple[int, str], int] = {}
+    seen_codes: set[str] = set()
+    success_count = 0
+    failed_count = 0
+    for material in materials:
+        new_code = ""
+        status = "success"
+        error_message = ""
+        try:
+            new_code = generate_material_code_candidate(db, library.id, material, new_rule, serial_state)
+            if new_code in seen_codes:
+                raise HTTPException(status_code=409, detail="Generated material code must be unique within preview batch")
+            seen_codes.add(new_code)
+            success_count += 1
+        except HTTPException as exc:
+            status = "failed"
+            error_message = str(exc.detail)
+            failed_count += 1
+        db.add(
+            MaterialCodeChangeDetail(
+                batch_id=batch.id,
+                material_id=material.id,
+                old_code=material.code,
+                new_code=new_code,
+                status=status,
+                error_message=error_message,
+            )
+        )
+    batch.success_count = success_count
+    batch.failed_count = failed_count
+    batch.updated_at = now()
+    add_audit_log(
+        db,
+        auth,
+        "material_code_change_batch",
+        "preview",
+        {"library_id": library.id, "new_rule_version_id": new_rule.id},
+        {"batch_id": batch.id, "total_count": batch.total_count, "success_count": success_count, "failed_count": failed_count},
+    )
+    db.commit()
+    db.refresh(batch)
+    return code_change_batch_to_out(db, batch, include_rows=True)
+
+
+@app.get("/api/v1/material-code-change-batches/{batch_id}", response_model=MaterialCodeChangeBatchOut)
+def get_code_change_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialCodeChangeBatchOut:
+    batch = db.get(MaterialCodeChangeBatch, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Material code change batch not found")
+    require_library_scope(auth, batch.library_id)
+    return code_change_batch_to_out(db, batch, include_rows=False)
+
+
+@app.get("/api/v1/material-code-change-batches/{batch_id}/preview", response_model=MaterialCodeChangePreviewListOut)
+def get_code_change_preview(
+    batch_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> MaterialCodeChangePreviewListOut:
+    batch = db.get(MaterialCodeChangeBatch, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Material code change batch not found")
+    require_library_scope(auth, batch.library_id)
+    query = db.query(MaterialCodeChangeDetail).filter(MaterialCodeChangeDetail.batch_id == batch.id)
+    total = query.count()
+    details = query.order_by(MaterialCodeChangeDetail.id).offset((page - 1) * page_size).limit(page_size).all()
+    materials = {item.id: item for item in db.query(Material).filter(Material.id.in_([detail.material_id for detail in details] or [-1])).all()}
+    return MaterialCodeChangePreviewListOut(
+        items=[code_change_row_to_out(detail, materials.get(detail.material_id)) for detail in details],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@app.post("/api/v1/material-code-change-batches/{batch_id}/execute", response_model=MaterialCodeChangeBatchOut)
+def execute_code_change_batch(
+    batch_id: int,
+    payload: BatchActionIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
+) -> MaterialCodeChangeBatchOut:
+    require_super_admin(auth)
+    if not payload.confirm:
+        raise HTTPException(status_code=422, detail="Explicit confirmation is required to execute a recode batch")
+    batch = db.get(MaterialCodeChangeBatch, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Material code change batch not found")
+    require_library_scope(auth, batch.library_id)
+    if batch.status != "preview":
+        raise HTTPException(status_code=409, detail=f"Batch is already {batch.status} and cannot be executed again")
+    if batch.failed_count:
+        raise HTTPException(status_code=409, detail="Failed preview rows or validation errors block execution")
+    library = db.get(MaterialLibrary, batch.library_id)
+    new_rule = db.get(MaterialCodeRuleVersion, batch.new_rule_version_id) if batch.new_rule_version_id else None
+    old_rule = db.get(MaterialCodeRuleVersion, batch.old_rule_version_id) if batch.old_rule_version_id else None
+    if not library or not new_rule:
+        raise HTTPException(status_code=404, detail="Batch library or target rule version not found")
+    details = (
+        db.query(MaterialCodeChangeDetail)
+        .filter(MaterialCodeChangeDetail.batch_id == batch.id, MaterialCodeChangeDetail.status == "success")
+        .order_by(MaterialCodeChangeDetail.id)
+        .all()
+    )
+    material_ids = [detail.material_id for detail in details]
+    materials = {item.id: item for item in db.query(Material).filter(Material.id.in_(material_ids or [-1])).all()}
+    before = {"batch_id": batch.id, "status": batch.status, "codes": {str(detail.material_id): detail.old_code for detail in details}}
+    for detail in details:
+        material = materials.get(detail.material_id)
+        if not material:
+            raise HTTPException(status_code=404, detail=f"Material not found for preview row: {detail.material_id}")
+        generated = generate_material_code(
+            db,
+            "default",
+            library.id,
+            {
+                "product": material.product_name,
+                "library": material.material_library,
+                "category": material.category,
+                "attributes": material_attributes(material.attributes),
+            },
+            new_rule,
+        )
+        if generated != detail.new_code:
+            raise HTTPException(status_code=409, detail="Preview is stale because serial counters or material data changed")
+        material.original_code = material.original_code or material.code
+        material.previous_code = material.code
+        material.code = detail.new_code
+        material.code_rule_version_id = new_rule.id
+        material.code_change_count = (material.code_change_count or 0) + 1
+        material.code_status = "active"
+        material.updated_at = now()
+        detail.status = "executed"
+        db.add(
+            MaterialCodeMapping(
+                library_id=library.id,
+                material_id=material.id,
+                old_code=detail.old_code,
+                new_code=detail.new_code,
+                old_rule_version_id=batch.old_rule_version_id,
+                new_rule_version_id=batch.new_rule_version_id,
+                batch_id=batch.id,
+                status="active",
+            )
+        )
+    if old_rule and old_rule.id != new_rule.id:
+        old_rule.status = "deprecated"
+        old_rule.updated_at = now()
+    new_rule.status = "active"
+    new_rule.effective_time = new_rule.effective_time or now()
+    new_rule.updated_at = now()
+    library.current_rule_version_id = new_rule.id
+    library.updated_at = now()
+    batch.status = "executed"
+    batch.updated_at = now()
+    add_audit_log(
+        db,
+        auth,
+        "material_code_change_batch",
+        "execute",
+        before,
+        {"batch_id": batch.id, "status": batch.status, "codes": {str(detail.material_id): detail.new_code for detail in details}},
+    )
+    db.commit()
+    db.refresh(batch)
+    return code_change_batch_to_out(db, batch, include_rows=True)
+
+
+@app.post("/api/v1/material-code-change-batches/{batch_id}/rollback", response_model=MaterialCodeChangeBatchOut)
+def rollback_code_change_batch(
+    batch_id: int,
+    payload: BatchActionIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/material-libraries")),
+) -> MaterialCodeChangeBatchOut:
+    require_super_admin(auth)
+    if not payload.confirm:
+        raise HTTPException(status_code=422, detail="Explicit confirmation is required to rollback a recode batch")
+    batch = db.get(MaterialCodeChangeBatch, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Material code change batch not found")
+    require_library_scope(auth, batch.library_id)
+    if batch.status != "executed":
+        raise HTTPException(status_code=409, detail=f"Batch is {batch.status} and is no longer rollbackable")
+    library = db.get(MaterialLibrary, batch.library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Batch library not found")
+    details = (
+        db.query(MaterialCodeChangeDetail)
+        .filter(MaterialCodeChangeDetail.batch_id == batch.id, MaterialCodeChangeDetail.status == "executed")
+        .order_by(MaterialCodeChangeDetail.id)
+        .all()
+    )
+    material_ids = [detail.material_id for detail in details]
+    materials = {item.id: item for item in db.query(Material).filter(Material.id.in_(material_ids or [-1])).all()}
+    before = {"batch_id": batch.id, "status": batch.status, "codes": {str(detail.material_id): detail.new_code for detail in details}}
+    for detail in details:
+        material = materials.get(detail.material_id)
+        if not material:
+            raise HTTPException(status_code=404, detail=f"Material not found for preview row: {detail.material_id}")
+        duplicate = db.query(Material).filter(Material.code == detail.old_code, Material.id != material.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Rollback would create a duplicate material code")
+        material.code = detail.old_code
+        material.previous_code = detail.new_code
+        material.original_code = material.original_code or detail.old_code
+        material.code_rule_version_id = batch.old_rule_version_id
+        material.code_change_count = max(0, (material.code_change_count or 0) - 1)
+        material.code_status = "active"
+        material.updated_at = now()
+        detail.status = "rolled_back"
+    mappings = db.query(MaterialCodeMapping).filter(MaterialCodeMapping.batch_id == batch.id).all()
+    for mapping in mappings:
+        mapping.status = "rolled_back"
+    old_rule = db.get(MaterialCodeRuleVersion, batch.old_rule_version_id) if batch.old_rule_version_id else None
+    new_rule = db.get(MaterialCodeRuleVersion, batch.new_rule_version_id) if batch.new_rule_version_id else None
+    if old_rule:
+        old_rule.status = "active"
+        old_rule.updated_at = now()
+        library.current_rule_version_id = old_rule.id
+    if new_rule and old_rule and new_rule.id != old_rule.id:
+        new_rule.status = "deprecated"
+        new_rule.updated_at = now()
+    library.updated_at = now()
+    batch.status = "rolled_back"
+    batch.updated_at = now()
+    add_audit_log(
+        db,
+        auth,
+        "material_code_change_batch",
+        "rollback",
+        before,
+        {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "reason": payload.reason,
+            "codes": {str(detail.material_id): detail.old_code for detail in details},
+        },
+    )
+    db.commit()
+    db.refresh(batch)
+    return code_change_batch_to_out(db, batch, include_rows=True)
+
+
+@app.get("/api/v1/material-libraries/{library_id}/code-mappings", response_model=None)
+def list_code_mappings(
+    library_id: int,
+    batch_id: int | None = None,
+    old_code: str = "",
+    new_code: str = "",
+    export: str = "",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/material-libraries/{library_id}")),
+) -> Any:
+    library = db.get(MaterialLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    query = db.query(MaterialCodeMapping).filter(MaterialCodeMapping.library_id == library.id)
+    if batch_id is not None:
+        query = query.filter(MaterialCodeMapping.batch_id == batch_id)
+    if old_code:
+        query = query.filter(MaterialCodeMapping.old_code == old_code)
+    if new_code:
+        query = query.filter(MaterialCodeMapping.new_code == new_code)
+    query = query.order_by(MaterialCodeMapping.id.desc())
+    if export.strip().lower() == "csv":
+        mappings = query.all()
+        materials = {item.id: item for item in db.query(Material).filter(Material.id.in_([mapping.material_id for mapping in mappings] or [-1])).all()}
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "library_id", "material_id", "material_name", "old_code", "new_code", "old_rule_version_id", "new_rule_version_id", "batch_id", "status", "created_at"])
+        for mapping in mappings:
+            material = materials.get(mapping.material_id)
+            writer.writerow(
+                [
+                    mapping.id,
+                    mapping.library_id,
+                    mapping.material_id,
+                    material.name if material else "",
+                    mapping.old_code,
+                    mapping.new_code,
+                    mapping.old_rule_version_id or "",
+                    mapping.new_rule_version_id or "",
+                    mapping.batch_id or "",
+                    mapping.status,
+                    mapping.created_at.isoformat(),
+                ]
+            )
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="material-code-mappings-{library.id}.csv"'},
+        )
+    total = query.count()
+    mappings = query.offset((page - 1) * page_size).limit(page_size).all()
+    materials = {item.id: item for item in db.query(Material).filter(Material.id.in_([mapping.material_id for mapping in mappings] or [-1])).all()}
+    return MaterialCodeMappingListOut(
+        items=[code_mapping_to_out(mapping, materials.get(mapping.material_id)) for mapping in mappings],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.delete("/api/v1/material-libraries/{library_id}")

@@ -174,6 +174,71 @@ class MaterialCodeRuleVersionListOut(BaseModel):
     page_size: int
 
 
+class RecodePreviewIn(BaseModel):
+    scope: str = "all"
+    material_ids: list[int] = Field(default_factory=list)
+
+
+class BatchActionIn(BaseModel):
+    confirm: bool = False
+    reason: str = ""
+
+
+class MaterialCodeChangeRowOut(BaseModel):
+    id: int
+    batch_id: int
+    material_id: int
+    material_name: str = ""
+    old_code: str
+    new_code: str
+    status: str
+    error_message: str
+
+
+class MaterialCodeChangeBatchOut(BaseModel):
+    batch_id: int
+    id: int
+    library_id: int
+    old_rule_version_id: int | None = None
+    new_rule_version_id: int | None = None
+    change_mode: str
+    total_count: int
+    success_count: int
+    failed_count: int
+    status: str
+    rows: list[MaterialCodeChangeRowOut] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class MaterialCodeChangePreviewListOut(BaseModel):
+    items: list[MaterialCodeChangeRowOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class MaterialCodeMappingOut(BaseModel):
+    id: int
+    library_id: int
+    material_id: int
+    material_name: str = ""
+    old_code: str
+    new_code: str
+    old_rule_version_id: int | None = None
+    new_rule_version_id: int | None = None
+    batch_id: int | None = None
+    status: str
+    created_at: str
+
+
+class MaterialCodeMappingListOut(BaseModel):
+    items: list[MaterialCodeMappingOut]
+    total: int
+    page: int
+    page_size: int
+
+
 class CategoryOut(BaseModel):
     id: int
     code: str
