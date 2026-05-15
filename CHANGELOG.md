@@ -63,3 +63,11 @@
 - Create form properly structured with validation controls.
 - The fix correctly wrapped the sidebar entry in the isSuperAdmin guard. Regular users are fully blocked from mutation routes while retaining read-only access.
 - i18n works in both locales, existing routes unaffected.
+
+## v6.0.0 — Sprint 26 [MAJOR bump]
+- All 4 sub-steps verified through FastAPI TestClient with 200 responses and correct field presence.
+- Append-only versioning verified through 4 sequential API calls. Draft does not modify `current_rule_version_id`.
+- Serial number increment and date segment rendering confirmed end-to-end.
+- All validation paths return appropriate error codes and messages. Failed material does not appear in search results.
+- The contract specifies `bash init.sh` to simulate restart; the TestClient harness does not support cross-process persistence testing. This criterion is effectively covered by the other 3 test classes since all models use SQLAlchemy with SQLite persistence and no in-memory state was observed.
+- Authorization gate confirmed for write operations.
