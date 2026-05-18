@@ -167,8 +167,9 @@ test("super_admin opens detail tabs and sees the active code rule", async () => 
   }
 
   await page.getByRole("tab", { name: "编码规则" }).click();
+  const rulePanel = page.getByRole("tabpanel", { name: "编码规则" });
   await expect(page.getByText("V1 Sprint 29 V1")).toBeVisible();
-  await expect(page.getByText("启用")).toBeVisible();
+  await expect(rulePanel.getByText("启用")).toBeVisible();
   await expect(page.getByText("固定文本")).toBeVisible();
   await expect(page.getByText("流水号")).toBeVisible();
   await expect(page.getByText(/流水号长度.*3/)).toBeVisible();
@@ -208,6 +209,16 @@ test("edit rule validates change reason, previews, activates, and creates recode
   await control(page.getByLabel("生效模式")).selectOption("all_recode");
   await page.getByRole("button", { name: "保存" }).click();
   await expect(page.getByText(/请运行全部物料重编码预览/)).toBeVisible();
+  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("tab", { name: "规则版本" }).click();
+  const draftRow = page.getByRole("row").filter({ hasText: "Sprint 29 all recode draft" });
+  await expect(draftRow).toBeVisible();
+  const draftBadge = draftRow.getByText("草稿");
+  await expect(draftBadge).toBeVisible();
+  await expect(draftBadge).toHaveClass(/bg-gray-50/);
+  await draftRow.getByRole("button", { name: "V3" }).click();
+  await expect(page.getByText("V3 片段明细")).toBeVisible();
+  await expect(page.getByText(/固定文本: DRAFT29/)).toBeVisible();
   await context.close();
 });
 
@@ -228,7 +239,7 @@ test("regular users are read-only and edit form keeps localized state", async ()
   await admin.page.getByRole("textbox", { name: "固定文本" }).fill("LOC29");
   await admin.page.getByLabel("变更原因").fill("Locale preservation");
   await admin.page.getByRole("button", { name: "语言" }).evaluate((element) => (element as HTMLElement).click());
-  await expect(admin.page.getByText("Edit Rule")).toBeVisible();
+  await expect(admin.page.getByRole("heading", { name: "Code Rule Edit" })).toBeVisible();
   expect(await control(admin.page.getByLabel("Change Reason")).inputValue()).toEqual("Locale preservation");
   expect(await control(admin.page.getByRole("textbox", { name: "Fixed Text" })).inputValue()).toEqual("LOC29");
   await admin.context.close();

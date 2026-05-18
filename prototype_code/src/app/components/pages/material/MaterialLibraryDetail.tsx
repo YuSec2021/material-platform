@@ -483,7 +483,7 @@ function RuleEditor({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={t("codeRuleDetail.editRule")}
+      title={t("codeRuleDetail.editRuleTitle")}
       size="xl"
       footer={
         <>
@@ -855,12 +855,6 @@ export function MaterialLibraryDetail({
             <p className="mt-1 font-mono text-sm text-gray-500">{library.code}</p>
           </div>
         </div>
-        <Badge
-          variant="outline"
-          className={library.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-gray-50 text-gray-600"}
-        >
-          {library.enabled ? t("status.enabled") : t("status.disabled")}
-        </Badge>
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DetailTab)} className="gap-4">
