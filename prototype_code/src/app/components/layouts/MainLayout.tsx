@@ -9,9 +9,11 @@ import {
   Languages,
   LayoutDashboard,
   Menu,
+  Moon,
   Package,
   ShieldCheck,
   Settings,
+  Sun,
   User,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -129,6 +131,40 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
   return items;
 }
 
+function useTheme() {
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("theme");
+      if (stored) return stored === "dark";
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    return false;
+  });
+
+  const toggleTheme = () => {
+    const next = isDark ? "light" : "dark";
+    setIsDark(next === "dark");
+    localStorage.setItem("theme", next);
+    document.documentElement.classList.toggle("dark", next === "dark");
+  };
+
+  return { isDark, toggleTheme };
+}
+
+function ThemeSwitcher({ isDark, onToggle }: { isDark: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      aria-label={t("app.toggleTheme")}
+      onClick={onToggle}
+      className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 active:scale-[0.98]"
+    >
+      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </button>
+  );
+}
+
 function LanguageSwitcher() {
   const { t, i18n } = useTranslation();
   const nextLanguage = i18n.language === "en-US" ? "zh-CN" : "en-US";
@@ -219,6 +255,7 @@ export function MainLayout() {
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
   const menuItems = buildMenuItems(t, Boolean(auth.user?.is_super_admin));
 
   const toggleMenu = (key: string) => {
@@ -282,6 +319,7 @@ export function MainLayout() {
             </div>
             <div className="flex shrink-0 items-center gap-2 md:gap-3">
               <LanguageSwitcher />
+              <ThemeSwitcher isDark={isDark} onToggle={toggleTheme} />
               <div className="hidden items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 sm:flex">
                 <User className="h-5 w-5 text-gray-600" />
                 <span className="max-w-28 truncate text-sm text-gray-700">{auth.user?.display_name}</span>
