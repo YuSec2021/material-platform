@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/app/components/ui/badge";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import { MaterialLibraryDetail } from "./MaterialLibraryDetail";
 
 type SegmentType = "fixed" | "category_path" | "attribute_code" | "date" | "serial";
 type DateFormat = "YYYY" | "YYMM" | "YYYYMMDD";
@@ -290,6 +291,7 @@ export function MaterialLibraryList() {
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<LibraryFormState>(emptyForm);
   const [editingLibrary, setEditingLibrary] = useState<MaterialLibrary | null>(null);
+  const [selectedLibrary, setSelectedLibrary] = useState<MaterialLibrary | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
 
@@ -442,6 +444,18 @@ export function MaterialLibraryList() {
     setForm((current) => ({ ...current, segments: moveItem(current.segments, index, nextIndex) }));
   };
 
+  if (selectedLibrary) {
+    return (
+      <MaterialLibraryDetail
+        library={selectedLibrary}
+        onBack={() => {
+          setSelectedLibrary(null);
+          void query.refetch();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -493,7 +507,13 @@ export function MaterialLibraryList() {
                   {item.enabled ? t("status.enabled") : t("status.disabled")}
                 </Badge>
               </div>
-              <h2 className="mb-1 text-lg font-medium text-gray-900">{item.name}</h2>
+              <button
+                type="button"
+                onClick={() => setSelectedLibrary(item)}
+                className="mb-1 block text-left text-lg font-medium text-gray-900 hover:text-blue-700"
+              >
+                {item.name}
+              </button>
               <p className="mb-3 font-mono text-sm text-gray-500">{item.code}</p>
               <p className="min-h-10 text-sm text-gray-600">{item.description || t("codeRule.noDescription")}</p>
               {item.auto_code_enabled && (
@@ -506,6 +526,13 @@ export function MaterialLibraryList() {
                 </div>
               )}
               <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedLibrary(item)}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                >
+                  {t("action.view")}
+                </button>
                 <button
                   type="button"
                   onClick={() => openEditForm(item)}

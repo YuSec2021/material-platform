@@ -147,6 +147,7 @@ class MaterialCodeRuleVersionIn(BaseModel):
     separator: str | None = None
     segments: list[dict[str, Any]] | None = None
     change_reason: str = ""
+    activate: bool = False
 
 
 class MaterialCodeRuleVersionOut(BaseModel):

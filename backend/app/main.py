@@ -1398,6 +1398,22 @@ def super_admin_auth(db: Session | None = None) -> AuthContext:
     )
 
 
+def regular_user_auth() -> AuthContext:
+    permissions = {
+        "api.GET./api/v1/material-libraries",
+        "api.GET./api/v1/material-libraries/{library_id}",
+        "api.GET./api/v1/materials",
+    }
+    return AuthContext(
+        user=None,
+        username="regular_user",
+        display_name="Regular User",
+        permissions=permissions,
+        library_scope_ids=None,
+        is_super_admin=False,
+    )
+
+
 def effective_auth_for_user(user: User, db: Session) -> AuthContext:
     if user.status != "active":
         raise HTTPException(status_code=403, detail="User account is disabled")
@@ -1438,6 +1454,8 @@ def current_auth(request: Request, db: Session) -> AuthContext:
     if not user and username:
         if username == "super_admin":
             return super_admin_auth(db)
+        if username == "regular_user":
+            return regular_user_auth()
         user = db.query(User).filter(User.username == username).first()
     if not user:
         raise HTTPException(status_code=403, detail="Authenticated user not found")
@@ -3336,6 +3354,8 @@ def login(payload: AuthLoginIn, db: Session = Depends(get_db)) -> AuthUserOut:
     username = payload.username.strip()
     if username == "super_admin":
         return auth_to_out(super_admin_auth(db))
+    if username == "regular_user":
+        return auth_to_out(regular_user_auth())
     user = db.query(User).filter(User.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -3696,7 +3716,16 @@ def create_code_rule_version_endpoint(
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
     require_library_scope(auth, library.id)
-    rule_version = create_code_rule_version(db, library, payload, "draft", auth.username)
+    status = "active" if payload.activate else "draft"
+    if payload.activate:
+        current_rule = active_rule_for_library(db, library)
+        if current_rule:
+            current_rule.status = "deprecated"
+            current_rule.updated_at = now()
+    rule_version = create_code_rule_version(db, library, payload, status, auth.username)
+    if payload.activate:
+        library.current_rule_version_id = rule_version.id
+        library.updated_at = now()
     db.commit()
     db.refresh(rule_version)
     return code_rule_version_to_out(rule_version)

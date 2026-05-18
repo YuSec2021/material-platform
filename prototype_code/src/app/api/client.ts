@@ -106,14 +106,19 @@ export type MaterialLibrary = {
   description: string;
   enabled: boolean;
   auto_code_enabled?: boolean;
+  recode_enabled?: boolean;
   current_rule_version_id?: number | null;
   code_rule_summary?: {
+    id?: number;
     version?: number;
     version_no?: number;
     version_label?: string;
     status?: string;
     rule_name?: string;
+    created_by?: string;
+    effective_time?: string | null;
   } | null;
+  material_count?: number;
 };
 
 export type Material = {
@@ -143,7 +148,43 @@ export type MaterialLibraryPayload = {
   description: string;
   enabled?: boolean;
   auto_code_enabled?: boolean;
+  recode_enabled?: boolean;
   code_rule?: Record<string, unknown> | null;
+};
+
+export type MaterialCodeRuleVersion = {
+  id: number;
+  library_id: number;
+  version_no: number;
+  version: number;
+  version_label: string;
+  rule_name: string;
+  rule_config: Record<string, unknown>;
+  segments: Record<string, unknown>[];
+  separator: string;
+  status: string;
+  change_reason: string;
+  created_by: string;
+  effective_time: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MaterialCodeRuleVersionList = {
+  items: MaterialCodeRuleVersion[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type MaterialCodeRuleVersionPayload = {
+  rule_name: string;
+  rule_config: {
+    separator?: string;
+    segments: Record<string, unknown>[];
+  };
+  change_reason: string;
+  activate?: boolean;
 };
 
 export type MaterialPayload = {
@@ -795,6 +836,9 @@ export const apiClient = {
   materialLibraries() {
     return request<MaterialLibrary[]>("/material-libraries");
   },
+  materialLibrary(id: number) {
+    return request<MaterialLibrary>(`/material-libraries/${id}`);
+  },
   createMaterialLibrary(payload: MaterialLibraryPayload) {
     return request<MaterialLibrary>("/material-libraries", { method: "POST", body: payload });
   },
@@ -803,6 +847,20 @@ export const apiClient = {
   },
   deleteMaterialLibrary(id: number) {
     return request<{ deleted: boolean; id: number }>(`/material-libraries/${id}`, { method: "DELETE" });
+  },
+  currentCodeRule(libraryId: number) {
+    return request<MaterialCodeRuleVersion>(`/material-libraries/${libraryId}/code-rules/current`);
+  },
+  codeRuleVersions(libraryId: number, page = 1, pageSize = 10) {
+    return request<MaterialCodeRuleVersionList>(
+      withQuery(`/material-libraries/${libraryId}/code-rules/versions`, { page, page_size: pageSize }),
+    );
+  },
+  createCodeRuleVersion(libraryId: number, payload: MaterialCodeRuleVersionPayload) {
+    return request<MaterialCodeRuleVersion>(`/material-libraries/${libraryId}/code-rules/versions`, {
+      method: "POST",
+      body: payload,
+    });
   },
   materials(params: MaterialQueryParams | QueryFunctionContextLike = {}) {
     const materialParams = "queryKey" in params ? {} : params;

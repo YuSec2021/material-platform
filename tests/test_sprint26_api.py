@@ -116,6 +116,58 @@ class Sprint26CodeRuleApiTest(unittest.TestCase):
         still_current = client.get(f"/api/v1/material-libraries/{library['id']}/code-rules/current", headers=SUPER_ADMIN)
         self.assertEqual(still_current.json()["id"], library["current_rule_version_id"])
 
+    def test_new_materials_only_rule_version_can_be_activated_without_breaking_drafts(self):
+        library = self.create_auto_library("ACT")
+        draft = client.post(
+            f"/api/v1/material-libraries/{library['id']}/code-rules/versions",
+            headers=SUPER_ADMIN,
+            json={
+                "rule_name": "Draft stays draft",
+                "rule_config": {"segments": [{"type": "fixed", "value": "DRF"}, {"type": "serial", "length": 3}]},
+                "change_reason": "draft remains append-only",
+            },
+        )
+        self.assertEqual(draft.status_code, 200, draft.text)
+        self.assertEqual(draft.json()["status"], "draft")
+
+        activated = client.post(
+            f"/api/v1/material-libraries/{library['id']}/code-rules/versions",
+            headers=SUPER_ADMIN,
+            json={
+                "rule_name": "Active V3",
+                "rule_config": {"segments": [{"type": "fixed", "value": "ACTV"}, {"type": "serial", "length": 4}]},
+                "change_reason": "new materials only activation",
+                "activate": True,
+            },
+        )
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertEqual(activated.json()["status"], "active")
+
+        current = client.get(f"/api/v1/material-libraries/{library['id']}/code-rules/current", headers=SUPER_ADMIN)
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["id"], activated.json()["id"])
+
+    def test_regular_user_can_read_libraries_but_not_create_rule_versions(self):
+        library = self.create_auto_library("REG")
+        login = client.post("/api/v1/auth/login", json={"username": "regular_user"})
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertFalse(login.json()["is_super_admin"])
+
+        listed = client.get("/api/v1/material-libraries", headers={"X-Username": "regular_user"})
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertTrue(any(item["id"] == library["id"] for item in listed.json()))
+
+        forbidden = client.post(
+            f"/api/v1/material-libraries/{library['id']}/code-rules/versions",
+            headers={"X-Username": "regular_user"},
+            json={
+                "rule_name": "Forbidden",
+                "rule_config": {"segments": [{"type": "fixed", "value": "NOPE"}, {"type": "serial", "length": 3}]},
+                "change_reason": "regular users are read-only",
+            },
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
     def test_material_creation_generates_serialized_codes(self):
         code_prefix = f"A{time.time_ns() % 100000000}"
         library = self.create_auto_library(code_prefix)
