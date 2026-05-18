@@ -16,7 +16,7 @@ import {
   Sun,
   User,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/app/auth/AuthContext";
 import {
@@ -140,6 +140,10 @@ function useTheme() {
     }
     return false;
   });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+  }, [isDark]);
 
   const toggleTheme = () => {
     const next = isDark ? "light" : "dark";
