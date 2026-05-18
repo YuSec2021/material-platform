@@ -1,10 +1,10 @@
-Project summary: Sprints 12-28 PASS. Sprint 29 implemented and committed for evaluation. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v8.0.0.
+Project summary: Sprints 12-31 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v10.0.0 (major bump after Sprint 31 complete — major feature done).
+
+Sprint 31: Frontend: Recode Integration and Code Rule Wizard Polish
+Status: SPRINT PASS. Notes: Auto-code preview before save, drag-reorder segment builder, attribute autocomplete + CSV import, serial scope preview, conflict highlighting + force-execute confirm, mapping export with CSV/Excel + filters, complete zh-CN/en-US i18n + 390px responsive.
+
+Sprint 30: Frontend: Batch Recoding Preview, Execution, and Code Mapping
+Status: SPRINT PASS. Notes: Preview modal with pass/fail rows, guarded execute confirmation, recode records + batch detail tabs, code mapping with search/filters/export, selected-material recode with checkbox selection, per-batch rollback with warning dialog.
 
 Sprint 29: Frontend: Material Library Detail - Code Rule View, Version Management, and Edit
-Status: implemented, awaiting evaluator. Notes: Detail tabs, current rule visualization, version table/detail, edit modal with preview/change reason/effective modes, read-only regular_user, i18n; backend supports optional activation flag.
-
-Sprint 28: Frontend: Create Material Library with Code Rule Configuration
-Status: SPRINT PASS. Notes: Visual segment builder (fixed/category/attribute/date/serial), live preview, validation, zh-CN/en-US i18n; 3 Playwright tests pass (1 selector fix needed on retry).
-
-Sprint 27: Batch Recoding — Preview, Execution, and Rollback APIs
-Status: SPRINT PASS. Notes: POST recode-preview (all/selected), GET batch, GET preview rows, POST execute, POST rollback, GET code-mappings with CSV export; 3 API tests pass.
+Status: SPRINT PASS. Notes: Detail tabs, current rule visualization, version table/detail, edit modal with preview/change reason/effective modes, read-only for regular users, i18n; 3/3 Playwright tests pass.

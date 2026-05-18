@@ -1,13 +1,13 @@
 {
   "mode": "contract",
-  "current_sprint": 31,
+  "current_sprint": 32,
   "retry_count": 0,
-  "last_successful_sprint": 30,
+  "last_successful_sprint": 31,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-30-frontend-ui",
+  "active_branch": "codex/sprint-31-frontend-ui",
   "base_branch": "main",
   "last_run_at": "2026-05-18T00:00:00Z",
-  "sprint_origin": "feature",
-  "current_version": "9.1.0"
+  "sprint_origin": "minor_feature",
+  "current_version": "9.2.0"
 }

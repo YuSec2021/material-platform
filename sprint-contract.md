@@ -1,90 +1,52 @@
-## Sprint 31: Frontend: Recode Integration and Code Rule Wizard Polish
+## Sprint 32: 优化 AI 链路追踪页面布局 + 深色主题支持
 
 ### Features
-- Integrate code generation into the material creation flow so a material created in an auto-code-enabled material library receives and displays a generated material code before save.
-- Polish the code rule segment builder with drag-to-reorder behavior, segment type icons, inline help tooltips, and segment-specific validation highlighting.
-- Enhance the attribute code mapping table with attribute-name autocomplete from existing attributes and CSV bulk import for value-to-code mappings.
-- Add serial number scope preview showing current serial values for each applicable scope key before material or rule creation.
-- Improve recode conflict handling by highlighting conflict rows in red with specific conflict details and blocking execution unless the user explicitly forces execution through an extra confirmation.
-- Expand code mapping export with date range filtering, batch filtering, old_code/new_code search, and CSV/Excel format selection.
-- Complete zh-CN and en-US i18n coverage for all code rule and recode labels, buttons, messages, table headers, validation errors, status badges, and empty states.
-- Improve responsive layout for code rule, recode, and mapping list views on narrow browser widths.
+- Refactor `/debug/trace` into a two-panel trace inspection layout.
+- Left panel: show the latest trace logs in reverse chronological order, with date range filtering.
+- Right panel: show the selected trace's hierarchical span tree with expand/collapse controls.
+- Add dark theme support for the trace page so all text, icons, badges, borders, panels, and empty/error/loading states remain readable.
+- Restrict implementation to `TraceDebugPage.tsx` and related styling only, with no backend API changes.
 
 ### Success criteria (black-box-verifiable)
-- [ ] A super_admin creating a material in an auto-code-enabled library sees the generated material code before saving, and the saved material keeps that code.
+- [ ] The debug trace page uses a two-panel layout, and the left trace list is ordered newest first.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login` in a browser, sign in with username `super_admin` and an empty password, then navigate to `http://localhost:5173/material/library`.
-  3. Using Playwright request context or an equivalent HTTP client with headers `X-Username: super_admin`, `X-User-Role: super_admin`, and `Authorization: Bearer super_admin`, create setup data through backend APIs: call `GET http://localhost:8000/api/v1/product-names` and `GET http://localhost:8000/api/v1/categories` to choose valid IDs; call `POST http://localhost:8000/api/v1/material-libraries` with a unique name, `auto_code_enabled: true`, `recode_enabled: true`, and a code rule containing fixed segment `S31` plus a serial segment.
-  4. In the browser, open the created material library detail view from `http://localhost:5173/material/library`, navigate to the material list or material creation entry point, and start creating a new material in that library.
-  5. Fill the required material fields using product/category IDs from setup and material name `Sprint 31 Auto Code Material`; before clicking the final save/create action, assert the form visibly shows a generated code beginning with `S31` in a material code field, preview row, or read-only generated-code display.
-  6. Save the material and assert the success state appears without manually typing a material code.
-  7. Reopen the created material from the UI or call `GET http://localhost:8000/api/v1/materials?material_library_id={library_id}` with the same headers and assert the material code is present, begins with `S31`, and matches the generated code shown before save.
+  2. Using an HTTP client with headers `X-Username: super_admin`, `X-User-Role: super_admin`, and `Authorization: Bearer super_admin`, create trace setup data: call `POST http://localhost:8000/api/v1/ai/providers` with a unique enabled `mock` provider for capability `category_match`, call `PUT http://localhost:8000/api/v1/ai/capability-mappings/category_match` to make that provider primary, call `POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke` with prompt `Sprint 32 older trace`, wait at least 1 second, then call the same invoke URL with prompt `Sprint 32 newer trace`; save both returned `trace_id` values.
+  3. Open `http://localhost:5173/login` in a browser, sign in with username `super_admin` and an empty password, then navigate to `http://localhost:5173/debug/trace`.
+  4. Assert the page shows a left trace-list panel and a right span-detail panel visible at the same time on a desktop viewport such as `1440x900`.
+  5. In the left trace-list panel, assert the newer saved `trace_id` appears above the older saved `trace_id`.
+  6. Assert the right span-detail panel shows details for the selected trace without requiring source-code inspection.
 
-- [ ] The code rule segment builder supports drag reorder, icons, tooltips, and segment-level validation feedback.
+- [ ] Date range filtering narrows the left trace list by trace start date without breaking selection.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password, then create or open an auto-code-enabled material library at `http://localhost:5173/material/library`.
-  3. Open the library detail view, click `编码规则`, click `编辑规则`, and assert each visible segment row shows an icon or type-specific visual marker for fixed text, category path, attribute code, date, or serial number segments.
-  4. Hover or focus the help affordance for at least two segment types and assert an inline tooltip appears explaining that segment type.
-  5. Add at least three segments, drag the last segment above the first segment, and assert the visual order changes and the live preview code updates to reflect the new order.
-  6. Create an invalid segment configuration, such as an empty fixed-text value or an attribute-code segment without an attribute name, and attempt to preview or save.
-  7. Assert the specific invalid segment is highlighted with a localized validation error near that segment, and unrelated valid segments are not marked as invalid.
+  2. Create at least two category-match traces through `POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke` as super_admin, then open `http://localhost:5173/debug/trace` in an authenticated super_admin browser session.
+  3. Read the displayed date, or the `start_time` returned by `GET http://localhost:8000/api/v1/debug/trace`, for one saved trace and enter that same date as both the start and end date in the page's date range filter.
+  4. Apply the filter and assert the saved trace for that date remains visible in the left trace list and can still be selected.
+  5. Change the date range to a full day that excludes the saved trace date, apply the filter, and assert the saved trace IDs from setup are no longer visible in the left trace list.
+  6. Clear the date range filter and assert the saved trace IDs return to the left trace list in newest-first order.
 
-- [ ] Attribute code mapping supports attribute autocomplete and CSV bulk import.
+- [ ] Selecting a trace shows a hierarchical span tree that can expand and collapse child spans.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, ensure there is at least one product/category/attribute available by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, and the existing attribute list endpoint if available; then open `http://localhost:5173/login`, sign in as `super_admin`, and navigate to `http://localhost:5173/material/library`.
-  3. Open a material library code rule create or edit form and add an attribute-code segment.
-  4. Click the attribute name input and type the first characters of an existing attribute name; assert an autocomplete list appears and selecting an option fills the attribute name field.
-  5. Prepare a CSV file with headers `value,code` and at least two rows such as `Red,RD` and `Blue,BL`; use the bulk import action in the attribute mapping table to upload that file.
-  6. Assert the mapping table now shows rows for `Red` -> `RD` and `Blue` -> `BL`.
-  7. Save or preview the rule and assert no validation error is shown for the imported mapping rows.
+  2. Using super_admin HTTP headers, create a mock `category_match` provider and mapping if needed, call `POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke`, save the returned `trace_id`, then call `GET http://localhost:8000/api/v1/debug/trace/{trace_id}` and confirm the response includes at least one `chain` span and one `llm` span.
+  3. Open `http://localhost:5173/debug/trace` in an authenticated super_admin browser session and click the saved `trace_id` in the left trace list.
+  4. Assert the right panel visibly shows the selected `trace_id`, a root span row, and at least one child span row nested under it.
+  5. Click the root span's collapse control and assert the child span row is hidden while the root span remains visible.
+  6. Click the root span's expand control and assert the child span row becomes visible again with its span type, status, and duration.
 
-- [ ] Serial number scope preview shows current values for configured scope keys before creation or rule activation.
+- [ ] The trace page remains readable and operable in dark theme.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, and open the create-library flow or an existing library's code rule edit form.
-  3. Add or select a serial-number segment, configure length, start value, and scope `全局` or its en-US equivalent, then assert the form shows a serial scope preview section with a current value for the global scope before saving.
-  4. Change the serial scope to `按类目` or its en-US equivalent and choose a category when prompted.
-  5. Assert the serial scope preview updates to show at least one category scope key and its current serial value.
-  6. Save or preview the rule and assert the generated example code uses the displayed serial configuration.
-
-- [ ] Conflict rows in recode preview are highlighted, execution is blocked by default, and force execution requires an extra confirmation.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, create an auto-code-enabled, recode-enabled library, two materials, and a draft code rule version that produces at least one duplicate or conflicting `new_code` by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, `POST http://localhost:8000/api/v1/materials`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions`, and `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview`.
-  3. In a browser session authenticated as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created library, and open the recode preview for the conflict batch.
-  4. Assert rows with conflict status are visually highlighted red and show a specific conflict reason such as duplicate code, existing code conflict, or `编码冲突`.
-  5. Click the normal execute/confirm recode action and assert execution is blocked with an error or disabled action while conflicts exist.
-  6. Enable the explicit force option if the UI provides it, then click the force execute action.
-  7. Assert a second confirmation dialog appears that explicitly mentions force execution and code conflicts before any execution request is sent.
-  8. Cancel the force confirmation and assert the batch remains in preview or pending state in the UI.
-
-- [ ] Code mapping export supports date range, batch filter, search, and CSV/Excel format selection.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, create an auto-code-enabled, recode-enabled library, at least one material, and one executed recode batch by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, `POST http://localhost:8000/api/v1/materials`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview`, and `POST http://localhost:8000/api/v1/material-code-change-batches/{batch_id}/execute`.
-  3. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created library detail view, and click the `编码映射` tab.
-  4. Enter an old code, new code, or material name visible in the table into the search field and assert the table filters to matching mapping rows.
-  5. Apply the executed batch ID filter and a date range that includes the mapping change time; assert the table remains filtered to the selected batch and date range.
-  6. Open the export action and assert it offers format choices for CSV and Excel.
-  7. Choose CSV, download the file, and assert the `.csv` content contains only rows matching the active search/filter criteria and includes columns for old code, new code, material name, batch ID, change time, and status.
-  8. Choose Excel, download the file, and assert an `.xlsx` file is downloaded for the same active search/filter criteria.
-
-- [ ] Code rule and recode pages have complete zh-CN/en-US labels and stay usable on a narrow viewport.
-  Evaluator steps:
-  1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, and open a material library detail view containing code rule, recode record, and code mapping tabs.
-  3. In zh-CN locale, visit the code rule edit form, recode preview, recode records, and code mapping tab; assert no visible key-like fallback text such as `codeRule.`, `recode.`, `mapping.`, `undefined`, or `missing` appears in labels, buttons, table headers, validation messages, status badges, or empty states.
-  4. Switch to en-US locale using the app's language control and repeat the same page visits; assert English labels are visible and no key-like fallback text appears.
-  5. Resize the browser viewport to `390x844`, return to `http://localhost:5173/material/library`, and open the same library detail view.
-  6. Assert the code rule, recode records, and code mapping list views remain usable without overlapping text or clipped primary actions; tables may scroll horizontally, but tab labels, filters, and primary buttons must remain reachable.
-  7. On the narrow viewport, open the code rule edit form and assert segment rows, validation errors, and save/cancel actions remain visible and operable.
+  2. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password, navigate to `http://localhost:5173/debug/trace`, and ensure at least one trace is visible by creating one through `POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke` if necessary.
+  3. Switch the browser to dark presentation by using the app's theme control if one exists; otherwise, in Playwright set `localStorage.theme = "dark"`, add the `dark` class to `document.documentElement`, and reload `http://localhost:5173/debug/trace`.
+  4. Assert the left trace-list panel, right span-detail panel, trace IDs, span names, badges, buttons, date inputs, icons, and empty/error/loading states use dark-compatible foreground and background colors rather than gray-on-dark or black-on-dark text.
+  5. Programmatically check visible text in both panels and assert normal text has a contrast ratio of at least 4.5:1 against its computed background; assert icon-only controls have at least 3:1 contrast.
+  6. In dark theme, apply a date range filter, select a trace, collapse and expand a span node, and assert each interaction remains visible and usable without overlapping or clipped text.
 
 ---
 CONTRACT APPROVED
 
-Sprint: 31
-Approved criteria: 7
-Notes: All criteria map cleanly to browser-mode verification with Playwright. Test steps are concrete and unambiguous. Each criterion has at least 6 test steps covering setup, action, and assertion phases. Good calibration on conflict handling (multi-step confirmation), export (CSV and Excel verification), and responsive (viewport boundary at 390x844).
+Sprint: 32
+Approved criteria: 4
+Notes: Criterion 4 step 5 (contrast ratio verification) requires custom page.evaluate() with a color-contrast utility in Playwright. Use existing CSS variables from theme.css (--foreground, --background, --muted-foreground, etc.) rather than hardcoded Tailwind gray color classes. Generator must replace hardcoded light-theme colors (text-gray-*, bg-white, bg-gray-50, border-gray-200) with CSS variable references for dark mode compatibility.

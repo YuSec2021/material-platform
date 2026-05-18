@@ -6,12 +6,12 @@ const resources = {
     translation: {
       app: {
         name: "智料通",
-        system: "专属于企业的AI物料中台",
+        system: "企业的一站式物料治理平台，专业、高效、智能化",
         about: "关于",
         aboutTitle: "关于智料通",
         aboutName: "名称：智料通",
         aboutVersion: "版本：v4.2.0",
-        aboutDescription: "描述：专属于企业的AI物料中台",
+        aboutDescription: "描述：企业的一站式物料治理平台，专业、高效、智能化",
         retry: "重试",
         reload: "重新加载",
         menu: "打开导航",
