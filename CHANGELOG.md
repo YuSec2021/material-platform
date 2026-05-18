@@ -102,3 +102,5 @@
 - Conflict rows are highlighted red via rowTone CSS. Execution is blocked by default (canExecute = false when hasConflicts). Force execution requires checkbox enablement and a second confirmation dialog.
 - Full-featured code mapping export with date range filter, batch filter, search (old_code/new_code/material_name), and CSV/Excel format selection.
 - Both zh-CN and en-US translations complete with no fallback keys. Responsive layout functional at narrow viewport.
+
+## v10.0.0 — Sprint 32 [MAJOR bump]
