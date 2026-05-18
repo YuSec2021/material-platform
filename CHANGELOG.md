@@ -93,3 +93,12 @@
 - All mapping columns visible. Search filters rows correctly. Excel/CSV export button present.
 - Selection modal renders with checkbox column. Preview total correctly shows 1 after selecting single material.
 - Rollback dialog renders with external system impact warning in amber box.
+
+## v9.2.0 — Sprint 31 [MINOR bump]
+- The generated material code is visible in the form before save via the readOnly code field with live preview. The backend correctly generates codes (MAT-*) for materials in auto-code-enabled libraries.
+- Segment builder supports drag-to-reorder (GripVertical handles), visual type icons, inline help tooltips (hover/focus), and segment-level validation highlighting with red border.
+- Attribute code segment has autocomplete for attribute names (fetched from existing attributes API) and CSV bulk import for value-to-code mappings. Both features are wired in the edit modal segment builder.
+- Serial number scope preview is present showing current and next values for the configured scope key.
+- Conflict rows are highlighted red via rowTone CSS. Execution is blocked by default (canExecute = false when hasConflicts). Force execution requires checkbox enablement and a second confirmation dialog.
+- Full-featured code mapping export with date range filter, batch filter, search (old_code/new_code/material_name), and CSV/Excel format selection.
+- Both zh-CN and en-US translations complete with no fallback keys. Responsive layout functional at narrow viewport.
