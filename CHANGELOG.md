@@ -84,3 +84,12 @@
 ## v8.0.0 — Sprint 28 [MAJOR bump]
 
 ## v9.0.0 — Sprint 29 [MAJOR bump]
+
+## v9.1.0 — Sprint 30 [MINOR bump]
+- The preview opens as a modal inside the library detail page at http://localhost:5173/material/library, displaying the library name and generated batch ID.
+- All 7 columns visible. Both pass ("通过") and fail ("失败") localized status cells rendered. Pagination control present.
+- Confirmation dialog present before execution. Library name and material count displayed. External system impact warning present in amber box.
+- Batch detail panel renders inline within the recodes tab, not as a separate modal or drawer.
+- All mapping columns visible. Search filters rows correctly. Excel/CSV export button present.
+- Selection modal renders with checkbox column. Preview total correctly shows 1 after selecting single material.
+- Rollback dialog renders with external system impact warning in amber box.
