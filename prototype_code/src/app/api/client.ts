@@ -187,6 +187,82 @@ export type MaterialCodeRuleVersionPayload = {
   activate?: boolean;
 };
 
+export type RecodeScope = "all" | "selected";
+
+export type RecodePreviewPayload = {
+  scope: RecodeScope;
+  material_ids?: number[];
+};
+
+export type BatchActionPayload = {
+  confirm: boolean;
+  reason?: string;
+};
+
+export type MaterialCodeChangeRow = {
+  id: number;
+  batch_id: number;
+  material_id: number;
+  material_name: string;
+  old_code: string;
+  new_code: string;
+  status: string;
+  error_message: string;
+};
+
+export type MaterialCodeChangeBatch = {
+  batch_id: number;
+  id: number;
+  library_id: number;
+  old_rule_version_id: number | null;
+  new_rule_version_id: number | null;
+  change_mode: RecodeScope | string;
+  total_count: number;
+  success_count: number;
+  failed_count: number;
+  status: string;
+  rows: MaterialCodeChangeRow[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type MaterialCodeChangePreviewList = {
+  items: MaterialCodeChangeRow[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type MaterialCodeMapping = {
+  id: number;
+  library_id: number;
+  material_id: number;
+  material_name: string;
+  old_code: string;
+  new_code: string;
+  old_rule_version_id: number | null;
+  new_rule_version_id: number | null;
+  batch_id: number | null;
+  status: string;
+  created_at: string;
+};
+
+export type MaterialCodeMappingList = {
+  items: MaterialCodeMapping[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type CodeMappingQueryParams = {
+  page?: number;
+  page_size?: number;
+  batch_id?: number | null;
+  old_code?: string;
+  new_code?: string;
+  export?: "csv";
+};
+
 export type MaterialPayload = {
   name: string;
   product_name_id: number;
@@ -204,6 +280,7 @@ export type MaterialQueryParams = {
   search?: string;
   status?: "" | "normal" | "stop_purchase" | "stop_use";
   product_name_id?: number | null;
+  material_library_id?: number | null;
 };
 
 export type MaterialGovernancePreviewPayload = {
@@ -781,6 +858,28 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return data as T;
 }
 
+async function download(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const url = pathToUrl(path);
+  const headers = requestHeaders(options.headers);
+  headers.delete("Accept");
+  headers.delete("Content-Type");
+  const { body: _body, ...fetchOptions } = options;
+
+  lastRequestUrl = url;
+  const response = await fetch(url, {
+    ...fetchOptions,
+    headers,
+  });
+  lastResponseStatus = response.status;
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new ApiError(response.status, text || response.statusText, url);
+  }
+
+  return response.blob();
+}
+
 export const apiClient = {
   get<T>(path: string) {
     return request<T>(path);
@@ -861,6 +960,41 @@ export const apiClient = {
       method: "POST",
       body: payload,
     });
+  },
+  recodePreview(libraryId: number, versionId: number, payload: RecodePreviewPayload) {
+    return request<MaterialCodeChangeBatch>(
+      `/material-libraries/${libraryId}/code-rules/versions/${versionId}/recode-preview`,
+      {
+        method: "POST",
+        body: payload,
+      },
+    );
+  },
+  recodeBatch(batchId: number) {
+    return request<MaterialCodeChangeBatch>(`/material-code-change-batches/${batchId}`);
+  },
+  recodePreviewRows(batchId: number, page = 1, pageSize = 50) {
+    return request<MaterialCodeChangePreviewList>(
+      withQuery(`/material-code-change-batches/${batchId}/preview`, { page, page_size: pageSize }),
+    );
+  },
+  executeRecodeBatch(batchId: number, payload: BatchActionPayload) {
+    return request<MaterialCodeChangeBatch>(`/material-code-change-batches/${batchId}/execute`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  rollbackRecodeBatch(batchId: number, payload: BatchActionPayload) {
+    return request<MaterialCodeChangeBatch>(`/material-code-change-batches/${batchId}/rollback`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  codeMappings(libraryId: number, params: CodeMappingQueryParams = {}) {
+    return request<MaterialCodeMappingList>(withQuery(`/material-libraries/${libraryId}/code-mappings`, params));
+  },
+  downloadCodeMappings(libraryId: number, params: CodeMappingQueryParams = {}) {
+    return download(withQuery(`/material-libraries/${libraryId}/code-mappings`, { ...params, export: "csv" }));
   },
   materials(params: MaterialQueryParams | QueryFunctionContextLike = {}) {
     const materialParams = "queryKey" in params ? {} : params;

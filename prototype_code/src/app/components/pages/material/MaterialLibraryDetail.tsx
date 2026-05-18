@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import {
   API_BASE_URL,
   apiClient,
+  type MaterialCodeChangeBatch,
   type MaterialCodeRuleVersion,
   type MaterialLibrary,
   type MaterialCodeRuleVersionPayload,
@@ -27,6 +28,12 @@ import { Button } from "@/app/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/app/components/ui/tabs";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import {
+  CodeMappingsPanel,
+  RecodePreviewModal,
+  RecodeRecordsPanel,
+  SelectedMaterialModal,
+} from "./MaterialLibraryRecodePanels";
 
 type SegmentType = "fixed" | "category_path" | "attribute_code" | "date" | "serial";
 type DateFormat = "YYYY" | "YYMM" | "YYYYMMDD";
@@ -389,11 +396,13 @@ function RuleEditor({
   currentRule,
   isOpen,
   onClose,
+  onRecodeDraft,
 }: {
   library: MaterialLibrary;
   currentRule: MaterialCodeRuleVersion;
   isOpen: boolean;
   onClose: () => void;
+  onRecodeDraft: (version: MaterialCodeRuleVersion, mode: Exclude<EffectiveMode, "new_materials">) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -424,6 +433,8 @@ function RuleEditor({
         form.effectiveMode === "all_recode" ? "codeRuleDetail.allRecodePrompt" : "codeRuleDetail.selectedRecodePrompt";
       setDraftPrompt(t(promptKey, { version: created.version_label }));
       toast.success(t("codeRuleDetail.draftCreated"));
+      onClose();
+      onRecodeDraft(created, form.effectiveMode);
     },
     onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
   });
@@ -811,6 +822,10 @@ export function MaterialLibraryDetail({
   const [versionPage, setVersionPage] = useState(1);
   const [selectedVersion, setSelectedVersion] = useState<MaterialCodeRuleVersion | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [previewBatch, setPreviewBatch] = useState<MaterialCodeChangeBatch | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [selectedRecodeVersion, setSelectedRecodeVersion] = useState<MaterialCodeRuleVersion | null>(null);
+  const [isSelectionOpen, setIsSelectionOpen] = useState(false);
 
   const libraryQuery = useQuery({
     queryKey: ["material-library", initialLibrary.id],
@@ -841,6 +856,50 @@ export function MaterialLibraryDetail({
 
   const openExport = () => {
     window.open(`${API_BASE_URL}/material-libraries/${library.id}/code-mappings?export=csv`, "_blank", "noopener,noreferrer");
+  };
+
+  const previewMutation = useMutation({
+    mutationFn: ({
+      versionId,
+      mode,
+      materialIds,
+    }: {
+      versionId: number;
+      mode: Exclude<EffectiveMode, "new_materials">;
+      materialIds: number[];
+    }) =>
+      apiClient.recodePreview(library.id, versionId, {
+        scope: mode === "all_recode" ? "all" : "selected",
+        material_ids: materialIds,
+      }),
+    onSuccess: (batch) => {
+      setPreviewBatch(batch);
+      setIsSelectionOpen(false);
+      setIsPreviewOpen(true);
+    },
+    onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
+  });
+
+  const startRecodePreview = (
+    version: MaterialCodeRuleVersion,
+    mode: Exclude<EffectiveMode, "new_materials">,
+    materialIds: number[] = [],
+  ) => {
+    setPreviewBatch(null);
+    setIsPreviewOpen(true);
+    previewMutation.mutate({ versionId: version.id, mode, materialIds });
+  };
+
+  const handleRecodeDraft = (
+    version: MaterialCodeRuleVersion,
+    mode: Exclude<EffectiveMode, "new_materials">,
+  ) => {
+    if (mode === "selected_recode") {
+      setSelectedRecodeVersion(version);
+      setIsSelectionOpen(true);
+      return;
+    }
+    startRecodePreview(version, mode);
   };
 
   return (
@@ -1053,10 +1112,10 @@ export function MaterialLibraryDetail({
           <PlaceholderPanel title={t("codeRuleDetail.tabs.materials")} body={t("codeRuleDetail.materialsPlaceholder")} />
         </TabsContent>
         <TabsContent value="recodes">
-          <PlaceholderPanel title={t("codeRuleDetail.tabs.recodes")} body={t("codeRuleDetail.recodesPlaceholder")} />
+          <RecodeRecordsPanel library={library} />
         </TabsContent>
         <TabsContent value="mappings">
-          <PlaceholderPanel title={t("codeRuleDetail.tabs.mappings")} body={t("codeRuleDetail.mappingsPlaceholder")} />
+          <CodeMappingsPanel library={library} />
         </TabsContent>
       </Tabs>
 
@@ -1067,8 +1126,34 @@ export function MaterialLibraryDetail({
           currentRule={currentRule}
           isOpen={isEditorOpen}
           onClose={() => setIsEditorOpen(false)}
+          onRecodeDraft={handleRecodeDraft}
         />
       )}
+
+      <SelectedMaterialModal
+        library={library}
+        isOpen={isSelectionOpen}
+        isGenerating={previewMutation.isPending}
+        onClose={() => setIsSelectionOpen(false)}
+        onGenerate={(materialIds) => {
+          if (selectedRecodeVersion) {
+            startRecodePreview(selectedRecodeVersion, "selected_recode", materialIds);
+          }
+        }}
+      />
+
+      <RecodePreviewModal
+        library={library}
+        batch={previewBatch}
+        isOpen={isPreviewOpen}
+        isGenerating={previewMutation.isPending}
+        onClose={() => setIsPreviewOpen(false)}
+        onBatchUpdated={setPreviewBatch}
+        onViewRecords={() => {
+          setIsPreviewOpen(false);
+          setActiveTab("recodes");
+        }}
+      />
     </div>
   );
 }
