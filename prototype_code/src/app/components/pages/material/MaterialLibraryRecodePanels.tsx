@@ -44,8 +44,8 @@ function statusTone(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-function rowTone(status: string) {
-  if (status === "failed") {
+function rowTone(status: string, errorMessage = "") {
+  if (status === "failed" || /unique|duplicate|conflict|冲突/i.test(errorMessage)) {
     return "bg-red-50 text-red-900";
   }
   return "bg-emerald-50 text-emerald-900";
@@ -108,6 +108,21 @@ function mappingsToWorkbook(rows: MaterialCodeMapping[], statusLabel: (status: s
     ].map((value) => String(value ?? "").replaceAll("\t", " ")).join("\t"),
   );
   return [headers.join("\t"), ...lines].join("\n");
+}
+
+function mappingsToCsv(rows: MaterialCodeMapping[], statusLabel: (status: string) => string) {
+  const headers = ["old_code", "new_code", "material_name", "batch_id", "change_time", "status"];
+  const lines = rows.map((row) =>
+    [
+      row.old_code,
+      row.new_code,
+      row.material_name,
+      row.batch_id ?? "",
+      formatTime(row.created_at),
+      statusLabel(row.status),
+    ].map(escapeCsv).join(","),
+  );
+  return [headers.join(","), ...lines].join("\n");
 }
 
 function classifyErrors(rows: MaterialCodeChangeRow[]): ErrorBreakdown {
@@ -179,6 +194,8 @@ export function RecodePreviewModal({
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [forceEnabled, setForceEnabled] = useState(false);
+  const [forceConfirmOpen, setForceConfirmOpen] = useState(false);
 
   const rowsQuery = useQuery({
     queryKey: ["material-recode-preview-rows", batch?.batch_id, page],
@@ -191,7 +208,10 @@ export function RecodePreviewModal({
   const total = rowsQuery.data?.total ?? batch?.total_count ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PREVIEW_PAGE_SIZE));
   const breakdown = classifyErrors(batch?.rows ?? rows);
-  const canExecute = Boolean(batch && batch.status === "preview" && batch.failed_count === 0);
+  const hasConflicts =
+    breakdown.codeConflict > 0 ||
+    rows.some((row) => /unique|duplicate|conflict|冲突/i.test(row.error_message));
+  const canExecute = Boolean(batch && batch.status === "preview" && batch.failed_count === 0 && !hasConflicts);
 
   const executeMutation = useMutation({
     mutationFn: () => apiClient.executeRecodeBatch(batch!.batch_id, { confirm: true, reason: t("codeRuleRecode.executeReason") }),
@@ -282,7 +302,7 @@ export function RecodePreviewModal({
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {rows.map((row) => (
-                  <tr key={row.id} className={rowTone(row.status)}>
+                  <tr key={row.id} className={rowTone(row.status, row.error_message)}>
                     <td className="px-3 py-2 text-gray-900">{row.material_name}</td>
                     <td className="px-3 py-2 text-gray-600">-</td>
                     <td className="px-3 py-2 text-gray-600">-</td>
@@ -326,16 +346,36 @@ export function RecodePreviewModal({
           </div>
 
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            {t("codeRuleRecode.externalWarning")}
+            {hasConflicts ? t("codeRuleRecode.conflictExecutionBlocked") : t("codeRuleRecode.externalWarning")}
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose}>
               {t("action.cancel")}
             </Button>
+            {hasConflicts && (
+              <label className="inline-flex items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm text-red-700">
+                <input
+                  type="checkbox"
+                  checked={forceEnabled}
+                  onChange={(event) => setForceEnabled(event.target.checked)}
+                />
+                {t("codeRuleRecode.forceOption")}
+              </label>
+            )}
             <Button type="button" onClick={() => setConfirmOpen(true)} disabled={!canExecute || executeMutation.isPending}>
               {executeMutation.isPending ? t("codeRuleRecode.executing") : t("codeRuleRecode.execute")}
             </Button>
+            {hasConflicts && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setForceConfirmOpen(true)}
+                disabled={!forceEnabled || executeMutation.isPending}
+              >
+                {t("codeRuleRecode.forceExecute")}
+              </Button>
+            )}
           </div>
         </div>
       </Modal>
@@ -360,6 +400,28 @@ export function RecodePreviewModal({
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
             {t("codeRuleRecode.externalWarning")}
           </p>
+        </div>
+      </Modal>
+      <Modal
+        isOpen={forceConfirmOpen}
+        onClose={() => setForceConfirmOpen(false)}
+        title={t("codeRuleRecode.forceConfirmTitle")}
+        footer={
+          <>
+            <Button type="button" variant="outline" onClick={() => setForceConfirmOpen(false)}>
+              {t("action.cancel")}
+            </Button>
+            <Button type="button" onClick={() => executeMutation.mutate()} disabled={executeMutation.isPending}>
+              {executeMutation.isPending ? t("codeRuleRecode.executing") : t("codeRuleRecode.forceConfirmExecute")}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 text-sm text-gray-700">
+          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+            {t("codeRuleRecode.forceConfirmBody")}
+          </p>
+          <p>{t("codeRuleRecode.executeConfirmBody", { library: library.name, count: batch?.total_count ?? 0 })}</p>
         </div>
       </Modal>
     </>
@@ -719,6 +781,7 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
   const [batchFilter, setBatchFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [exportFormat, setExportFormat] = useState<"csv" | "xlsx">("csv");
 
   const mappingsQuery = useQuery({
     queryKey: ["material-code-mappings", library.id, page, batchFilter],
@@ -752,10 +815,13 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
   const visibleRows = filteredRows.slice(0, MAPPING_PAGE_SIZE);
 
   const handleExport = async () => {
-    try {
-      await apiClient.downloadCodeMappings(library.id, { batch_id: batchFilter ? Number(batchFilter) : null });
-    } catch {
-      // The visible Excel export is generated client-side so filters beyond backend exact-code filters are preserved.
+    if (exportFormat === "csv") {
+      downloadTextFile(
+        `material-code-mappings-${library.id}.csv`,
+        mappingsToCsv(filteredRows, (status) => localizedStatus(status, t)),
+        "text/csv;charset=utf-8",
+      );
+      return;
     }
     downloadTextFile(
       `material-code-mappings-${library.id}.xlsx`,
@@ -768,10 +834,23 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
     <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-medium text-gray-900">{t("codeRuleDetail.tabs.mappings")}</h2>
-        <Button type="button" variant="outline" size="sm" onClick={handleExport}>
-          <FileSpreadsheet data-icon="inline-start" />
-          {t("codeRuleRecode.exportExcel")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <span>{t("codeRuleRecode.exportFormat")}</span>
+            <select
+              value={exportFormat}
+              onChange={(event) => setExportFormat(event.target.value as "csv" | "xlsx")}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="csv">{t("codeRuleRecode.exportCsv")}</option>
+              <option value="xlsx">{t("codeRuleRecode.exportExcel")}</option>
+            </select>
+          </label>
+          <Button type="button" variant="outline" size="sm" onClick={handleExport}>
+            <FileSpreadsheet data-icon="inline-start" />
+            {t("action.export")}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">

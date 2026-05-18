@@ -4,12 +4,20 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Calendar,
+  GripVertical,
+  Hash,
+  HelpCircle,
+  Layers,
   Download,
   Eye,
   History,
   Pencil,
   Plus,
   RefreshCw,
+  Tags,
+  Type,
+  Upload,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -34,6 +42,7 @@ import {
   RecodeRecordsPanel,
   SelectedMaterialModal,
 } from "./MaterialLibraryRecodePanels";
+import { MaterialList } from "./MaterialList";
 
 type SegmentType = "fixed" | "category_path" | "attribute_code" | "date" | "serial";
 type DateFormat = "YYYY" | "YYMM" | "YYYYMMDD";
@@ -80,6 +89,13 @@ const dateFormats: DateFormat[] = ["YYYY", "YYMM", "YYYYMMDD"];
 const serialScopes: SerialScope[] = ["global", "category", "category_attribute", "year", "month"];
 const mockCategoryCodes = ["NETWORK", "SWITCH", "CORE"];
 const mockAttributes: Record<string, string> = { color: "red" };
+const segmentIconMap = {
+  fixed: Type,
+  category_path: Layers,
+  attribute_code: Tags,
+  date: Calendar,
+  serial: Hash,
+};
 
 function nextId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -300,6 +316,82 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
   return next;
 }
 
+function moveItemById<T extends { id: string }>(items: T[], draggedId: string, targetId: string) {
+  const fromIndex = items.findIndex((item) => item.id === draggedId);
+  const toIndex = items.findIndex((item) => item.id === targetId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return items;
+  }
+  return moveItem(items, fromIndex, toIndex);
+}
+
+function segmentValidationError(
+  segment: EditableSegment,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  if (segment.type === "fixed" && !segment.fixedValue.trim()) {
+    return t("codeRule.validation.fixedValueRequired");
+  }
+  if (segment.type === "attribute_code" && !segment.attributeName.trim()) {
+    return t("codeRule.validation.attributeNameRequired");
+  }
+  return "";
+}
+
+function parseMappingCsv(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(1)
+    .map((line) => {
+      const [value = "", code = ""] = line.split(",").map((cell) => cell.trim().replace(/^"|"$/g, ""));
+      return value && code ? createMappingRow(value, code.toUpperCase()) : null;
+    })
+    .filter((row): row is AttributeMappingRow => Boolean(row));
+}
+
+function serialScopePreviewRows(segment: EditableSegment, t: (key: string, options?: Record<string, unknown>) => string) {
+  const length = Number(segment.serialLength) || 3;
+  const start = Number(segment.serialStart) || 1;
+  const current = Math.max(0, start - 1);
+  const next = String(start).padStart(length, "0");
+  if (segment.serialScope === "category" || segment.serialScope === "category_attribute") {
+    return [
+      {
+        key: "CAT-NETWORK",
+        current,
+        next,
+      },
+    ];
+  }
+  if (segment.serialScope === "year") {
+    return [{ key: String(new Date().getFullYear()), current, next }];
+  }
+  if (segment.serialScope === "month") {
+    return [{ key: new Date().toISOString().slice(0, 7), current, next }];
+  }
+  return [{ key: t("codeRule.serialScopes.global"), current, next }];
+}
+
+function SegmentHelp({ type }: { type: SegmentType }) {
+  const { t } = useTranslation();
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus:bg-gray-100 focus:text-gray-700"
+        aria-label={t("codeRule.segmentHelpLabel", { type: t(`codeRule.segmentTypes.${type}`) })}
+      >
+        <HelpCircle className="h-4 w-4" />
+      </button>
+      <span className="pointer-events-none absolute left-0 top-7 z-10 hidden w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-lg group-focus-within:block group-hover:block">
+        {t(`codeRule.segmentHelp.${type}`)}
+      </span>
+    </span>
+  );
+}
+
 function statusTone(status: string) {
   if (status === "active") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -410,12 +502,28 @@ function RuleEditor({
   const [showValidation, setShowValidation] = useState(false);
   const [previewRequested, setPreviewRequested] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState("");
+  const [draggedSegmentId, setDraggedSegmentId] = useState<string | null>(null);
+  const attributesQuery = useQuery({
+    queryKey: ["attributes", "code-rule-autocomplete"],
+    queryFn: () => apiClient.attributes(null),
+    enabled: isOpen,
+    retry: false,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ["categories", "code-rule-serial-preview"],
+    queryFn: apiClient.categories,
+    enabled: isOpen,
+    retry: false,
+  });
+  const attributeOptions = attributesQuery.data ?? [];
+  const categoryOptions = categoriesQuery.data ?? [];
 
   const preview = useMemo(
     () => buildPreview(form, t("codeRule.previewMissingMapping")),
     [form, t],
   );
   const reasonMissing = showValidation && !form.changeReason.trim();
+  const hasSegmentErrors = form.segments.some((segment) => segmentValidationError(segment, t));
 
   const saveMutation = useMutation({
     mutationFn: (payload: MaterialCodeRuleVersionPayload) => apiClient.createCodeRuleVersion(library.id, payload),
@@ -465,10 +573,15 @@ function RuleEditor({
   const handleSave = () => {
     setShowValidation(true);
     setDraftPrompt("");
-    if (!form.changeReason.trim()) {
+    if (!form.changeReason.trim() || hasSegmentErrors) {
       return;
     }
     saveMutation.mutate(formToPayload(form));
+  };
+
+  const handlePreview = () => {
+    setShowValidation(true);
+    setPreviewRequested(true);
   };
 
   const addSegment = (type: SegmentType) => {
@@ -488,6 +601,21 @@ function RuleEditor({
       return;
     }
     setForm((current) => ({ ...current, segments: moveItem(current.segments, index, nextIndex) }));
+  };
+
+  const importMappings = (segmentId: string, file: File | null) => {
+    if (!file) {
+      return;
+    }
+    void file.text().then((text) => {
+      const rows = parseMappingCsv(text);
+      if (rows.length === 0) {
+        toast.error(t("codeRule.csvImportEmpty"));
+        return;
+      }
+      updateSegment(segmentId, { mappings: rows });
+      toast.success(t("codeRule.csvImportSuccess", { count: rows.length }));
+    });
   };
 
   return (
@@ -559,12 +687,12 @@ function RuleEditor({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-gray-800">{t("codeRule.livePreview")}</div>
-              {previewRequested && preview.error && <p className="mt-2 text-sm text-red-600">{preview.error}</p>}
-              {previewRequested && !preview.error && (
+              {preview.error && <p className="mt-2 text-sm text-red-600">{preview.error}</p>}
+              {!preview.error && (
                 <p className="mt-2 break-all font-mono text-lg text-blue-700">{preview.code || t("codeRule.emptyPreview")}</p>
               )}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => setPreviewRequested(true)}>
+            <Button type="button" variant="outline" size="sm" onClick={handlePreview}>
               <Eye data-icon="inline-start" />
               {t("codeRuleDetail.preview")}
             </Button>
@@ -588,25 +716,58 @@ function RuleEditor({
 
         <div className="flex flex-col gap-3">
           {form.segments.map((segment, index) => (
-            <article key={segment.id} className="rounded-lg border border-gray-200 bg-white p-4">
+            <article
+              key={segment.id}
+              draggable
+              onDragStart={() => setDraggedSegmentId(segment.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => {
+                if (!draggedSegmentId) {
+                  return;
+                }
+                setForm((current) => ({
+                  ...current,
+                  segments: moveItemById(current.segments, draggedSegmentId, segment.id),
+                }));
+                setDraggedSegmentId(null);
+                setPreviewRequested(true);
+              }}
+              className={`rounded-lg border bg-white p-4 ${
+                showValidation && segmentValidationError(segment, t)
+                  ? "border-red-300 ring-2 ring-red-100"
+                  : "border-gray-200"
+              }`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <label className="flex w-56 flex-col gap-1 text-sm text-gray-700">
-                  <span>{t("codeRule.segmentType")}</span>
-                  <select
-                    value={segment.type}
-                    onChange={(event) => {
-                      const next = createSegment(event.target.value as SegmentType);
-                      updateSegment(segment.id, { ...next, id: segment.id });
-                    }}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    {segmentTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {t(`codeRule.segmentTypes.${type}`)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <GripVertical className="h-5 w-5 shrink-0 cursor-grab text-gray-400" aria-hidden="true" />
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+                    {(() => {
+                      const Icon = segmentIconMap[segment.type];
+                      return <Icon className="h-4 w-4" />;
+                    })()}
+                  </span>
+                  <label className="flex w-56 flex-col gap-1 text-sm text-gray-700">
+                    <span className="flex items-center gap-1">
+                      {t("codeRule.segmentType")}
+                      <SegmentHelp type={segment.type} />
+                    </span>
+                    <select
+                      value={segment.type}
+                      onChange={(event) => {
+                        const next = createSegment(event.target.value as SegmentType);
+                        updateSegment(segment.id, { ...next, id: segment.id });
+                      }}
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      {segmentTypes.map((type) => (
+                        <option key={type} value={type}>
+                          {t(`codeRule.segmentTypes.${type}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
@@ -639,6 +800,9 @@ function RuleEditor({
                   </Button>
                 </div>
               </div>
+              {showValidation && segmentValidationError(segment, t) && (
+                <p className="mt-3 text-sm text-red-600">{segmentValidationError(segment, t)}</p>
+              )}
 
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 {segment.type === "fixed" && (
@@ -693,10 +857,35 @@ function RuleEditor({
                       <span>{t("codeRule.attributeName")}</span>
                       <input
                         type="text"
+                        list="code-rule-attribute-options"
                         value={segment.attributeName}
                         onChange={(event) => updateSegment(segment.id, { attributeName: event.target.value })}
                         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                       />
+                      <datalist id="code-rule-attribute-options">
+                        {attributeOptions.map((attribute) => (
+                          <option key={attribute.id} value={attribute.name} />
+                        ))}
+                      </datalist>
+                      {segment.attributeName.trim() && (
+                        <div className="max-h-32 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-sm">
+                          {attributeOptions
+                            .filter((attribute) =>
+                              attribute.name.toLowerCase().includes(segment.attributeName.trim().toLowerCase()),
+                            )
+                            .slice(0, 6)
+                            .map((attribute) => (
+                              <button
+                                key={attribute.id}
+                                type="button"
+                                className="block w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-blue-50"
+                                onClick={() => updateSegment(segment.id, { attributeName: attribute.name })}
+                              >
+                                {attribute.name}
+                              </button>
+                            ))}
+                        </div>
+                      )}
                     </label>
                     <div className="flex flex-col gap-2">
                       <div className="text-sm font-medium text-gray-700">{t("codeRule.mappingTable")}</div>
@@ -742,6 +931,19 @@ function RuleEditor({
                         <Plus data-icon="inline-start" />
                         {t("codeRule.addMapping")}
                       </Button>
+                      <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border border-blue-200 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50">
+                        <Upload className="h-3.5 w-3.5" />
+                        {t("codeRule.importCsv")}
+                        <input
+                          type="file"
+                          accept=".csv,text/csv"
+                          className="sr-only"
+                          onChange={(event) => {
+                            importMappings(segment.id, event.target.files?.[0] ?? null);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
                     </div>
                   </div>
                 )}
@@ -798,6 +1000,31 @@ function RuleEditor({
                         ))}
                       </select>
                     </label>
+                    {(segment.serialScope === "category" || segment.serialScope === "category_attribute") && (
+                      <label className="flex flex-col gap-1 text-sm text-gray-700">
+                        <span>{t("codeRule.serialScopeKey")}</span>
+                        <select className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                          {(categoryOptions.length > 0 ? categoryOptions : [{ id: 0, name: "NETWORK", code: "NETWORK" }]).map((category) => (
+                            <option key={category.id} value={category.code}>
+                              {category.name} ({category.code})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900 md:col-span-3">
+                      <div className="font-medium">{t("codeRule.serialPreviewTitle")}</div>
+                      <div className="mt-2 grid gap-2 md:grid-cols-3">
+                        {serialScopePreviewRows(segment, t).map((row) => (
+                          <div key={row.key} className="rounded border border-blue-100 bg-white px-3 py-2">
+                            <div className="text-xs text-blue-600">{row.key}</div>
+                            <div className="mt-1 font-mono">
+                              {t("codeRule.serialCurrent")}: {row.current} / {t("codeRule.serialNext")}: {row.next}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </>
                 )}
               </div>
@@ -1109,7 +1336,7 @@ export function MaterialLibraryDetail({
         </TabsContent>
 
         <TabsContent value="materials">
-          <PlaceholderPanel title={t("codeRuleDetail.tabs.materials")} body={t("codeRuleDetail.materialsPlaceholder")} />
+          <MaterialList fixedLibraryId={library.id} />
         </TabsContent>
         <TabsContent value="recodes">
           <RecodeRecordsPanel library={library} />

@@ -20,6 +20,7 @@ import {
   type Brand,
   type Category,
   type Material,
+  type MaterialCodeRuleVersion,
   type MaterialLibrary,
   type MaterialPayload,
   type ProductName,
@@ -43,6 +44,12 @@ type MaterialFormState = {
 };
 
 type LifecycleAction = "stop_purchase" | "stop_use";
+type SegmentType = "fixed" | "category_path" | "attribute_code" | "date" | "serial";
+
+type CodePreview = {
+  code: string;
+  error: string | null;
+};
 
 const aiActionLabels: Record<AiModalType, string> = {
   治理: "AI物料治理",
@@ -118,6 +125,94 @@ function selectedName<T extends { id: number; name: string }>(items: T[] | undef
   return items?.find((item) => item.id === id)?.name ?? "";
 }
 
+function segmentTypeFromRaw(raw: unknown): SegmentType {
+  if (raw === "fixed_text") {
+    return "fixed";
+  }
+  if (raw === "serial_number") {
+    return "serial";
+  }
+  if (["fixed", "category_path", "attribute_code", "date", "serial"].includes(String(raw))) {
+    return raw as SegmentType;
+  }
+  return "fixed";
+}
+
+function renderDateSegment(format: string) {
+  const current = new Date();
+  const year = String(current.getFullYear());
+  const month = String(current.getMonth() + 1).padStart(2, "0");
+  const day = String(current.getDate()).padStart(2, "0");
+  if (format === "YYYY") {
+    return year;
+  }
+  if (format === "YYMM") {
+    return `${year.slice(2)}${month}`;
+  }
+  return `${year}${month}${day}`;
+}
+
+function valueMapping(segment: Record<string, unknown>) {
+  if (Array.isArray(segment.mappings)) {
+    return Object.fromEntries(
+      segment.mappings
+        .map((item) => (typeof item === "object" && item ? item as Record<string, unknown> : null))
+        .filter(Boolean)
+        .map((item) => [String(item?.value ?? ""), String(item?.code ?? "")]),
+    );
+  }
+  const mapping = segment.value_to_code ?? segment.value_to_code_mapping;
+  return typeof mapping === "object" && mapping ? mapping as Record<string, string> : {};
+}
+
+function serialPreview(segment: Record<string, unknown>, materials: Material[]) {
+  const length = Number(segment.length ?? segment.padding_length ?? 3) || 3;
+  const start = Number(segment.start ?? segment.start_value ?? 1) || 1;
+  const step = Number(segment.step ?? 1) || 1;
+  const current = Math.max(0, materials.length) > 0 ? start + (materials.length - 1) * step : start - step;
+  return String(current + step).padStart(length, "0");
+}
+
+function buildMaterialCodePreview(
+  rule: MaterialCodeRuleVersion | undefined,
+  form: MaterialFormState,
+  category: Category | undefined,
+  materials: Material[],
+): CodePreview {
+  if (!rule) {
+    return { code: "", error: null };
+  }
+
+  const parts: string[] = [];
+  for (const segment of rule.segments) {
+    const type = segmentTypeFromRaw(segment.type);
+    if (type === "fixed") {
+      parts.push(String(segment.value ?? segment.text ?? segment.literal ?? "").trim().toUpperCase());
+    } else if (type === "date") {
+      parts.push(renderDateSegment(String(segment.format ?? "YYYYMMDD")));
+    } else if (type === "category_path") {
+      if (!category) {
+        return { code: "", error: "请选择类目后预览自动编码。" };
+      }
+      const source = String(segment.source ?? "code");
+      const raw = source === "name" ? category.name : category.code;
+      const length = Number(segment.length ?? segment.max_length ?? 0) || 0;
+      parts.push(raw.replace(/[^A-Za-z0-9_-]/g, "").toUpperCase().slice(0, length || undefined));
+    } else if (type === "attribute_code") {
+      const attributeName = String(segment.attribute ?? segment.attribute_name ?? segment.name ?? "");
+      const value = form.attributes[attributeName];
+      if (value === undefined || value === "") {
+        return { code: "", error: `请填写属性 ${attributeName} 后预览自动编码。` };
+      }
+      const mapped = valueMapping(segment)[String(value)] ?? String(value);
+      parts.push(mapped.replace(/[^A-Za-z0-9_-]/g, "").toUpperCase());
+    } else if (type === "serial") {
+      parts.push(serialPreview(segment, materials));
+    }
+  }
+  return { code: parts.join(rule.separator ?? ""), error: null };
+}
+
 function csvCell(value: unknown) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
@@ -181,7 +276,7 @@ function TreeCategory({
   );
 }
 
-export function MaterialList() {
+export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {}) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
@@ -202,8 +297,13 @@ export function MaterialList() {
   const [lifecycleFeedback, setLifecycleFeedback] = useState("");
 
   const materialsQuery = useQuery({
-    queryKey: ["materials", searchTerm, statusFilter],
-    queryFn: () => apiClient.materials({ search: searchTerm.trim(), status: statusFilter }),
+    queryKey: ["materials", searchTerm, statusFilter, selectedLibraryId],
+    queryFn: () =>
+      apiClient.materials({
+        search: searchTerm.trim(),
+        status: statusFilter,
+        material_library_id: selectedLibraryId === "" ? null : selectedLibraryId,
+      }),
     retry: false,
   });
 
@@ -241,11 +341,16 @@ export function MaterialList() {
 
   useEffect(() => {
     const libraries = librariesQuery.data ?? [];
+    if (fixedLibraryId) {
+      setSelectedLibraryId(fixedLibraryId);
+      setExpandedLibraryIds([fixedLibraryId]);
+      return;
+    }
     if (selectedLibraryId === "" && libraries.length > 0) {
       setSelectedLibraryId(libraries[0]!.id);
       setExpandedLibraryIds([libraries[0]!.id]);
     }
-  }, [librariesQuery.data, selectedLibraryId]);
+  }, [fixedLibraryId, librariesQuery.data, selectedLibraryId]);
 
   useEffect(() => {
     const selectedProduct = productNamesQuery.data?.find((item) => item.id === selectedProductNameId);
@@ -260,6 +365,20 @@ export function MaterialList() {
   const productNames = productNamesQuery.data ?? [];
   const brands = brandsQuery.data ?? [];
   const dynamicAttributes = attributesQuery.data ?? [];
+  const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
+  const selectedCategory = categories.find((category) => category.id === form.category_id);
+
+  const currentRuleQuery = useQuery({
+    queryKey: ["material-code-rule-current", form.material_library_id],
+    queryFn: () => apiClient.currentCodeRule(Number(form.material_library_id)),
+    enabled: isFormOpen && !editingMaterial && Boolean(selectedLibrary?.auto_code_enabled && form.material_library_id),
+    retry: false,
+  });
+
+  const materialCodePreview = useMemo(
+    () => buildMaterialCodePreview(currentRuleQuery.data, form, selectedCategory, materialRows),
+    [currentRuleQuery.data, form, materialRows, selectedCategory],
+  );
 
   const saveMutation = useMutation({
     mutationFn: (payload: MaterialPayload) =>
@@ -405,7 +524,7 @@ export function MaterialList() {
 
   return (
     <div className="flex h-full flex-col gap-4 lg:flex-row lg:gap-6">
-      <aside className="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 lg:max-h-none lg:w-64 lg:shrink-0">
+      {!fixedLibraryId && <aside className="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 lg:max-h-none lg:w-64 lg:shrink-0">
         <h2 className="mb-4 text-sm font-medium text-gray-900">物料库 / 类目</h2>
         <ApiState
           isLoading={librariesQuery.isLoading || categoriesQuery.isLoading}
@@ -451,7 +570,7 @@ export function MaterialList() {
             })}
           </div>
         </ApiState>
-      </aside>
+      </aside>}
 
       <main className="min-w-0 flex-1 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -663,10 +782,17 @@ export function MaterialList() {
               <span>{t("field.materialCode")}</span>
               <input
                 type="text"
-                value={editingMaterial?.code ?? "保存后自动生成"}
+                value={editingMaterial?.code ?? (materialCodePreview.code || t("material.autoCodePending"))}
                 readOnly
                 className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
               />
+              {!editingMaterial && selectedLibrary?.auto_code_enabled && (
+                <span className={materialCodePreview.error ? "text-xs text-red-600" : "text-xs text-blue-700"}>
+                  {currentRuleQuery.isLoading
+                    ? t("material.autoCodeLoading")
+                    : materialCodePreview.error ?? t("material.autoCodePreview")}
+                </span>
+              )}
             </label>
             <label className="space-y-1 text-sm text-gray-700">
               <span>{t("field.library")}</span>

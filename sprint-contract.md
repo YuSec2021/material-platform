@@ -1,102 +1,90 @@
-## Sprint 30: Frontend: Batch Recoding Preview, Execution, and Code Mapping
+## Sprint 31: Frontend: Recode Integration and Code Rule Wizard Polish
 
 ### Features
-- Add a `重编码预览` experience that is triggered after editing a material library code rule and selecting `全部物料重编码` or `选中物料重编码`.
-- Show a preview summary header with total materials, expected success count, expected failure count, and an error breakdown by `缺少属性`, `编码冲突`, and `类目编码缺失`.
-- Display preview rows in a paginated table with 50 rows per page and columns for material name, specification, category path, old code, new code, status, and failure reason.
-- Use visually distinct pass/fail row states for preview results, with localized statuses `通过` and `失败`.
-- Provide a CSV download for preview results containing every visible preview column.
-- Add a guarded recode execution flow with a prominent confirmation dialog that includes library name, material count, and an external-system impact warning.
-- Show loading and progress feedback while recode preview and execution are running.
-- Fill the `重编码记录` tab with recode batch rows and batch detail views containing batch metadata and per-material change details.
-- Fill the `编码映射` tab with searchable/filterable code mappings, pagination, and Excel export.
-- Add per-batch rollback from the recode record detail with a risk-warning confirmation dialog.
-- Implementation must extend `prototype_code/src/app/api/client.ts` with typed API client methods for the recode APIs, including `recodePreview`, `recodeBatch`, `recodePreviewRows`, `executeRecodeBatch`, `rollbackRecodeBatch`, `codeMappings`, and a code mapping export/download method.
+- Integrate code generation into the material creation flow so a material created in an auto-code-enabled material library receives and displays a generated material code before save.
+- Polish the code rule segment builder with drag-to-reorder behavior, segment type icons, inline help tooltips, and segment-specific validation highlighting.
+- Enhance the attribute code mapping table with attribute-name autocomplete from existing attributes and CSV bulk import for value-to-code mappings.
+- Add serial number scope preview showing current serial values for each applicable scope key before material or rule creation.
+- Improve recode conflict handling by highlighting conflict rows in red with specific conflict details and blocking execution unless the user explicitly forces execution through an extra confirmation.
+- Expand code mapping export with date range filtering, batch filtering, old_code/new_code search, and CSV/Excel format selection.
+- Complete zh-CN and en-US i18n coverage for all code rule and recode labels, buttons, messages, table headers, validation errors, status badges, and empty states.
+- Improve responsive layout for code rule, recode, and mapping list views on narrow browser widths.
 
 ### Success criteria (black-box-verifiable)
-- [ ] A super_admin can trigger all-material recode preview from the edit-rule flow and see the preview summary.
+- [ ] A super_admin creating a material in an auto-code-enabled library sees the generated material code before saving, and the saved material keeps that code.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
   2. Open `http://localhost:5173/login` in a browser, sign in with username `super_admin` and an empty password, then navigate to `http://localhost:5173/material/library`.
-  3. Using Playwright request context or an equivalent HTTP client with headers `X-Username: super_admin`, `X-User-Role: super_admin`, and `Authorization: Bearer super_admin`, create the test data through backend APIs: call `GET http://localhost:8000/api/v1/product-names` and `GET http://localhost:8000/api/v1/categories` to choose valid IDs; call `POST http://localhost:8000/api/v1/material-libraries` with a unique name, `auto_code_enabled: true`, `recode_enabled: true`, and a code rule containing fixed segment `S30` plus a serial segment; then call `POST http://localhost:8000/api/v1/materials` with that library ID, the chosen product/category IDs, material name `Sprint 30 Preview Material`, status `normal`, and attributes `{}`.
-  4. Refresh `http://localhost:5173/material/library`, open the created material library detail view, click `编码规则`, click `编辑规则`, make a small segment change, enter change reason `Sprint 30 all recode preview`, select `全部物料重编码`, and save.
-  5. Assert the preview view opens as a modal or drawer inside the selected library detail on `http://localhost:5173/material/library`; the visible container must have heading `重编码预览`, show the selected library name, and show the generated batch ID.
-  6. Assert the preview view shows a summary header with total materials, expected success count, expected failure count, and an error breakdown containing labels for `缺少属性`, `编码冲突`, and `类目编码缺失`.
-  7. Assert visible loading or progress feedback appears while the preview is being generated, even if the preview completes quickly.
+  3. Using Playwright request context or an equivalent HTTP client with headers `X-Username: super_admin`, `X-User-Role: super_admin`, and `Authorization: Bearer super_admin`, create setup data through backend APIs: call `GET http://localhost:8000/api/v1/product-names` and `GET http://localhost:8000/api/v1/categories` to choose valid IDs; call `POST http://localhost:8000/api/v1/material-libraries` with a unique name, `auto_code_enabled: true`, `recode_enabled: true`, and a code rule containing fixed segment `S31` plus a serial segment.
+  4. In the browser, open the created material library detail view from `http://localhost:5173/material/library`, navigate to the material list or material creation entry point, and start creating a new material in that library.
+  5. Fill the required material fields using product/category IDs from setup and material name `Sprint 31 Auto Code Material`; before clicking the final save/create action, assert the form visibly shows a generated code beginning with `S31` in a material code field, preview row, or read-only generated-code display.
+  6. Save the material and assert the success state appears without manually typing a material code.
+  7. Reopen the created material from the UI or call `GET http://localhost:8000/api/v1/materials?material_library_id={library_id}` with the same headers and assert the material code is present, begins with `S31`, and matches the generated code shown before save.
 
-- [ ] The recode preview table exposes complete row data, status styling, pagination, and CSV download.
+- [ ] The code rule segment builder supports drag reorder, icons, tooltips, and segment-level validation feedback.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. In a browser session authenticated as `super_admin`, create an automatic-code, recode-enabled library and at least one material through backend calls to `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, and `POST http://localhost:8000/api/v1/materials`, using the same authentication headers from criterion 1.
-  3. Navigate to `http://localhost:5173/material/library`, open the created library, and create or open a recode preview through the `全部物料重编码` edit-rule flow.
-  4. Assert the preview table contains columns labeled for material name, specification, category path, old code, new code, status, and failure reason.
-  5. Assert pass rows show localized status `通过` with a green visual state and failed rows, when present, show localized status `失败` with a red visual state and a visible failure reason.
-  6. If the preview contains more than 50 rows, use the pagination control and assert the page size is 50 rows and navigating pages keeps the browser in the `重编码预览` modal or drawer on `http://localhost:5173/material/library`.
-  7. Click the preview CSV download action and assert a `.csv` file is downloaded.
-  8. Open the downloaded CSV and assert it contains headers for material name, specification, category path, old code, new code, status, and failure reason.
+  2. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password, then create or open an auto-code-enabled material library at `http://localhost:5173/material/library`.
+  3. Open the library detail view, click `编码规则`, click `编辑规则`, and assert each visible segment row shows an icon or type-specific visual marker for fixed text, category path, attribute code, date, or serial number segments.
+  4. Hover or focus the help affordance for at least two segment types and assert an inline tooltip appears explaining that segment type.
+  5. Add at least three segments, drag the last segment above the first segment, and assert the visual order changes and the live preview code updates to reflect the new order.
+  6. Create an invalid segment configuration, such as an empty fixed-text value or an attribute-code segment without an attribute name, and attempt to preview or save.
+  7. Assert the specific invalid segment is highlighted with a localized validation error near that segment, and unrelated valid segments are not marked as invalid.
 
-- [ ] Recode execution requires explicit confirmation, shows progress, and writes a completed batch record.
+- [ ] Attribute code mapping supports attribute autocomplete and CSV bulk import.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password, then create an automatic-code, recode-enabled library and one material through backend calls to `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, and `POST http://localhost:8000/api/v1/materials`.
-  3. Navigate to `http://localhost:5173/material/library`, open the created library, and open an all-material recode preview through the edit-rule flow.
-  4. Click the execute or confirm recode action and assert a confirmation dialog appears before execution.
-  5. Assert the confirmation dialog includes the selected library name, the material count being recoded, and a warning about external system impact.
-  6. Cancel the dialog and assert no success message or new completed batch is shown.
-  7. Reopen the confirmation dialog, confirm execution, and assert the UI shows loading or progress feedback during execution.
-  8. Assert execution finishes with a success or completed state and the UI offers a way to view the related `重编码记录`.
-  9. Navigate to the `重编码记录` tab in the same library detail view and assert a batch row appears with batch ID, old version, new version, change mode, total count, success count, failed count, status, created_by, and created_at.
+  2. Using backend APIs with super_admin headers, ensure there is at least one product/category/attribute available by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, and the existing attribute list endpoint if available; then open `http://localhost:5173/login`, sign in as `super_admin`, and navigate to `http://localhost:5173/material/library`.
+  3. Open a material library code rule create or edit form and add an attribute-code segment.
+  4. Click the attribute name input and type the first characters of an existing attribute name; assert an autocomplete list appears and selecting an option fills the attribute name field.
+  5. Prepare a CSV file with headers `value,code` and at least two rows such as `Red,RD` and `Blue,BL`; use the bulk import action in the attribute mapping table to upload that file.
+  6. Assert the mapping table now shows rows for `Red` -> `RD` and `Blue` -> `BL`.
+  7. Save or preview the rule and assert no validation error is shown for the imported mapping rows.
 
-- [ ] The recode records tab supports batch browsing and full batch detail.
+- [ ] Serial number scope preview shows current values for configured scope keys before creation or rule activation.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, create an automatic-code, recode-enabled library and one material through `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, and `POST http://localhost:8000/api/v1/materials`.
-  3. Using backend APIs, create an executed batch for that library: call `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions` with `activate: false` and a changed fixed segment such as `S30R`; call `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview` with body `{ "scope": "all", "material_ids": [] }`; then call `POST http://localhost:8000/api/v1/material-code-change-batches/{batch_id}/execute` with body `{ "confirm": true, "reason": "Sprint 30 record setup" }`.
-  4. In a browser session authenticated as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created material library detail view, and click the `重编码记录` tab.
-  5. Assert the batch list shows columns or labels for batch ID, old version, new version, change mode, total count, success count, failed count, status, created_by, and created_at.
-  6. Click a batch row or detail action and assert a drawer, modal, expanded panel, or detail page opens for that batch.
-  7. Assert the batch detail shows batch metadata and per-material change details including material name, old code, new code, status, and failure reason when applicable.
-  8. If the batch list has more rows than one page, use the pagination control and assert page changes keep the browser in the selected library's `重编码记录` experience under `http://localhost:5173/material/library`.
+  2. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, and open the create-library flow or an existing library's code rule edit form.
+  3. Add or select a serial-number segment, configure length, start value, and scope `全局` or its en-US equivalent, then assert the form shows a serial scope preview section with a current value for the global scope before saving.
+  4. Change the serial scope to `按类目` or its en-US equivalent and choose a category when prompted.
+  5. Assert the serial scope preview updates to show at least one category scope key and its current serial value.
+  6. Save or preview the rule and assert the generated example code uses the displayed serial configuration.
 
-- [ ] The code mapping tab supports search, filters, pagination, and Excel export.
+- [ ] Conflict rows in recode preview are highlighted, execution is blocked by default, and force execution requires an extra confirmation.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, create an automatic-code, recode-enabled library, one material, and one executed recode batch by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, `POST http://localhost:8000/api/v1/materials`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview`, and `POST http://localhost:8000/api/v1/material-code-change-batches/{batch_id}/execute`.
-  3. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password, navigate to `http://localhost:5173/material/library`, open the created material library detail view, and click the `编码映射` tab.
-  4. Assert the mapping table shows columns or labels for old code, new code, material name, batch ID, change time, and status.
-  5. Enter an old code, new code, or material name visible in the table into the search field and assert the table filters to matching rows.
-  6. Apply a batch ID filter or date range filter and assert the table updates without leaving `http://localhost:5173/material/library` or the selected library detail modal under it.
-  7. If more mappings exist than fit on one page, use the pagination control and assert the next page shows different rows.
-  8. Click the Excel export action and assert an `.xlsx` file is downloaded containing mapping columns for old code, new code, material name, batch ID, change time, and status.
+  2. Using backend APIs with super_admin headers, create an auto-code-enabled, recode-enabled library, two materials, and a draft code rule version that produces at least one duplicate or conflicting `new_code` by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, `POST http://localhost:8000/api/v1/materials`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions`, and `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview`.
+  3. In a browser session authenticated as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created library, and open the recode preview for the conflict batch.
+  4. Assert rows with conflict status are visually highlighted red and show a specific conflict reason such as duplicate code, existing code conflict, or `编码冲突`.
+  5. Click the normal execute/confirm recode action and assert execution is blocked with an error or disabled action while conflicts exist.
+  6. Enable the explicit force option if the UI provides it, then click the force execute action.
+  7. Assert a second confirmation dialog appears that explicitly mentions force execution and code conflicts before any execution request is sent.
+  8. Cancel the force confirmation and assert the batch remains in preview or pending state in the UI.
 
-- [ ] A selected-material recode preview limits execution to the chosen materials.
+- [ ] Code mapping export supports date range, batch filter, search, and CSV/Excel format selection.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Open `http://localhost:5173/login`, sign in with username `super_admin` and an empty password.
-  3. Using backend APIs with super_admin headers, create an automatic-code, recode-enabled library through `POST http://localhost:8000/api/v1/material-libraries` after fetching valid product/category IDs from `GET http://localhost:8000/api/v1/product-names` and `GET http://localhost:8000/api/v1/categories`.
-  4. Create exactly two materials in that library with two separate `POST http://localhost:8000/api/v1/materials` requests, using names `Sprint 30 Selected A` and `Sprint 30 Selected B`.
-  5. Navigate to `http://localhost:5173/material/library`, open the created library, click `编码规则`, click `编辑规则`, make a small segment change, enter change reason `Sprint 30 selected recode`, select `选中物料重编码`, and save.
-  6. Assert the app opens a selected-material selection modal or drawer headed `选择重编码物料` that contains a searchable material table with a checkbox column as the first column and rows for the two materials created through the API.
-  7. Check exactly one material row checkbox and click the generate-preview action.
-  8. Assert the preview summary total materials count is `1` and the preview table contains only the selected material.
-  9. Execute the selected-material recode after confirmation and assert the resulting `重编码记录` batch shows selected-material change mode and total count `1`.
+  2. Using backend APIs with super_admin headers, create an auto-code-enabled, recode-enabled library, at least one material, and one executed recode batch by calling `GET http://localhost:8000/api/v1/product-names`, `GET http://localhost:8000/api/v1/categories`, `POST http://localhost:8000/api/v1/material-libraries`, `POST http://localhost:8000/api/v1/materials`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions`, `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview`, and `POST http://localhost:8000/api/v1/material-code-change-batches/{batch_id}/execute`.
+  3. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created library detail view, and click the `编码映射` tab.
+  4. Enter an old code, new code, or material name visible in the table into the search field and assert the table filters to matching mapping rows.
+  5. Apply the executed batch ID filter and a date range that includes the mapping change time; assert the table remains filtered to the selected batch and date range.
+  6. Open the export action and assert it offers format choices for CSV and Excel.
+  7. Choose CSV, download the file, and assert the `.csv` content contains only rows matching the active search/filter criteria and includes columns for old code, new code, material name, batch ID, change time, and status.
+  8. Choose Excel, download the file, and assert an `.xlsx` file is downloaded for the same active search/filter criteria.
 
-- [ ] Rollback is available per completed batch and requires a risk-warning confirmation.
+- [ ] Code rule and recode pages have complete zh-CN/en-US labels and stay usable on a narrow viewport.
   Evaluator steps:
   1. Start the system with `bash init.sh`.
-  2. Using backend APIs with super_admin headers, create rollback preconditions: call `GET http://localhost:8000/api/v1/product-names` and `GET http://localhost:8000/api/v1/categories`; call `POST http://localhost:8000/api/v1/material-libraries` for an automatic-code, recode-enabled library; call `POST http://localhost:8000/api/v1/materials` to create at least one material; call `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions` with `activate: false`; call `POST http://localhost:8000/api/v1/material-libraries/{library_id}/code-rules/versions/{version_id}/recode-preview` with body `{ "scope": "all", "material_ids": [] }`; and call `POST http://localhost:8000/api/v1/material-code-change-batches/{batch_id}/execute` with body `{ "confirm": true, "reason": "Sprint 30 rollback setup" }`.
-  3. In a browser session authenticated as `super_admin`, navigate to `http://localhost:5173/material/library`, open the created material library detail view, and click the `重编码记录` tab.
-  4. Open the completed batch detail and assert a rollback action is visible for rollback-eligible batches.
-  5. Click the rollback action and assert a confirmation dialog appears with a warning about external system references or downstream code usage.
-  6. Cancel the rollback dialog and assert the batch status and the `编码映射` table row for that batch still show an active status such as `生效中` or `active`.
-  7. Reopen the rollback dialog, confirm rollback, and assert loading or progress feedback appears while rollback is running.
-  8. Assert the UI reports rollback completion and the batch status changes to a rolled-back state such as `已回滚` or `rolled_back`.
-  9. Navigate to the `编码映射` tab, apply the batch ID filter for the rolled-back batch, and assert the mapping table's `状态` cell for each affected row displays `已回滚` or `rolled_back`; no row for that batch may show `生效中` or `active`.
-
+  2. Open `http://localhost:5173/login`, sign in as `super_admin`, navigate to `http://localhost:5173/material/library`, and open a material library detail view containing code rule, recode record, and code mapping tabs.
+  3. In zh-CN locale, visit the code rule edit form, recode preview, recode records, and code mapping tab; assert no visible key-like fallback text such as `codeRule.`, `recode.`, `mapping.`, `undefined`, or `missing` appears in labels, buttons, table headers, validation messages, status badges, or empty states.
+  4. Switch to en-US locale using the app's language control and repeat the same page visits; assert English labels are visible and no key-like fallback text appears.
+  5. Resize the browser viewport to `390x844`, return to `http://localhost:5173/material/library`, and open the same library detail view.
+  6. Assert the code rule, recode records, and code mapping list views remain usable without overlapping text or clipped primary actions; tables may scroll horizontally, but tab labels, filters, and primary buttons must remain reachable.
+  7. On the narrow viewport, open the code rule edit form and assert segment rows, validation errors, and save/cancel actions remain visible and operable.
 
 ---
 CONTRACT APPROVED
 
-Sprint: 30
+Sprint: 31
 Approved criteria: 7
-Notes: API client methods listed in features (item 14) are internal implementation details exercised transitively by UI interaction tests -- not independently observable through browser verification, which is acceptable for a black-box contract. All test steps use exact URLs, auth headers, API endpoints with path parameters, and concrete UI assertions including file download content verification.
+Notes: All criteria map cleanly to browser-mode verification with Playwright. Test steps are concrete and unambiguous. Each criterion has at least 6 test steps covering setup, action, and assertion phases. Good calibration on conflict handling (multi-step confirmation), export (CSV and Excel verification), and responsive (viewport boundary at 390x844).
