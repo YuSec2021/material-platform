@@ -82,3 +82,5 @@
 - All mutation endpoints properly require super_admin role. Unauthorized requests blocked at 403.
 
 ## v8.0.0 — Sprint 28 [MAJOR bump]
+
+## v9.0.0 — Sprint 29 [MAJOR bump]
