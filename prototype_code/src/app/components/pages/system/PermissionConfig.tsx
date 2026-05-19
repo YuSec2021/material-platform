@@ -266,7 +266,7 @@ export function PermissionConfig() {
                           />
                           <span>
                             <span className="block text-foreground">{operationLabel(t, permission.permission_type)}</span>
-                            <span className="block break-all text-xs text-muted-foreground">{moduleLabel(t, permission.module)} / {permission.permission_key}</span>
+                            <span className="block break-all text-xs text-muted-foreground">{moduleLabel(t, permission.module)}</span>
                           </span>
                         </label>
                       ))}
