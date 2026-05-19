@@ -55,30 +55,42 @@ function operationLabel(t: (key: string) => string, permissionType: string): str
     DELETE: t("permission.operation.delete"),
     approve: t("permission.operation.approve"),
     reject: t("permission.operation.reject"),
+    list: t("permission.operation.list"),
+    export: t("permission.operation.export"),
+    import: t("permission.operation.import"),
   };
-  return map[permissionType] ?? permissionType;
+  return map[permissionType] ?? t(`permission.type.${permissionType}`, permissionType);
 }
 
 function moduleLabel(t: (key: string) => string, moduleKey: string): string {
   const key = `permission.module.${moduleKey}` as const;
   const translated = t(key);
-  return translated === key ? moduleKey : translated;
+  if (translated !== key) return translated;
+  // Fallback: snake_case -> Title Case
+  return moduleKey
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
-function catalogLabel(t: (key: string) => string, module: string): string {
-  if (module.includes("standard") || module.includes("分类") || module.includes("类目")) {
-    return t("permission.catalog.standards");
+function catalogForModule(moduleKey: string): string {
+  if (moduleKey.includes("category_management") || moduleKey.includes("attribute_management") ||
+      moduleKey.includes("brand") || moduleKey.includes("product_name") || moduleKey.includes("code_rule")) {
+    return "standards";
   }
-  if (module.includes("material") || module.includes("物料") || module.includes("brand") || module.includes("品牌") || module.includes("product_name") || module.includes("品名") || module.includes("attribute") || module.includes("属性")) {
-    return t("permission.catalog.materials");
+  if (moduleKey.includes("material_archives") || moduleKey.includes("material_library") ||
+      moduleKey.includes("material_code") || moduleKey === "material") {
+    return "materials";
   }
-  if (module.includes("application") || module.includes("申请")) {
-    return t("permission.catalog.applications");
+  if (moduleKey.includes("application")) {
+    return "applications";
   }
-  if (module.includes("user") || module.includes("role") || module.includes("系统") || module.includes("permission") || module.includes("reason") || module.includes("approval") || module.includes("ai_provider") || module.includes("rule")) {
-    return t("permission.catalog.system");
-  }
-  return module;
+  return "system";
+}
+
+function catalogLabel(t: (key: string) => string, moduleKey: string): string {
+  const catalog = catalogForModule(moduleKey);
+  return t(`permission.catalog.${catalog}`);
 }
 
 export function PermissionConfig() {
