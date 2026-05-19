@@ -141,6 +141,28 @@ class MaterialLibraryUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class CategoryLibraryOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str
+    enabled: bool
+
+
+class CategoryLibraryIn(BaseModel):
+    name: str
+    code: str = ""
+    description: str = ""
+    enabled: bool = True
+
+
+class CategoryLibraryUpdate(BaseModel):
+    name: str | None = None
+    code: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
 class MaterialCodeRuleVersionIn(BaseModel):
     rule_name: str
     rule_config: dict[str, Any] | None = None
@@ -244,8 +266,26 @@ class CategoryOut(BaseModel):
     id: int
     code: str
     name: str
+    category_library_id: int | None = None
+    category_library: str = ""
     description: str
     enabled: bool
+
+
+class CategoryIn(BaseModel):
+    name: str
+    code: str = ""
+    category_library_id: int
+    description: str = ""
+    enabled: bool = True
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = None
+    code: str | None = None
+    category_library_id: int | None = None
+    description: str | None = None
+    enabled: bool | None = None
 
 
 class MaterialIn(BaseModel):

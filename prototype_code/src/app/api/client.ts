@@ -30,6 +30,16 @@ export type Category = {
   id: number;
   code: string;
   name: string;
+  category_library_id: number | null;
+  category_library: string;
+  description: string;
+  enabled: boolean;
+};
+
+export type CategoryLibrary = {
+  id: number;
+  code: string;
+  name: string;
   description: string;
   enabled: boolean;
 };
@@ -150,6 +160,21 @@ export type MaterialLibraryPayload = {
   auto_code_enabled?: boolean;
   recode_enabled?: boolean;
   code_rule?: Record<string, unknown> | null;
+};
+
+export type CategoryLibraryPayload = {
+  name: string;
+  code?: string;
+  description: string;
+  enabled?: boolean;
+};
+
+export type CategoryPayload = {
+  name: string;
+  code?: string;
+  category_library_id: number;
+  description: string;
+  enabled?: boolean;
 };
 
 export type MaterialCodeRuleVersion = {
@@ -903,6 +928,30 @@ export const apiClient = {
   },
   categories() {
     return request<Category[]>("/categories");
+  },
+  createCategory(payload: CategoryPayload) {
+    return request<Category>("/categories", { method: "POST", body: payload });
+  },
+  updateCategory(id: number, payload: Partial<CategoryPayload>) {
+    return request<Category>(`/categories/${id}`, { method: "PUT", body: payload });
+  },
+  deleteCategory(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/categories/${id}`, { method: "DELETE" });
+  },
+  categoryLibraries() {
+    return request<CategoryLibrary[]>("/category-libraries");
+  },
+  categoryLibrary(id: number) {
+    return request<CategoryLibrary>(`/category-libraries/${id}`);
+  },
+  createCategoryLibrary(payload: CategoryLibraryPayload) {
+    return request<CategoryLibrary>("/category-libraries", { method: "POST", body: payload });
+  },
+  updateCategoryLibrary(id: number, payload: Partial<CategoryLibraryPayload>) {
+    return request<CategoryLibrary>(`/category-libraries/${id}`, { method: "PUT", body: payload });
+  },
+  deleteCategoryLibrary(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/category-libraries/${id}`, { method: "DELETE" });
   },
   brands() {
     return request<Brand[]>("/brands");

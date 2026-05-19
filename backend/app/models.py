@@ -108,8 +108,8 @@ class MaterialLibrary(Base):
     )
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class CategoryLibrary(Base):
+    __tablename__ = "category_libraries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -119,6 +119,22 @@ class Category(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+    categories: Mapped[list["Category"]] = relationship(back_populates="category_library")
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    category_library_id: Mapped[int | None] = mapped_column(ForeignKey("category_libraries.id"), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    category_library: Mapped[CategoryLibrary | None] = relationship(back_populates="categories")
     materials: Mapped[list["Material"]] = relationship(back_populates="category")
 
 

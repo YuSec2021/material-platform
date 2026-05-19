@@ -34,6 +34,7 @@ from .models import (
     Brand,
     CapabilityModelMapping,
     Category,
+    CategoryLibrary,
     FeaturePermission,
     LLMProviderConfig,
     Material,
@@ -71,7 +72,12 @@ from .schemas import (
     BrandUpdate,
     CapabilityMappingIn,
     CapabilityMappingOut,
+    CategoryIn,
+    CategoryLibraryIn,
+    CategoryLibraryOut,
+    CategoryLibraryUpdate,
     CategoryOut,
+    CategoryUpdate,
     ChangeOut,
     GatewayInvokeIn,
     GovernanceImportIn,
@@ -182,6 +188,11 @@ SEED_LIBRARY = {
     "code": "MLIB-DEFAULT",
     "name": "Default Material Library",
     "description": "Default library for sprint verification materials",
+}
+SEED_CATEGORY_LIBRARY = {
+    "code": "CLIB-DEFAULT",
+    "name": "Default Category Library",
+    "description": "Default category library for sprint verification categories",
 }
 SEED_CATEGORY = {
     "code": "CAT-PRINTER",
@@ -416,6 +427,7 @@ PERMISSION_CATALOG = [
     {"module": "material_library", "permission_type": "directory", "permission_key": "directory.material_library", "label": "Material Library Directory"},
     {"module": "workflow", "permission_type": "directory", "permission_key": "directory.workflow", "label": "Workflow Directory"},
     {"module": "system_admin", "permission_type": "directory", "permission_key": "directory.system_admin", "label": "System Admin Directory"},
+    {"module": "category_library", "permission_type": "directory", "permission_key": "directory.category_library", "label": "Category Library Directory"},
     {"module": "category_management", "permission_type": "directory", "permission_key": "directory.category_management", "label": "Category Management Directory"},
     {"module": "brand_management", "permission_type": "directory", "permission_key": "directory.brand_management", "label": "Brand Management Directory"},
     {"module": "product_name_management", "permission_type": "directory", "permission_key": "directory.product_name_management", "label": "Product Name Directory"},
@@ -436,6 +448,12 @@ PERMISSION_CATALOG = [
     {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.delete", "label": "Attribute Delete"},
     {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.import", "label": "Attribute Import"},
     {"module": "attribute_management", "permission_type": "button", "permission_key": "button.attribute_management.export", "label": "Attribute Export"},
+    {"module": "category_library", "permission_type": "button", "permission_key": "button.category_library.create", "label": "Category Library Create"},
+    {"module": "category_library", "permission_type": "button", "permission_key": "button.category_library.edit", "label": "Category Library Edit"},
+    {"module": "category_library", "permission_type": "button", "permission_key": "button.category_library.delete", "label": "Category Library Delete"},
+    {"module": "category_management", "permission_type": "button", "permission_key": "button.category_management.create", "label": "Category Create"},
+    {"module": "category_management", "permission_type": "button", "permission_key": "button.category_management.edit", "label": "Category Edit"},
+    {"module": "category_management", "permission_type": "button", "permission_key": "button.category_management.delete", "label": "Category Delete"},
     {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.submit", "label": "Workflow Submit"},
     {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.approve", "label": "Workflow Approve"},
     {"module": "workflow", "permission_type": "button", "permission_key": "button.workflow.reject", "label": "Workflow Reject"},
@@ -501,6 +519,14 @@ PERMISSION_CATALOG = [
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/roles/{role_id}/permissions", "label": "PUT /api/v1/roles/{role_id}/permissions"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/permissions/catalog", "label": "GET /api/v1/permissions/catalog"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories", "label": "GET /api/v1/categories"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories", "label": "POST /api/v1/categories"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}", "label": "PUT /api/v1/categories/{category_id}"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}", "label": "DELETE /api/v1/categories/{category_id}"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries", "label": "GET /api/v1/category-libraries"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.POST./api/v1/category-libraries", "label": "POST /api/v1/category-libraries"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries/{library_id}", "label": "GET /api/v1/category-libraries/{library_id}"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.PUT./api/v1/category-libraries/{library_id}", "label": "PUT /api/v1/category-libraries/{library_id}"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.DELETE./api/v1/category-libraries/{library_id}", "label": "DELETE /api/v1/category-libraries/{library_id}"},
     {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names", "label": "GET /api/v1/product-names"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.GET./api/v1/brands", "label": "GET /api/v1/brands"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.POST./api/v1/brands", "label": "POST /api/v1/brands"},
@@ -519,6 +545,7 @@ def startup() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_audit_log_schema()
     ensure_material_code_rule_schema()
+    ensure_category_schema()
     db = next(get_db())
     try:
         ensure_seed_product(db)
@@ -578,6 +605,28 @@ def ensure_material_code_rule_schema() -> None:
         Base.metadata.create_all(bind=connection)
 
 
+def ensure_category_schema() -> None:
+    with engine.begin() as connection:
+        if engine.dialect.name == "sqlite":
+            Base.metadata.create_all(bind=connection)
+            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(categories)").fetchall()}
+            if "category_library_id" not in existing:
+                connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
+            return
+
+        Base.metadata.create_all(bind=connection)
+        has_column = connection.exec_driver_sql(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'categories'
+              AND column_name = 'category_library_id'
+            """
+        ).fetchone()
+        if not has_column:
+            connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
+
+
 def ensure_seed_product(db: Session) -> ProductName:
     Base.metadata.create_all(bind=engine)
     product = db.query(ProductName).filter(ProductName.name == SEED_PRODUCT["name"]).first()
@@ -590,16 +639,36 @@ def ensure_seed_product(db: Session) -> ProductName:
     return product
 
 
+def ensure_default_category_library(db: Session) -> CategoryLibrary:
+    Base.metadata.create_all(bind=engine)
+    ensure_category_schema()
+    category_library = db.query(CategoryLibrary).filter(CategoryLibrary.code == SEED_CATEGORY_LIBRARY["code"]).first()
+    if category_library:
+        return category_library
+    category_library = CategoryLibrary(**SEED_CATEGORY_LIBRARY)
+    db.add(category_library)
+    db.flush()
+    return category_library
+
+
 def ensure_seed_material_context(db: Session) -> tuple[MaterialLibrary, Category]:
     Base.metadata.create_all(bind=engine)
+    ensure_category_schema()
     library = db.query(MaterialLibrary).filter(MaterialLibrary.code == SEED_LIBRARY["code"]).first()
     if not library:
         library = MaterialLibrary(**SEED_LIBRARY)
         db.add(library)
+    category_library = ensure_default_category_library(db)
     category = db.query(Category).filter(Category.code == SEED_CATEGORY["code"]).first()
     if not category:
-        category = Category(**SEED_CATEGORY)
+        category = Category(**SEED_CATEGORY, category_library_id=category_library.id)
         db.add(category)
+    elif category.category_library_id is None:
+        category.category_library_id = category_library.id
+    db.query(Category).filter(Category.category_library_id.is_(None)).update(
+        {Category.category_library_id: category_library.id},
+        synchronize_session=False,
+    )
     db.commit()
     db.refresh(library)
     db.refresh(category)
@@ -1914,11 +1983,23 @@ def library_to_out(library: MaterialLibrary, db: Session | None = None) -> Mater
     )
 
 
+def category_library_to_out(library: CategoryLibrary) -> CategoryLibraryOut:
+    return CategoryLibraryOut(
+        id=library.id,
+        code=library.code,
+        name=library.name,
+        description=library.description,
+        enabled=library.enabled,
+    )
+
+
 def category_to_out(category: Category) -> CategoryOut:
     return CategoryOut(
         id=category.id,
         code=category.code,
         name=category.name,
+        category_library_id=category.category_library_id,
+        category_library=category.category_library.name if category.category_library else "",
         description=category.description,
         enabled=category.enabled,
     )
@@ -2574,12 +2655,16 @@ def complete_workflow_application(application: WorkflowApplication, db: Session)
         existing = db.query(Category).filter(Category.name == name).first()
         proposed_code = str(data.get("proposed_category_code") or "").strip()
         accepted_code = proposed_code if proposed_code and not db.query(Category).filter(Category.code == proposed_code).first() else ""
+        category_library = ensure_default_category_library(db)
         category = existing or Category(
             code=accepted_code or next_unique_code(db, Category, "CAT", name),
             name=name,
+            category_library_id=category_library.id,
             description=str(data.get("description") or data.get("business_reason") or ""),
             enabled=True,
         )
+        if existing and existing.category_library_id is None:
+            existing.category_library_id = category_library.id
         if not existing:
             db.add(category)
             db.flush()
@@ -2866,10 +2951,14 @@ def infer_product_category(text: str) -> tuple[str, str, str]:
 def get_or_create_category(db: Session, name: str) -> Category:
     category = db.query(Category).filter(Category.name == name).first()
     if category:
+        if category.category_library_id is None:
+            category.category_library_id = ensure_default_category_library(db).id
         return category
+    category_library = ensure_default_category_library(db)
     category = Category(
         code=next_unique_code(db, Category, "CAT", name),
         name=name,
+        category_library_id=category_library.id,
         description="Created by AI material addition recommendation",
         enabled=True,
     )
@@ -4129,6 +4218,109 @@ def delete_material_library(
     return {"deleted": True, "id": library_id}
 
 
+@app.get("/api/v1/category-libraries", response_model=list[CategoryLibraryOut])
+def list_category_libraries(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/category-libraries")),
+) -> list[CategoryLibraryOut]:
+    ensure_seed_material_context(db)
+    libraries = db.query(CategoryLibrary).order_by(CategoryLibrary.id).all()
+    return [category_library_to_out(library) for library in libraries]
+
+
+@app.post("/api/v1/category-libraries", response_model=CategoryLibraryOut)
+def create_category_library(
+    payload: CategoryLibraryIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/category-libraries")),
+) -> CategoryLibraryOut:
+    require_button_permission(auth, "button.category_library.create")
+    name = compact_space(payload.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="Category library name is required")
+    code = compact_space(payload.code).upper() or next_unique_code(db, CategoryLibrary, "CLIB", f"{name}:{now().isoformat()}")
+    if db.query(CategoryLibrary).filter(CategoryLibrary.name == name).first():
+        raise HTTPException(status_code=409, detail="Category library name must be unique")
+    if db.query(CategoryLibrary).filter(CategoryLibrary.code == code).first():
+        raise HTTPException(status_code=409, detail="Category library code must be unique")
+    library = CategoryLibrary(
+        code=code,
+        name=name,
+        description=payload.description.strip(),
+        enabled=payload.enabled,
+    )
+    db.add(library)
+    db.commit()
+    db.refresh(library)
+    return category_library_to_out(library)
+
+
+@app.get("/api/v1/category-libraries/{library_id}", response_model=CategoryLibraryOut)
+def get_category_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/category-libraries/{library_id}")),
+) -> CategoryLibraryOut:
+    library = db.get(CategoryLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    return category_library_to_out(library)
+
+
+@app.put("/api/v1/category-libraries/{library_id}", response_model=CategoryLibraryOut)
+def update_category_library(
+    library_id: int,
+    payload: CategoryLibraryUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/category-libraries/{library_id}")),
+) -> CategoryLibraryOut:
+    require_button_permission(auth, "button.category_library.edit")
+    library = db.get(CategoryLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    if payload.name is not None:
+        name = compact_space(payload.name)
+        if not name:
+            raise HTTPException(status_code=422, detail="Category library name is required")
+        duplicate = db.query(CategoryLibrary).filter(CategoryLibrary.name == name, CategoryLibrary.id != library.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Category library name must be unique")
+        library.name = name
+    if payload.code is not None:
+        code = compact_space(payload.code).upper()
+        if not code:
+            raise HTTPException(status_code=422, detail="Category library code is required")
+        duplicate = db.query(CategoryLibrary).filter(CategoryLibrary.code == code, CategoryLibrary.id != library.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Category library code must be unique")
+        library.code = code
+    if payload.description is not None:
+        library.description = payload.description.strip()
+    if payload.enabled is not None:
+        library.enabled = payload.enabled
+    library.updated_at = now()
+    db.commit()
+    db.refresh(library)
+    return category_library_to_out(library)
+
+
+@app.delete("/api/v1/category-libraries/{library_id}")
+def delete_category_library(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/category-libraries/{library_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.category_library.delete")
+    library = db.get(CategoryLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    if db.query(Category).filter(Category.category_library_id == library.id).first():
+        raise HTTPException(status_code=409, detail="Category library cannot be deleted while it contains categories")
+    db.delete(library)
+    db.commit()
+    return {"deleted": True, "id": library_id}
+
+
 @app.get("/api/v1/categories", response_model=list[CategoryOut])
 def list_categories(
     db: Session = Depends(get_db),
@@ -4137,6 +4329,96 @@ def list_categories(
     ensure_seed_material_context(db)
     categories = db.query(Category).order_by(Category.id).all()
     return [category_to_out(category) for category in categories]
+
+
+@app.post("/api/v1/categories", response_model=CategoryOut)
+def create_category(
+    payload: CategoryIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/categories")),
+) -> CategoryOut:
+    require_button_permission(auth, "button.category_management.create")
+    library = db.get(CategoryLibrary, payload.category_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    name = compact_space(payload.name)
+    if not name:
+        raise HTTPException(status_code=422, detail="Category name is required")
+    code = compact_space(payload.code).upper() or next_unique_code(db, Category, "CAT", f"{name}:{now().isoformat()}")
+    if db.query(Category).filter(Category.name == name).first():
+        raise HTTPException(status_code=409, detail="Category name must be unique")
+    if db.query(Category).filter(Category.code == code).first():
+        raise HTTPException(status_code=409, detail="Category code must be unique")
+    category = Category(
+        code=code,
+        name=name,
+        category_library_id=library.id,
+        description=payload.description.strip(),
+        enabled=payload.enabled,
+    )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category_to_out(category)
+
+
+@app.put("/api/v1/categories/{category_id}", response_model=CategoryOut)
+def update_category(
+    category_id: int,
+    payload: CategoryUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/categories/{category_id}")),
+) -> CategoryOut:
+    require_button_permission(auth, "button.category_management.edit")
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if payload.category_library_id is not None:
+        library = db.get(CategoryLibrary, payload.category_library_id)
+        if not library:
+            raise HTTPException(status_code=404, detail="Category library not found")
+        category.category_library_id = library.id
+    if payload.name is not None:
+        name = compact_space(payload.name)
+        if not name:
+            raise HTTPException(status_code=422, detail="Category name is required")
+        duplicate = db.query(Category).filter(Category.name == name, Category.id != category.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Category name must be unique")
+        category.name = name
+    if payload.code is not None:
+        code = compact_space(payload.code).upper()
+        if not code:
+            raise HTTPException(status_code=422, detail="Category code is required")
+        duplicate = db.query(Category).filter(Category.code == code, Category.id != category.id).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Category code must be unique")
+        category.code = code
+    if payload.description is not None:
+        category.description = payload.description.strip()
+    if payload.enabled is not None:
+        category.enabled = payload.enabled
+    category.updated_at = now()
+    db.commit()
+    db.refresh(category)
+    return category_to_out(category)
+
+
+@app.delete("/api/v1/categories/{category_id}")
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/categories/{category_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.category_management.delete")
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if db.query(Material).filter(Material.category_id == category.id).first():
+        raise HTTPException(status_code=409, detail="Category cannot be deleted while it contains materials")
+    db.delete(category)
+    db.commit()
+    return {"deleted": True, "id": category_id}
 
 
 @app.get("/api/v1/system/config", response_model=SystemConfigOut)
