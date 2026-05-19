@@ -110,3 +110,9 @@
 - All Application Workflow, System Administration, AI Management, and Rule Engine pages render with dark-compatible backgrounds. Interactive elements (tables, forms, status badges, tabs) are visible and readable.
 - Switching between light and dark themes does not change routes, cause authentication loss, or produce unreadable text. The theme toggle persists state correctly.
 - The build passes cleanly. The sprint33 Playwright test has one failure that is a **test code quality issue** (ambiguous `main` locator resolves to both the MainLayout's `<main>` and the MaterialList page's `<main>` element simultaneously). This is not a dark theme implementation defect. The actual dark theme behavior on /material/list was independently verified as PASS in criteria 1 and 3. The test needs a `.first()` or more specific selector, not a code behavior fix.
+
+## v11.1.0 — Sprint 34 [MINOR bump]
+- Permission labels show localized operation names (查看/新建/编辑/删除) not raw API paths
+- Catalog and module names follow i18n language (zh-CN/EN-US)
+- Dark theme compatibility preserved on permissions page
+- Build passes without TypeScript errors
