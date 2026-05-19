@@ -59,7 +59,10 @@ function operationLabel(t: (key: string) => string, permissionType: string): str
     export: t("permission.operation.export"),
     import: t("permission.operation.import"),
   };
-  return map[permissionType] ?? t(`permission.type.${permissionType}`, permissionType);
+  return map[permissionType] ?? (() => {
+    const translated = t(`permission.type.${permissionType}` as const);
+    return translated === `permission.type.${permissionType}` ? permissionType : translated;
+  })();
 }
 
 function moduleLabel(t: (key: string) => string, moduleKey: string): string {
@@ -74,7 +77,7 @@ function moduleLabel(t: (key: string) => string, moduleKey: string): string {
 }
 
 function catalogForModule(moduleKey: string): string {
-  if (moduleKey.includes("category_management") || moduleKey.includes("attribute_management") ||
+  if (moduleKey.includes("category_management") || moduleKey.includes("category_library") || moduleKey.includes("attribute_management") ||
       moduleKey.includes("brand") || moduleKey.includes("product_name") || moduleKey.includes("code_rule")) {
     return "standards";
   }
