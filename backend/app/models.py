@@ -129,12 +129,15 @@ class Category(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     category_library_id: Mapped[int | None] = mapped_column(ForeignKey("category_libraries.id"), nullable=True, index=True)
+    parent_category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     category_library: Mapped[CategoryLibrary | None] = relationship(back_populates="categories")
+    parent: Mapped["Category | None"] = relationship(remote_side=[id], back_populates="children")
+    children: Mapped[list["Category"]] = relationship(back_populates="parent")
     materials: Mapped[list["Material"]] = relationship(back_populates="category")
 
 

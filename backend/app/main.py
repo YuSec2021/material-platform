@@ -520,6 +520,8 @@ PERMISSION_CATALOG = [
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/permissions/catalog", "label": "GET /api/v1/permissions/catalog"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories", "label": "GET /api/v1/categories"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories", "label": "POST /api/v1/categories"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/template", "label": "GET /api/v1/categories/template"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/bulk-import", "label": "POST /api/v1/categories/bulk-import"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}", "label": "PUT /api/v1/categories/{category_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}", "label": "DELETE /api/v1/categories/{category_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries", "label": "GET /api/v1/category-libraries"},
@@ -612,6 +614,8 @@ def ensure_category_schema() -> None:
             existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(categories)").fetchall()}
             if "category_library_id" not in existing:
                 connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
+            if "parent_category_id" not in existing:
+                connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
             return
 
         Base.metadata.create_all(bind=connection)
@@ -625,6 +629,16 @@ def ensure_category_schema() -> None:
         ).fetchone()
         if not has_column:
             connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
+        has_parent_column = connection.exec_driver_sql(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'categories'
+              AND column_name = 'parent_category_id'
+            """
+        ).fetchone()
+        if not has_parent_column:
+            connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
 
 
 def ensure_seed_product(db: Session) -> ProductName:
@@ -1469,6 +1483,9 @@ def super_admin_auth(db: Session | None = None) -> AuthContext:
 
 def regular_user_auth() -> AuthContext:
     permissions = {
+        "api.GET./api/v1/category-libraries",
+        "api.GET./api/v1/category-libraries/{library_id}",
+        "api.GET./api/v1/categories",
         "api.GET./api/v1/material-libraries",
         "api.GET./api/v1/material-libraries/{library_id}",
         "api.GET./api/v1/materials",
@@ -2000,6 +2017,7 @@ def category_to_out(category: Category) -> CategoryOut:
         name=category.name,
         category_library_id=category.category_library_id,
         category_library=category.category_library.name if category.category_library else "",
+        parent_category_id=category.parent_category_id,
         description=category.description,
         enabled=category.enabled,
     )
@@ -4331,6 +4349,184 @@ def list_categories(
     return [category_to_out(category) for category in categories]
 
 
+CATEGORY_IMPORT_HEADERS = ["一级类目", "二级类目", "三级类目"]
+
+
+def normalize_category_import_row(raw: Any, row_number: int) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"row_number": row_number, "levels": [], "errors": ["Row must be an object"]}
+    levels = [compact_space(str(raw.get(header) or "")) for header in CATEGORY_IMPORT_HEADERS]
+    errors: list[str] = []
+    if not levels[0]:
+        errors.append("一级类目 is required")
+    if levels[2] and not levels[1]:
+        errors.append("二级类目 is required when 三级类目 is provided")
+    return {"row_number": row_number, "levels": levels, "errors": errors}
+
+
+def parse_category_import_csv(text: str) -> list[dict[str, str]]:
+    reader = csv.DictReader(StringIO(text))
+    fieldnames = [name.strip() for name in (reader.fieldnames or [])]
+    missing_headers = [header for header in CATEGORY_IMPORT_HEADERS if header not in fieldnames]
+    if missing_headers:
+        raise HTTPException(status_code=422, detail=f"Missing CSV headers: {', '.join(missing_headers)}")
+    return [{header: row.get(header, "") for header in CATEGORY_IMPORT_HEADERS} for row in reader]
+
+
+async def category_import_rows_from_request(request: Request) -> list[dict[str, str]]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        upload = form.get("file") or form.get("csv") or form.get("upload")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=422, detail="CSV file is required")
+        content = await upload.read()
+        text = content.decode("utf-8-sig")
+        return parse_category_import_csv(text)
+
+    if "text/csv" in content_type:
+        content = await request.body()
+        return parse_category_import_csv(content.decode("utf-8-sig"))
+
+    payload = await request.json()
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        rows = payload.get("rows") or payload.get("items") or payload.get("categories")
+        if isinstance(rows, list):
+            return rows
+    raise HTTPException(status_code=422, detail="Expected JSON array or object with rows")
+
+
+def find_category_by_parent(db: Session, library_id: int, parent_id: int | None, name: str) -> Category | None:
+    query = db.query(Category).filter(
+        Category.category_library_id == library_id,
+        Category.name == name,
+    )
+    if parent_id is None:
+        query = query.filter(Category.parent_category_id.is_(None))
+    else:
+        query = query.filter(Category.parent_category_id == parent_id)
+    return query.first()
+
+
+def create_import_category(db: Session, library_id: int, parent_id: int | None, name: str) -> Category:
+    category = Category(
+        code=next_unique_code(db, Category, "CAT", f"{library_id}:{parent_id or 0}:{name}:{now().isoformat()}"),
+        name=name,
+        category_library_id=library_id,
+        parent_category_id=parent_id,
+        description="",
+        enabled=True,
+    )
+    db.add(category)
+    db.flush()
+    return category
+
+
+def import_category_levels(db: Session, library_id: int, levels: list[str]) -> dict[str, Any]:
+    parent_id: int | None = None
+    path: list[str] = []
+    created: list[Category] = []
+    skipped: list[Category] = []
+    for name in [level for level in levels if level]:
+        path.append(name)
+        existing = find_category_by_parent(db, library_id, parent_id, name)
+        if existing:
+            skipped.append(existing)
+            parent_id = existing.id
+            continue
+        category = create_import_category(db, library_id, parent_id, name)
+        created.append(category)
+        parent_id = category.id
+    return {"path": path, "created": created, "skipped": skipped}
+
+
+@app.get("/api/v1/categories/template")
+def download_category_template(
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories/template")),
+) -> StreamingResponse:
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(CATEGORY_IMPORT_HEADERS)
+    writer.writerow(["办公设备", "", ""])
+    writer.writerow(["办公设备", "打印设备", ""])
+    writer.writerow(["办公设备", "打印设备", "激光打印机"])
+    content = output.getvalue()
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="category-template.csv"'},
+    )
+
+
+@app.post("/api/v1/categories/bulk-import")
+async def bulk_import_categories(
+    request: Request,
+    category_library_id: int = Query(...),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/categories/bulk-import")),
+) -> dict[str, Any]:
+    require_super_admin(auth)
+    library = db.get(CategoryLibrary, category_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+
+    rows = await category_import_rows_from_request(request)
+    normalized_rows = [normalize_category_import_row(row, index + 1) for index, row in enumerate(rows)]
+    errors = [
+        {"row_number": row["row_number"], "errors": row["errors"]}
+        for row in normalized_rows
+        if row["errors"]
+    ]
+    success_details: list[dict[str, Any]] = []
+    skipped_details: list[dict[str, Any]] = []
+
+    for row in [item for item in normalized_rows if not item["errors"]]:
+        result = import_category_levels(db, library.id, row["levels"])
+        created = result["created"]
+        skipped = result["skipped"]
+        path = " / ".join(result["path"])
+        if created:
+            success_details.extend(
+                {
+                    "row_number": row["row_number"],
+                    "id": category.id,
+                    "name": category.name,
+                    "parent_category_id": category.parent_category_id,
+                    "path": path,
+                }
+                for category in created
+            )
+        elif skipped:
+            skipped_details.append(
+                {
+                    "row_number": row["row_number"],
+                    "reason": "duplicate",
+                    "path": path,
+                }
+            )
+        else:
+            skipped_details.append(
+                {
+                    "row_number": row["row_number"],
+                    "reason": "empty",
+                    "path": path,
+                }
+            )
+
+    db.commit()
+    return {
+        "category_library_id": library.id,
+        "success_count": len(success_details),
+        "skipped_count": len(skipped_details),
+        "error_count": len(errors),
+        "success": success_details,
+        "skipped": skipped_details,
+        "errors": errors,
+    }
+
+
 @app.post("/api/v1/categories", response_model=CategoryOut)
 def create_category(
     payload: CategoryIn,
@@ -4341,6 +4537,11 @@ def create_category(
     library = db.get(CategoryLibrary, payload.category_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Category library not found")
+    parent = db.get(Category, payload.parent_category_id) if payload.parent_category_id else None
+    if payload.parent_category_id and not parent:
+        raise HTTPException(status_code=404, detail="Parent category not found")
+    if parent and parent.category_library_id != library.id:
+        raise HTTPException(status_code=422, detail="Parent category must be in the same library")
     name = compact_space(payload.name)
     if not name:
         raise HTTPException(status_code=422, detail="Category name is required")
@@ -4353,6 +4554,7 @@ def create_category(
         code=code,
         name=name,
         category_library_id=library.id,
+        parent_category_id=parent.id if parent else None,
         description=payload.description.strip(),
         enabled=payload.enabled,
     )
@@ -4378,6 +4580,15 @@ def update_category(
         if not library:
             raise HTTPException(status_code=404, detail="Category library not found")
         category.category_library_id = library.id
+    if payload.parent_category_id is not None:
+        if payload.parent_category_id == category.id:
+            raise HTTPException(status_code=422, detail="Category cannot be its own parent")
+        parent = db.get(Category, payload.parent_category_id)
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent category not found")
+        if parent.category_library_id != category.category_library_id:
+            raise HTTPException(status_code=422, detail="Parent category must be in the same library")
+        category.parent_category_id = parent.id
     if payload.name is not None:
         name = compact_space(payload.name)
         if not name:
@@ -4416,6 +4627,8 @@ def delete_category(
         raise HTTPException(status_code=404, detail="Category not found")
     if db.query(Material).filter(Material.category_id == category.id).first():
         raise HTTPException(status_code=409, detail="Category cannot be deleted while it contains materials")
+    if db.query(Category).filter(Category.parent_category_id == category.id).first():
+        raise HTTPException(status_code=409, detail="Category cannot be deleted while it contains child categories")
     db.delete(category)
     db.commit()
     return {"deleted": True, "id": category_id}

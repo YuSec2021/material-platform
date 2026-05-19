@@ -32,6 +32,7 @@ export type Category = {
   name: string;
   category_library_id: number | null;
   category_library: string;
+  parent_category_id: number | null;
   description: string;
   enabled: boolean;
 };
@@ -173,8 +174,35 @@ export type CategoryPayload = {
   name: string;
   code?: string;
   category_library_id: number;
+  parent_category_id?: number | null;
   description: string;
   enabled?: boolean;
+};
+
+export type CategoryImportRow = {
+  "一级类目": string;
+  "二级类目"?: string;
+  "三级类目"?: string;
+};
+
+export type CategoryBulkImportResult = {
+  category_library_id: number;
+  success_count: number;
+  skipped_count: number;
+  error_count: number;
+  success: Array<Record<string, unknown>>;
+  skipped: Array<Record<string, unknown>>;
+  errors: Array<{ row_number: number; errors: string[] }>;
+};
+
+export type CategoryRecognitionResult = {
+  categories: Array<{
+    level1: string;
+    level2?: string;
+    level3?: string;
+    confidence?: number;
+  }>;
+  suggestions?: string[];
 };
 
 export type MaterialCodeRuleVersion = {
@@ -852,7 +880,11 @@ function withQuery(path: string, params: Record<string, string | number | boolea
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = pathToUrl(path);
   const headers = requestHeaders(options.headers);
-  const body = options.body === undefined ? undefined : JSON.stringify(options.body);
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (isFormData) {
+    headers.delete("Content-Type");
+  }
+  const body = options.body === undefined || isFormData ? options.body : JSON.stringify(options.body);
 
   lastRequestUrl = url;
   const response = await fetch(url, {
@@ -937,6 +969,29 @@ export const apiClient = {
   },
   deleteCategory(id: number) {
     return request<{ deleted: boolean; id: number }>(`/categories/${id}`, { method: "DELETE" });
+  },
+  downloadCategoryTemplate() {
+    return download("/categories/template");
+  },
+  bulkImportCategories(categoryLibraryId: number, rows: CategoryImportRow[]) {
+    return request<CategoryBulkImportResult>(withQuery("/categories/bulk-import", { category_library_id: categoryLibraryId }), {
+      method: "POST",
+      body: { rows },
+    });
+  },
+  bulkImportCategoriesFile(categoryLibraryId: number, file: File) {
+    const formData = new FormData();
+    formData.set("file", file);
+    return request<CategoryBulkImportResult>(withQuery("/categories/bulk-import", { category_library_id: categoryLibraryId }), {
+      method: "POST",
+      body: formData,
+    });
+  },
+  recognizeCategories(text: string, categoryLibraryId?: number | null) {
+    return request<CategoryRecognitionResult>("/ai/category-recognition/recognize", {
+      method: "POST",
+      body: { text, category_library_id: categoryLibraryId ?? undefined },
+    });
   },
   categoryLibraries() {
     return request<CategoryLibrary[]>("/category-libraries");

@@ -268,6 +268,7 @@ class CategoryOut(BaseModel):
     name: str
     category_library_id: int | None = None
     category_library: str = ""
+    parent_category_id: int | None = None
     description: str
     enabled: bool
 
@@ -276,6 +277,7 @@ class CategoryIn(BaseModel):
     name: str
     code: str = ""
     category_library_id: int
+    parent_category_id: int | None = None
     description: str = ""
     enabled: bool = True
 
@@ -284,6 +286,7 @@ class CategoryUpdate(BaseModel):
     name: str | None = None
     code: str | None = None
     category_library_id: int | None = None
+    parent_category_id: int | None = None
     description: str | None = None
     enabled: bool | None = None
 
