@@ -522,6 +522,7 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories", "label": "POST /api/v1/categories"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/template", "label": "GET /api/v1/categories/template"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/bulk-import", "label": "POST /api/v1/categories/bulk-import"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize", "label": "POST /api/v1/ai/category-recognition/recognize"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}", "label": "PUT /api/v1/categories/{category_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}", "label": "DELETE /api/v1/categories/{category_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries", "label": "GET /api/v1/category-libraries"},
@@ -4440,6 +4441,90 @@ def import_category_levels(db: Session, library_id: int, levels: list[str]) -> d
         created.append(category)
         parent_id = category.id
     return {"path": path, "created": created, "skipped": skipped}
+
+
+def split_recognized_category_line(line: str) -> list[str]:
+    cleaned = re.sub(r"^\s*[\-\*\d一二三四五六七八九十]+[\.、)]\s*", "", line.strip())
+    cleaned = re.sub(r"\s*(?:>|/|\\|,|，|、|;|；|\t)\s*", "/", cleaned)
+    parts = [compact_space(part) for part in cleaned.split("/") if compact_space(part)]
+    if len(parts) == 1:
+        parts = [compact_space(part) for part in re.split(r"\s+", parts[0]) if compact_space(part)]
+    return parts[:3]
+
+
+def confidence_for_category_levels(levels: list[str]) -> float:
+    if len(levels) >= 3:
+        return 0.92
+    if len(levels) == 2:
+        return 0.86
+    return 0.78
+
+
+def recognized_category_from_levels(levels: list[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "level1": levels[0],
+        "confidence": confidence_for_category_levels(levels),
+    }
+    if len(levels) > 1:
+        result["level2"] = levels[1]
+    if len(levels) > 2:
+        result["level3"] = levels[2]
+    return result
+
+
+def recognize_category_lines(text: str) -> list[dict[str, Any]]:
+    categories: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for raw_line in text.splitlines():
+        line = compact_space(raw_line)
+        if not line:
+            continue
+        levels = split_recognized_category_line(line)
+        if not levels:
+            continue
+        key = tuple(levels)
+        if key in seen:
+            continue
+        seen.add(key)
+        categories.append(recognized_category_from_levels(levels))
+    if not categories:
+        levels = split_recognized_category_line(text)
+        if levels:
+            categories.append(recognized_category_from_levels(levels))
+    return categories
+
+
+@app.post("/api/v1/ai/category-recognition/recognize")
+def recognize_categories(
+    payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/category-recognition/recognize")),
+) -> dict[str, Any]:
+    require_super_admin(auth)
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Recognition text is required")
+
+    category_library_id = payload.get("category_library_id")
+    if category_library_id is not None:
+        try:
+            library_id = int(category_library_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="category_library_id must be an integer") from None
+        library = db.get(CategoryLibrary, library_id)
+        if not library:
+            raise HTTPException(status_code=404, detail="Category library not found")
+
+    categories = recognize_category_lines(text)
+    if not categories:
+        raise HTTPException(status_code=422, detail="No recognizable category paths found")
+    return {
+        "categories": categories,
+        "suggestions": [
+            "Review recognized names before confirming import",
+            "Use one line per category path for best results",
+        ],
+    }
 
 
 @app.get("/api/v1/categories/template")

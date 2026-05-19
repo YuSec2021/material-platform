@@ -108,6 +108,30 @@ class Sprint36CategoryBulkImportApiTest(unittest.TestCase):
         )
         self.assertEqual(regular_post.status_code, 403, regular_post.text)
 
+    def test_ai_category_recognition_endpoint_returns_editable_paths(self):
+        token = self.unique_token()
+        library = self.create_library(token)
+
+        response = client.post(
+            "/api/v1/ai/category-recognition/recognize",
+            headers=SUPER_ADMIN,
+            json={
+                "text": f"办公设备 打印设备 激光打印机\n耗材/打印耗材/硒鼓{token}",
+                "category_library_id": library["id"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["categories"][0]["level1"], "办公设备")
+        self.assertEqual(payload["categories"][0]["level2"], "打印设备")
+        self.assertEqual(payload["categories"][0]["level3"], "激光打印机")
+        self.assertIn("confidence", payload["categories"][0])
+        self.assertEqual(payload["categories"][1]["level1"], "耗材")
+        self.assertEqual(payload["categories"][1]["level2"], "打印耗材")
+        self.assertEqual(payload["categories"][1]["level3"], f"硒鼓{token}")
+        self.assertTrue(payload["suggestions"])
+
 
 if __name__ == "__main__":
     unittest.main()
