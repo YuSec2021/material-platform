@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RotateCcw, Save } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { apiClient, type PermissionEntry, type Role } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 
@@ -45,7 +46,43 @@ function mutationError(error: unknown) {
   return error instanceof Error ? error.message : "后端操作失败";
 }
 
+function operationLabel(t: (key: string) => string, permissionType: string): string {
+  const map: Record<string, string> = {
+    GET: t("permission.operation.view"),
+    POST: t("permission.operation.create"),
+    PUT: t("permission.operation.edit"),
+    PATCH: t("permission.operation.edit"),
+    DELETE: t("permission.operation.delete"),
+    approve: t("permission.operation.approve"),
+    reject: t("permission.operation.reject"),
+  };
+  return map[permissionType] ?? permissionType;
+}
+
+function moduleLabel(t: (key: string) => string, moduleKey: string): string {
+  const key = `permission.module.${moduleKey}` as const;
+  const translated = t(key);
+  return translated === key ? moduleKey : translated;
+}
+
+function catalogLabel(t: (key: string) => string, module: string): string {
+  if (module.includes("standard") || module.includes("分类") || module.includes("类目")) {
+    return t("permission.catalog.standards");
+  }
+  if (module.includes("material") || module.includes("物料") || module.includes("brand") || module.includes("品牌") || module.includes("product_name") || module.includes("品名") || module.includes("attribute") || module.includes("属性")) {
+    return t("permission.catalog.materials");
+  }
+  if (module.includes("application") || module.includes("申请")) {
+    return t("permission.catalog.applications");
+  }
+  if (module.includes("user") || module.includes("role") || module.includes("系统") || module.includes("permission") || module.includes("reason") || module.includes("approval") || module.includes("ai_provider") || module.includes("rule")) {
+    return t("permission.catalog.system");
+  }
+  return module;
+}
+
 export function PermissionConfig() {
+  const { t } = useTranslation();
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [selectedPermissionKeys, setSelectedPermissionKeys] = useState<Set<string>>(new Set());
@@ -134,8 +171,8 @@ export function PermissionConfig() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl text-gray-900">权限配置</h1>
-        <p className="mt-1 text-sm text-gray-500">按角色编辑后端目录、API 和按钮权限，保存后由 RBAC 接口持久化。</p>
+        <h1 className="text-2xl text-foreground">权限配置</h1>
+        <p className="mt-1 text-sm text-muted-foreground">按角色编辑后端目录、API 和按钮权限，保存后由 RBAC 接口持久化。</p>
       </div>
 
       <ApiState
@@ -150,8 +187,8 @@ export function PermissionConfig() {
         }}
       >
         <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-4 rounded-lg border border-gray-200 bg-white p-4">
-            <h2 className="mb-4 text-sm font-medium text-gray-700">功能目录</h2>
+          <div className="col-span-4 rounded-lg border border-border bg-card p-4">
+            <h2 className="mb-4 text-sm font-medium text-foreground">{t("permission.catalog.system")}</h2>
             <div className="flex flex-col gap-1">
               {modules.map((module) => (
                 <button
@@ -159,11 +196,11 @@ export function PermissionConfig() {
                   type="button"
                   onClick={() => setSelectedModuleId(module.id)}
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                    selectedModuleId === module.id ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+                    selectedModuleId === module.id ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "text-foreground hover:bg-accent"
                   }`}
                 >
-                  <span>{module.title}</span>
-                  <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                  <span>{moduleLabel(t, module.id)}</span>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                     {module.permissions.length}
                     <ChevronRight className="h-3.5 w-3.5" />
                   </span>
@@ -172,14 +209,14 @@ export function PermissionConfig() {
             </div>
           </div>
 
-          <div className="col-span-8 rounded-lg border border-gray-200 bg-white p-6">
+          <div className="col-span-8 rounded-lg border border-border bg-card p-6">
             <div className="mb-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-              <label className="flex flex-col gap-2 text-sm text-gray-700">
+              <label className="flex flex-col gap-2 text-sm text-foreground">
                 <span>选择角色</span>
                 <select
                   value={selectedRoleId}
                   onChange={(event) => setSelectedRoleId(event.target.value)}
-                  className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                 >
                   {(rolesQuery.data ?? []).map((role) => (
                     <option key={role.id} value={role.id}>
@@ -188,36 +225,36 @@ export function PermissionConfig() {
                   ))}
                 </select>
               </label>
-              <div className="text-sm text-gray-500">
+              <div className="text-sm text-muted-foreground">
                 当前角色：{selectedRole?.name ?? "未选择"}
               </div>
             </div>
 
-            <div className="rounded-lg border border-gray-200">
-              <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
-                <h2 className="text-sm font-medium text-gray-700">{selectedModule?.title ?? "权限"} 权限项</h2>
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border bg-muted/40 px-4 py-3">
+                <h2 className="text-sm font-medium text-foreground">{catalogLabel(t, selectedModule?.id ?? "")} / {moduleLabel(t, selectedModule?.id ?? "")}</h2>
               </div>
               <div className="max-h-[28rem] overflow-y-auto p-4">
                 {groupByType(selectedModule?.permissions ?? []).map(([type, permissions]) => (
                   <fieldset key={type} className="mb-5 last:mb-0">
-                    <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                      {type}
+                    <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {operationLabel(t, type)}
                     </legend>
                     <div className="grid gap-2 md:grid-cols-2">
                       {permissions.map((permission) => (
                         <label
                           key={permission.permission_key}
-                          className="flex items-start gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
                         >
                           <input
                             type="checkbox"
                             checked={selectedPermissionKeys.has(permission.permission_key)}
                             onChange={() => togglePermission(permission.permission_key)}
-                            className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                            className="mt-0.5 h-4 w-4 rounded border-border"
                           />
                           <span>
-                            <span className="block text-gray-900">{permission.label}</span>
-                            <span className="block break-all text-xs text-gray-500">{permission.permission_key}</span>
+                            <span className="block text-foreground">{operationLabel(t, permission.permission_type)}</span>
+                            <span className="block break-all text-xs text-muted-foreground">{moduleLabel(t, permission.module)} / {permission.permission_key}</span>
                           </span>
                         </label>
                       ))}
@@ -227,7 +264,7 @@ export function PermissionConfig() {
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
               <div className="text-sm">
                 {saveMutation.isError && <span className="text-red-700">{mutationError(saveMutation.error)}</span>}
                 {saveMessage && !saveMutation.isError && <span className="text-green-700">{saveMessage}</span>}
@@ -236,7 +273,7 @@ export function PermissionConfig() {
                 <button
                   type="button"
                   onClick={resetToLoaded}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
                 >
                   <RotateCcw className="h-4 w-4" />
                   重置
@@ -245,7 +282,7 @@ export function PermissionConfig() {
                   type="button"
                   onClick={() => saveMutation.mutate()}
                   disabled={!selectedRoleId || saveMutation.isPending}
-                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
                 >
                   <Save className="h-4 w-4" />
                   {saveMutation.isPending ? "保存中..." : "保存配置"}
