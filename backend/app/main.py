@@ -30,8 +30,10 @@ from .database import Base, SessionLocal, engine, get_db
 from .models import (
     Attribute,
     AttributeChange,
+    AIAgentConfig,
     AuditLog,
     Brand,
+    CapabilityAgentMapping,
     CapabilityModelMapping,
     Category,
     CategoryLibrary,
@@ -70,6 +72,9 @@ from .schemas import (
     BrandLogo,
     BrandOut,
     BrandUpdate,
+    AgentConfigIn,
+    AgentConfigOut,
+    AgentConfigTestOut,
     CapabilityMappingIn,
     CapabilityMappingOut,
     CategoryIn,
@@ -1121,6 +1126,68 @@ def provider_to_out(provider: ModelConfig, db: Session) -> ProviderConfigOut:
     )
 
 
+def agent_config_to_out(config: AIAgentConfig) -> AgentConfigOut:
+    return AgentConfigOut(
+        id=config.id,
+        config_key=config.config_key,
+        provider=config.provider,
+        model_name=config.model_name,
+        base_url=config.base_url,
+        api_key_masked=masked_api_key(config.encrypted_api_key),
+        has_api_key=bool(config.encrypted_api_key),
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        timeout=config.timeout,
+        enabled=config.enabled,
+        connection_status=config.connection_status,
+        last_test_message=config.last_test_message,
+        last_test_at=config.last_test_at.isoformat() if config.last_test_at else None,
+        created_at=config.created_at.isoformat(),
+        updated_at=config.updated_at.isoformat(),
+    )
+
+
+def validate_agent_payload(payload: AgentConfigIn) -> dict[str, Any]:
+    values = {
+        "config_key": compact_space(payload.config_key),
+        "provider": compact_space(payload.provider).lower(),
+        "model_name": compact_space(payload.model_name),
+        "base_url": compact_space(payload.base_url),
+        "temperature": float(payload.temperature),
+        "max_tokens": int(payload.max_tokens),
+        "timeout": int(payload.timeout),
+        "enabled": bool(payload.enabled),
+    }
+    if not values["config_key"]:
+        raise HTTPException(status_code=422, detail="config_key is required")
+    if not values["provider"]:
+        raise HTTPException(status_code=422, detail="provider is required")
+    if not values["model_name"]:
+        raise HTTPException(status_code=422, detail="model_name is required")
+    if not values["base_url"].startswith(("http://", "https://", "local://")):
+        raise HTTPException(status_code=422, detail="base_url must be a valid URL")
+    return values
+
+
+def apply_agent_payload(config: AIAgentConfig, payload: AgentConfigIn) -> AIAgentConfig:
+    values = validate_agent_payload(payload)
+    for field, value in values.items():
+        setattr(config, field, value)
+    if payload.api_key and not payload.api_key.startswith("**"):
+        config.encrypted_api_key = encrypt_api_key(payload.api_key)
+    config.updated_at = now()
+    return config
+
+
+def test_agent_config_connection(config: AIAgentConfig) -> dict[str, Any]:
+    result = test_model_connection(config)
+    config.connection_status = "ok" if result["ok"] else "error"
+    config.last_test_message = result["message"]
+    config.last_test_at = now()
+    config.updated_at = now()
+    return {**result, "status": config.connection_status}
+
+
 def mapping_to_out(mapping: CapabilityModelMapping) -> CapabilityMappingOut:
     return CapabilityMappingOut(
         id=mapping.id,
@@ -1132,6 +1199,39 @@ def mapping_to_out(mapping: CapabilityModelMapping) -> CapabilityMappingOut:
         enabled=mapping.enabled,
         updated_at=mapping.updated_at.isoformat(),
     )
+
+
+def agent_mapping_to_out(mapping: CapabilityAgentMapping) -> CapabilityMappingOut:
+    return CapabilityMappingOut(
+        id=mapping.id,
+        capability=mapping.capability,
+        primary_model_id=mapping.agent_config_id,
+        primary_model_name=mapping.agent_config.config_key if mapping.agent_config else "",
+        fallback_model_id=mapping.fallback_agent_config_id,
+        fallback_model_name=mapping.fallback_agent_config.config_key if mapping.fallback_agent_config else "",
+        agent_config_id=mapping.agent_config_id,
+        agent_config_key=mapping.agent_config.config_key if mapping.agent_config else "",
+        fallback_agent_config_id=mapping.fallback_agent_config_id,
+        fallback_agent_config_key=mapping.fallback_agent_config.config_key if mapping.fallback_agent_config else "",
+        enabled=mapping.enabled,
+        updated_at=mapping.updated_at.isoformat(),
+    )
+
+
+def agent_mapping_for_capability(db: Session, capability: str) -> CapabilityAgentMapping | None:
+    Base.metadata.create_all(bind=engine)
+    return (
+        db.query(CapabilityAgentMapping)
+        .filter(CapabilityAgentMapping.capability == capability, CapabilityAgentMapping.enabled.is_(True))
+        .first()
+    )
+
+
+def agent_for_capability(db: Session, capability: str) -> AIAgentConfig | None:
+    mapping = agent_mapping_for_capability(db, capability)
+    if mapping and mapping.agent_config and mapping.agent_config.enabled:
+        return mapping.agent_config
+    return None
 
 
 class SpanCollector:
@@ -1282,11 +1382,19 @@ def call_model_config(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     started = time.perf_counter()
+    body: dict[str, Any] = {
+        "model": model_config.model_name,
+        "messages": request_messages,
+        "temperature": getattr(model_config, "temperature", 0),
+    }
+    max_tokens = getattr(model_config, "max_tokens", None)
+    if max_tokens:
+        body["max_tokens"] = int(max_tokens)
     response = httpx.post(
         url,
-        json={"model": model_config.model_name, "messages": request_messages, "temperature": 0},
+        json=body,
         headers=headers,
-        timeout=max(1, model_config.timeout_seconds),
+        timeout=max(1, int(getattr(model_config, "timeout_seconds", 30))),
     )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     if response.status_code >= 500:
@@ -4693,7 +4801,7 @@ def call_category_recognition_provider(
     request: CategoryRecognitionRequest,
     hierarchy_paths: list[list[str]],
 ) -> dict[str, Any]:
-    provider = provider_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY)
+    provider = agent_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY) or provider_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY)
     model_name = compact_space(request.model_override or provider.model_name or CATEGORY_RECOGNITION_DEFAULT_MODEL)
     collector = SpanCollector("category_recognition.recognize", CATEGORY_RECOGNITION_CAPABILITY)
     mark_root_trace_model(collector, provider, model_name)
@@ -4713,10 +4821,14 @@ def call_category_recognition_provider(
         body = {
             "model": model_name,
             "messages": category_recognition_messages(request.text, hierarchy_paths),
-            "temperature": 0,
+            "temperature": getattr(provider, "temperature", 0),
             "response_format": {"type": "json_object"},
         }
-        timeout_seconds = min(30, max(1, int(provider.timeout_seconds or 30)))
+        max_tokens = getattr(provider, "max_tokens", None)
+        if max_tokens:
+            body["max_tokens"] = int(max_tokens)
+        timeout_value = getattr(provider, "timeout", getattr(provider, "timeout_seconds", 30))
+        timeout_seconds = min(120, max(1, int(timeout_value or 30)))
         last_error = ""
         for attempt in range(2):
             span_id = collector.start_span(
@@ -6199,6 +6311,134 @@ def match_materials_alias(
     return match_materials(payload, db, auth)
 
 
+@app.get("/api/v1/ai/agent-configs", response_model=list[AgentConfigOut])
+def list_ai_agent_configs(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AgentConfigOut]:
+    current_auth(request, db)
+    Base.metadata.create_all(bind=engine)
+    configs = db.query(AIAgentConfig).order_by(AIAgentConfig.enabled.desc(), AIAgentConfig.id.desc()).all()
+    return [agent_config_to_out(config) for config in configs]
+
+
+@app.post("/api/v1/ai/agent-configs", response_model=AgentConfigOut)
+def create_ai_agent_config(
+    payload: AgentConfigIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    require_super_admin(current_auth(request, db))
+    if not payload.api_key:
+        raise HTTPException(status_code=422, detail="api_key is required")
+    config = AIAgentConfig(config_key=compact_space(payload.config_key), provider=compact_space(payload.provider))
+    apply_agent_payload(config, payload)
+    db.add(config)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.get("/api/v1/ai/agent-configs/{config_id}", response_model=AgentConfigOut)
+def get_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    current_auth(request, db)
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="AI agent config not found")
+    return agent_config_to_out(config)
+
+
+@app.put("/api/v1/ai/agent-configs/{config_id}", response_model=AgentConfigOut)
+def update_ai_agent_config(
+    config_id: int,
+    payload: AgentConfigIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    require_super_admin(current_auth(request, db))
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="AI agent config not found")
+    apply_agent_payload(config, payload)
+    if not config.encrypted_api_key:
+        raise HTTPException(status_code=422, detail="api_key is required")
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.patch("/api/v1/ai/agent-configs/{config_id}/toggle", response_model=AgentConfigOut)
+def toggle_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    require_super_admin(current_auth(request, db))
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="AI agent config not found")
+    config.enabled = not config.enabled
+    config.updated_at = now()
+    db.commit()
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.delete("/api/v1/ai/agent-configs/{config_id}")
+def delete_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    require_super_admin(current_auth(request, db))
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="AI agent config not found")
+    db.query(CapabilityAgentMapping).filter(
+        or_(
+            CapabilityAgentMapping.agent_config_id == config.id,
+            CapabilityAgentMapping.fallback_agent_config_id == config.id,
+        )
+    ).delete(synchronize_session=False)
+    db.delete(config)
+    db.commit()
+    return {"deleted": True, "id": config_id}
+
+
+@app.get("/api/v1/ai/agent-configs/{config_id}/test", response_model=AgentConfigTestOut)
+def test_saved_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigTestOut:
+    require_super_admin(current_auth(request, db))
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="AI agent config not found")
+    result = test_agent_config_connection(config)
+    db.commit()
+    return AgentConfigTestOut(
+        ok=result["ok"],
+        status=result["status"],
+        message=result["message"],
+        provider=config.provider,
+        model=config.model_name,
+        last_test_at=config.last_test_at.isoformat() if config.last_test_at else None,
+    )
+
+
 @app.get("/api/v1/ai/providers", response_model=list[ProviderConfigOut])
 def list_ai_providers(
     db: Session = Depends(get_db),
@@ -6345,8 +6585,13 @@ def list_capability_mappings(
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
 ) -> list[CapabilityMappingOut]:
     ensure_provider_configs(db)
-    mappings = db.query(CapabilityModelMapping).order_by(CapabilityModelMapping.capability).all()
-    return [mapping_to_out(mapping) for mapping in mappings]
+    agent_mappings = db.query(CapabilityAgentMapping).order_by(CapabilityAgentMapping.capability).all()
+    agent_capabilities = {mapping.capability for mapping in agent_mappings}
+    model_query = db.query(CapabilityModelMapping)
+    if agent_capabilities:
+        model_query = model_query.filter(~CapabilityModelMapping.capability.in_(agent_capabilities))
+    model_mappings = model_query.order_by(CapabilityModelMapping.capability).all()
+    return [agent_mapping_to_out(mapping) for mapping in agent_mappings] + [mapping_to_out(mapping) for mapping in model_mappings]
 
 
 @app.put("/api/v1/ai/capability-mappings/{capability}", response_model=CapabilityMappingOut)
@@ -6359,6 +6604,27 @@ def save_capability_mapping(
     capability = capability or payload.capability
     if capability not in AI_CAPABILITIES:
         raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    if payload.agent_config_id:
+        require_super_admin(auth)
+        agent = db.get(AIAgentConfig, payload.agent_config_id)
+        if not agent or not agent.enabled:
+            raise HTTPException(status_code=409, detail="Agent config must exist and be enabled")
+        fallback_agent = db.get(AIAgentConfig, payload.fallback_agent_config_id) if payload.fallback_agent_config_id else None
+        if payload.fallback_agent_config_id and (not fallback_agent or not fallback_agent.enabled):
+            raise HTTPException(status_code=409, detail="Fallback agent config must exist and be enabled")
+        mapping = db.query(CapabilityAgentMapping).filter(CapabilityAgentMapping.capability == capability).first()
+        if not mapping:
+            mapping = CapabilityAgentMapping(capability=capability, agent_config_id=agent.id)
+            db.add(mapping)
+        mapping.agent_config_id = agent.id
+        mapping.fallback_agent_config_id = fallback_agent.id if fallback_agent else None
+        mapping.enabled = payload.enabled
+        mapping.updated_at = now()
+        db.commit()
+        db.refresh(mapping)
+        return agent_mapping_to_out(mapping)
+    if payload.primary_model_id is None:
+        raise HTTPException(status_code=422, detail="primary_model_id or agent_config_id is required")
     primary = db.get(ModelConfig, payload.primary_model_id)
     if not primary or not primary.enabled:
         raise HTTPException(status_code=409, detail="Primary model must exist and be enabled")

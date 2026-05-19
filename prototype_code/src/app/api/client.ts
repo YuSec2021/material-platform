@@ -613,6 +613,7 @@ export type AiCapability =
   | "material_add"
   | "material_match"
   | "category_match"
+  | "category_recognition"
   | "material_analysis"
   | "attr_recommend"
   | "material_governance";
@@ -658,21 +659,67 @@ export type AiProviderTestResult = {
   message: string;
 };
 
+export type AiAgentConfig = {
+  id: number;
+  config_key: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  api_key_masked: string;
+  has_api_key: boolean;
+  temperature: number;
+  max_tokens: number;
+  timeout: number;
+  enabled: boolean;
+  connection_status: "ok" | "error" | "untested" | string;
+  last_test_message: string;
+  last_test_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AiAgentConfigPayload = {
+  config_key: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  api_key?: string;
+  temperature: number;
+  max_tokens: number;
+  timeout: number;
+  enabled: boolean;
+};
+
+export type AiAgentConfigTestResult = {
+  ok: boolean;
+  status: "ok" | "error" | "untested" | string;
+  message: string;
+  provider: string;
+  model: string;
+  last_test_at: string | null;
+};
+
 export type AiCapabilityMapping = {
   id: number;
   capability: AiCapability;
-  primary_model_id: number;
+  primary_model_id: number | null;
   primary_model_name: string;
   fallback_model_id: number | null;
   fallback_model_name: string;
+  agent_config_id?: number | null;
+  agent_config_key?: string;
+  fallback_agent_config_id?: number | null;
+  fallback_agent_config_key?: string;
   enabled: boolean;
   updated_at: string;
 };
 
 export type AiCapabilityMappingPayload = {
   capability: AiCapability;
-  primary_model_id: number;
+  primary_model_id?: number | null;
   fallback_model_id: number | null;
+  agent_config_id?: number | null;
+  fallback_agent_config_id?: number | null;
   enabled: boolean;
 };
 
@@ -1277,6 +1324,24 @@ export const apiClient = {
   },
   updateAiCapabilityMapping(capability: AiCapability, payload: AiCapabilityMappingPayload) {
     return request<AiCapabilityMapping>(`/ai/capability-mappings/${capability}`, { method: "PUT", body: payload });
+  },
+  aiAgentConfigs() {
+    return request<AiAgentConfig[]>("/ai/agent-configs");
+  },
+  createAiAgentConfig(payload: AiAgentConfigPayload) {
+    return request<AiAgentConfig>("/ai/agent-configs", { method: "POST", body: payload });
+  },
+  updateAiAgentConfig(id: number, payload: AiAgentConfigPayload) {
+    return request<AiAgentConfig>(`/ai/agent-configs/${id}`, { method: "PUT", body: payload });
+  },
+  toggleAiAgentConfig(id: number) {
+    return request<AiAgentConfig>(`/ai/agent-configs/${id}/toggle`, { method: "PATCH" });
+  },
+  deleteAiAgentConfig(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/ai/agent-configs/${id}`, { method: "DELETE" });
+  },
+  testAiAgentConfig(id: number) {
+    return request<AiAgentConfigTestResult>(`/ai/agent-configs/${id}/test`);
   },
   ruleCategories() {
     return request<RuleCategory[]>("/rules/categories");

@@ -477,20 +477,66 @@ class ProviderConfigOut(BaseModel):
     updated_at: str
 
 
+class AgentConfigIn(BaseModel):
+    config_key: str
+    provider: str
+    model_name: str
+    base_url: str
+    api_key: str | None = None
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2048, ge=1, le=32000)
+    timeout: int = Field(default=30, ge=5, le=120)
+    enabled: bool = True
+
+
+class AgentConfigOut(BaseModel):
+    id: int
+    config_key: str
+    provider: str
+    model_name: str
+    base_url: str
+    api_key_masked: str
+    has_api_key: bool
+    temperature: float
+    max_tokens: int
+    timeout: int
+    enabled: bool
+    connection_status: str
+    last_test_message: str = ""
+    last_test_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class AgentConfigTestOut(BaseModel):
+    ok: bool
+    status: str
+    message: str
+    provider: str
+    model: str
+    last_test_at: str | None = None
+
+
 class CapabilityMappingIn(BaseModel):
     capability: str = ""
-    primary_model_id: int
+    primary_model_id: int | None = None
     fallback_model_id: int | None = None
+    agent_config_id: int | None = None
+    fallback_agent_config_id: int | None = None
     enabled: bool = True
 
 
 class CapabilityMappingOut(BaseModel):
     id: int
     capability: str
-    primary_model_id: int
+    primary_model_id: int | None = None
     primary_model_name: str
     fallback_model_id: int | None = None
     fallback_model_name: str = ""
+    agent_config_id: int | None = None
+    agent_config_key: str = ""
+    fallback_agent_config_id: int | None = None
+    fallback_agent_config_key: str = ""
     enabled: bool
     updated_at: str
 

@@ -303,6 +303,54 @@ class ModelConfig(Base):
         return self.enabled
 
 
+class AIAgentConfig(Base):
+    __tablename__ = "ai_agent_config"
+    __table_args__ = (UniqueConstraint("config_key", name="uq_ai_agent_config_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    config_key: Mapped[str] = mapped_column(String(120), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    model_name: Mapped[str] = mapped_column(String(180), index=True)
+    base_url: Mapped[str] = mapped_column(String(320), default="")
+    encrypted_api_key: Mapped[str] = mapped_column(Text, default="")
+    temperature: Mapped[float] = mapped_column(default=0.2)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=2048)
+    timeout: Mapped[int] = mapped_column(Integer, default=30)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    connection_status: Mapped[str] = mapped_column(String(40), default="untested", index=True)
+    last_test_message: Mapped[str] = mapped_column(Text, default="")
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def model(self) -> str:
+        return self.model_name
+
+    @property
+    def endpoint(self) -> str:
+        return self.base_url
+
+    @property
+    def timeout_seconds(self) -> int:
+        return self.timeout
+
+
+class CapabilityAgentMapping(Base):
+    __tablename__ = "capability_agent_mapping"
+    __table_args__ = (UniqueConstraint("capability", name="uq_capability_agent_mapping"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    capability: Mapped[str] = mapped_column(String(80), index=True)
+    agent_config_id: Mapped[int] = mapped_column(ForeignKey("ai_agent_config.id"), index=True)
+    fallback_agent_config_id: Mapped[int | None] = mapped_column(ForeignKey("ai_agent_config.id"), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    agent_config: Mapped[AIAgentConfig] = relationship(foreign_keys=[agent_config_id])
+    fallback_agent_config: Mapped[AIAgentConfig | None] = relationship(foreign_keys=[fallback_agent_config_id])
+
+
 class CapabilityModelMapping(Base):
     __tablename__ = "capability_model_mapping"
     __table_args__ = (UniqueConstraint("capability", name="uq_capability_model_mapping"),)
