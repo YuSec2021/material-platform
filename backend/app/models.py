@@ -127,7 +127,7 @@ class Category(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
     category_library_id: Mapped[int | None] = mapped_column(ForeignKey("category_libraries.id"), nullable=True, index=True)
     parent_category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")

@@ -399,6 +399,46 @@ class MaterialMatchIn(BaseModel):
     top_k: int = 3
 
 
+class CategoryRecognitionRequest(BaseModel):
+    text: str
+    category_library_id: int | None = None
+    model_override: str | None = None
+
+
+class CategoryRecognitionCategory(BaseModel):
+    level1: str
+    level2: str | None = None
+    level3: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class CategoryRecognitionResponse(BaseModel):
+    categories: list[CategoryRecognitionCategory]
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class CategoryRecognitionBatchRequest(BaseModel):
+    items: list[Any] = Field(min_length=1, max_length=100)
+    category_library_id: int | None = None
+    model_override: str | None = None
+
+
+class CategoryRecognitionJobResult(BaseModel):
+    text: str
+    category_library_id: int | None = None
+    categories: list[CategoryRecognitionCategory]
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class CategoryRecognitionJob(BaseModel):
+    job_id: str
+    status: str
+    text: str | None = None
+    category_library_id: int | None = None
+    result: CategoryRecognitionJobResult | None = None
+    error: str = ""
+
+
 class ProviderConfigIn(BaseModel):
     display_name: str | None = None
     name: str | None = None
@@ -408,7 +448,9 @@ class ProviderConfigIn(BaseModel):
     endpoint: str | None = None
     base_url: str | None = None
     api_key: str | None = None
-    capabilities: list[str] = Field(default_factory=lambda: ["material_add", "material_match"])
+    capability: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
+    timeout: int | None = None
     active: bool | None = None
     enabled: bool | None = None
     timeout_seconds: int = 10
@@ -436,7 +478,7 @@ class ProviderConfigOut(BaseModel):
 
 
 class CapabilityMappingIn(BaseModel):
-    capability: str
+    capability: str = ""
     primary_model_id: int
     fallback_model_id: int | None = None
     enabled: bool = True
@@ -462,6 +504,8 @@ class TraceSummaryOut(BaseModel):
     trace_id: str
     operation_name: str
     capability: str
+    provider: str = ""
+    model: str = ""
     status: str
     start_time: str
     duration_ms: int

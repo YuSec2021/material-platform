@@ -77,6 +77,11 @@ from .schemas import (
     CategoryLibraryOut,
     CategoryLibraryUpdate,
     CategoryOut,
+    CategoryRecognitionBatchRequest,
+    CategoryRecognitionJob,
+    CategoryRecognitionJobResult,
+    CategoryRecognitionRequest,
+    CategoryRecognitionResponse,
     CategoryUpdate,
     ChangeOut,
     GatewayInvokeIn,
@@ -201,7 +206,15 @@ SEED_CATEGORY = {
 }
 MATERIAL_STATUSES = {"normal", "stop_purchase", "stop_use"}
 MATERIAL_TRANSITIONS = {("normal", "stop_purchase"), ("stop_purchase", "stop_use")}
-AI_CAPABILITIES = {"material_add", "material_match", "category_match", "material_analysis", "attr_recommend", "material_governance"}
+AI_CAPABILITIES = {
+    "material_add",
+    "material_match",
+    "category_match",
+    "category_recognition",
+    "material_analysis",
+    "attr_recommend",
+    "material_governance",
+}
 APPROVAL_MODES = {"simple", "multi_node"}
 APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop_use"}
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
@@ -220,7 +233,7 @@ DEFAULT_PROVIDER = {
     "provider": "mock",
     "model": "mock-material-governance-v1",
     "endpoint": "local://deterministic",
-    "capabilities": ["material_add", "material_match"],
+    "capabilities": ["material_add", "material_match", "category_recognition"],
 }
 KNOWN_BRANDS = ["华为", "Huawei", "HUAWEI", "联想", "Lenovo", "惠普", "HP", "戴尔", "Dell", "治理测试品牌"]
 HCM_SEED_USERS = [
@@ -523,6 +536,9 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/template", "label": "GET /api/v1/categories/template"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/bulk-import", "label": "POST /api/v1/categories/bulk-import"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize", "label": "POST /api/v1/ai/category-recognition/recognize"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize-async", "label": "POST /api/v1/ai/category-recognition/recognize-async"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/ai/category-recognition/jobs/{job_id}", "label": "GET /api/v1/ai/category-recognition/jobs/{job_id}"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/batch", "label": "POST /api/v1/ai/category-recognition/batch"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}", "label": "PUT /api/v1/categories/{category_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}", "label": "DELETE /api/v1/categories/{category_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries", "label": "GET /api/v1/category-libraries"},
@@ -617,9 +633,17 @@ def ensure_category_schema() -> None:
                 connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
             if "parent_category_id" not in existing:
                 connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
+            for index in connection.exec_driver_sql("PRAGMA index_list(categories)").fetchall():
+                index_name = index[1]
+                is_unique = bool(index[2])
+                columns = [row[2] for row in connection.exec_driver_sql(f"PRAGMA index_info({index_name})").fetchall()]
+                if is_unique and columns == ["name"]:
+                    connection.exec_driver_sql(f"DROP INDEX {index_name}")
             return
 
         Base.metadata.create_all(bind=connection)
+        connection.exec_driver_sql("ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_name_key")
+        connection.exec_driver_sql("DROP INDEX IF EXISTS ix_categories_name")
         has_column = connection.exec_driver_sql(
             """
             SELECT 1
@@ -1222,6 +1246,8 @@ def model_chat_url(model_config: ModelConfig) -> str:
         return ""
     if base_url.endswith("/v1/chat/completions"):
         return base_url
+    if base_url.endswith("/v1"):
+        return f"{base_url}/chat/completions"
     return f"{base_url}/v1/chat/completions"
 
 
@@ -1388,9 +1414,16 @@ def model_values_from_payload(payload: ProviderConfigIn) -> dict[str, Any]:
         "model_name": model_name,
         "base_url": base_url,
         "enabled": bool(enabled),
-        "timeout_seconds": max(1, min(120, int(payload.timeout_seconds or 10))),
+        "timeout_seconds": max(1, min(120, int(payload.timeout or payload.timeout_seconds or 10))),
         "fallback_model_id": payload.fallback_model_id,
     }
+
+
+def provider_payload_capabilities(payload: ProviderConfigIn) -> list[str]:
+    capabilities = normalize_capabilities(payload.capabilities)
+    if payload.capability:
+        capabilities.append(payload.capability)
+    return capabilities
 
 
 def apply_model_payload(db: Session, provider: ModelConfig, payload: ProviderConfigIn) -> ModelConfig:
@@ -1409,12 +1442,18 @@ def apply_model_payload(db: Session, provider: ModelConfig, payload: ProviderCon
         provider.encrypted_api_key = encrypt_api_key(payload.api_key)
     provider.updated_at = now()
     db.flush()
-    test_result = test_model_connection(provider)
+    if provider.provider == "openai-compatible":
+        test_result = {
+            "status": "configured",
+            "message": "OpenAI-compatible provider configured; use explicit test endpoint to verify connectivity",
+        }
+    else:
+        test_result = test_model_connection(provider)
     provider.connection_status = test_result["status"]
     provider.last_test_message = test_result["message"]
     provider.last_test_at = now()
     db.flush()
-    sync_model_capabilities(db, provider, payload.capabilities)
+    sync_model_capabilities(db, provider, provider_payload_capabilities(payload))
     return provider
 
 
@@ -4494,27 +4533,140 @@ def recognize_category_lines(text: str) -> list[dict[str, Any]]:
     return categories
 
 
-@app.post("/api/v1/ai/category-recognition/recognize")
-def recognize_categories(
-    payload: dict[str, Any],
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/category-recognition/recognize")),
-) -> dict[str, Any]:
-    require_super_admin(auth)
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=422, detail="Recognition text is required")
+CATEGORY_RECOGNITION_JOBS: dict[str, dict[str, Any]] = {}
+CATEGORY_RECOGNITION_CAPABILITY = "category_recognition"
+CATEGORY_RECOGNITION_DEFAULT_MODEL = "qwen3.6-plus"
 
-    category_library_id = payload.get("category_library_id")
-    if category_library_id is not None:
+
+class CategoryRecognitionUpstreamError(Exception):
+    def __init__(self, message: str, status_code: int = 502, retryable: bool = True):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
+def validate_category_library(db: Session, category_library_id: int | None) -> CategoryLibrary | None:
+    if category_library_id is None:
+        return None
+    library = db.get(CategoryLibrary, category_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    return library
+
+
+def category_path_for(category: Category, by_id: dict[int, Category]) -> list[str]:
+    path = [category.name]
+    parent_id = category.parent_category_id
+    seen = {category.id}
+    while parent_id and parent_id not in seen:
+        parent = by_id.get(parent_id)
+        if not parent:
+            break
+        path.append(parent.name)
+        seen.add(parent.id)
+        parent_id = parent.parent_category_id
+    return list(reversed(path))[:3]
+
+
+def category_hierarchy_paths(db: Session, library_id: int | None) -> list[list[str]]:
+    query = db.query(Category).filter(Category.enabled.is_(True))
+    if library_id is not None:
+        query = query.filter(Category.category_library_id == library_id)
+    categories = query.order_by(Category.parent_category_id.isnot(None), Category.parent_category_id, Category.id).all()
+    by_id = {category.id: category for category in categories}
+    paths: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for category in categories:
+        path = category_path_for(category, by_id)
+        key = tuple(path)
+        if key and key not in seen:
+            seen.add(key)
+            paths.append(path)
+    return paths
+
+
+def category_recognition_messages(text: str, hierarchy_paths: list[list[str]]) -> list[dict[str, str]]:
+    hierarchy = "\n".join(f"- {' / '.join(path)}" for path in hierarchy_paths) or "- No configured categories"
+    system_prompt = (
+        "You are a category recognition agent for an enterprise material master data system. "
+        "Use the provided category hierarchy context and return structured JSON output only. "
+        "The JSON schema is {\"categories\":[{\"level1\":\"...\",\"level2\":\"...\","
+        "\"level3\":\"...\",\"confidence\":0.0}],\"suggestions\":[\"...\"]}. "
+        "Return multiple category candidates when the input is ambiguous. Confidence must be between 0.0 and 1.0.\n\n"
+        f"Category hierarchy:\n{hierarchy}\n\n"
+        "Examples:\n"
+        "- HP LaserJet printer -> 办公设备 / 打印机 / 激光打印机\n"
+        "- 防割手套 -> 安全用品 / 防护用品 / 防护手套"
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Recognize the category path for this material description:\n{text}"},
+    ]
+
+
+def clamp_confidence(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = 0.5
+    return round(max(0.0, min(1.0, numeric)), 4)
+
+
+def extract_json_payload(content: str) -> dict[str, Any]:
+    text = content.strip()
+    candidates = [text]
+    candidates.extend(re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.IGNORECASE | re.DOTALL))
+    if "{" in text and "}" in text:
+        candidates.append(text[text.find("{"): text.rfind("}") + 1])
+    for candidate in candidates:
         try:
-            library_id = int(category_library_id)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="category_library_id must be an integer") from None
-        library = db.get(CategoryLibrary, library_id)
-        if not library:
-            raise HTTPException(status_code=404, detail="Category library not found")
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("Provider response did not contain a JSON object")
 
+
+def normalized_category_candidate(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    levels: list[str] = []
+    if isinstance(raw.get("levels"), list):
+        levels = [compact_space(str(item)) for item in raw["levels"] if compact_space(str(item))]
+    elif raw.get("path"):
+        levels = split_recognized_category_line(str(raw["path"]))
+    else:
+        levels = [
+            compact_space(str(raw.get("level1") or "")),
+            compact_space(str(raw.get("level2") or "")),
+            compact_space(str(raw.get("level3") or "")),
+        ]
+        levels = [level for level in levels if level]
+    if not levels:
+        return None
+    candidate: dict[str, Any] = {"level1": levels[0], "confidence": clamp_confidence(raw.get("confidence"))}
+    if len(levels) > 1:
+        candidate["level2"] = levels[1]
+    if len(levels) > 2:
+        candidate["level3"] = levels[2]
+    return candidate
+
+
+def parse_category_recognition_response(content: str) -> dict[str, Any]:
+    parsed = extract_json_payload(content)
+    raw_categories = parsed.get("categories") or parsed.get("candidates") or parsed.get("results") or []
+    categories = [candidate for candidate in (normalized_category_candidate(item) for item in raw_categories) if candidate]
+    categories.sort(key=lambda item: item["confidence"], reverse=True)
+    suggestions = [compact_space(str(item)) for item in parsed.get("suggestions", []) if compact_space(str(item))]
+    if not suggestions:
+        suggestions = ["请人工复核候选类目与物料描述是否匹配"]
+    if not categories:
+        raise ValueError("Provider JSON did not include category candidates")
+    return {"categories": categories, "suggestions": suggestions}
+
+
+def local_category_recognition_response(text: str) -> dict[str, Any]:
     categories = recognize_category_lines(text)
     if not categories:
         raise HTTPException(status_code=422, detail="No recognizable category paths found")
@@ -4525,6 +4677,215 @@ def recognize_categories(
             "Use one line per category path for best results",
         ],
     }
+
+
+def mark_root_trace_model(collector: SpanCollector, provider: ModelConfig, model_name: str) -> None:
+    for span in collector.spans:
+        if span["span_id"] == collector.root_span_id:
+            span["provider"] = provider.provider
+            span["model"] = model_name
+            span["metadata"].update({"provider": provider.provider, "model": model_name})
+            return
+
+
+def call_category_recognition_provider(
+    db: Session,
+    request: CategoryRecognitionRequest,
+    hierarchy_paths: list[list[str]],
+) -> dict[str, Any]:
+    provider = provider_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY)
+    model_name = compact_space(request.model_override or provider.model_name or CATEGORY_RECOGNITION_DEFAULT_MODEL)
+    collector = SpanCollector("category_recognition.recognize", CATEGORY_RECOGNITION_CAPABILITY)
+    mark_root_trace_model(collector, provider, model_name)
+    try:
+        if provider.provider == "mock" or (provider.base_url or "").startswith("local://"):
+            result = local_category_recognition_response(request.text)
+            collector.finish_span(collector.root_span_id, "ok", metadata={"mode": "local", "model": model_name})
+            return result
+
+        url = model_chat_url(provider)
+        if not url:
+            raise CategoryRecognitionUpstreamError("Model base URL is not configured", 502, True)
+        headers = {"Content-Type": "application/json"}
+        api_key = decrypt_api_key(provider.encrypted_api_key)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        body = {
+            "model": model_name,
+            "messages": category_recognition_messages(request.text, hierarchy_paths),
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        timeout_seconds = min(30, max(1, int(provider.timeout_seconds or 30)))
+        last_error = ""
+        for attempt in range(2):
+            span_id = collector.start_span(
+                "category_recognition.llm.chat",
+                "llm",
+                capability=CATEGORY_RECOGNITION_CAPABILITY,
+                parent_span_id=collector.root_span_id,
+                provider=provider.provider,
+                model=model_name,
+                metadata={"attempt": attempt + 1, "url": url},
+            )
+            try:
+                response = httpx.post(url, json=body, headers=headers, timeout=timeout_seconds)
+            except httpx.TimeoutException as exc:
+                last_error = f"Provider timed out after {timeout_seconds}s"
+                collector.finish_span(span_id, "error", str(exc))
+                raise CategoryRecognitionUpstreamError(last_error, 504, True) from exc
+            except httpx.RequestError as exc:
+                last_error = f"Provider request failed: {exc}"
+                collector.finish_span(span_id, "error", str(exc))
+                raise CategoryRecognitionUpstreamError(last_error, 503, True) from exc
+            if response.status_code >= 500:
+                last_error = f"Provider returned HTTP {response.status_code}"
+                collector.finish_span(span_id, "error", last_error)
+                if attempt == 0:
+                    continue
+                raise CategoryRecognitionUpstreamError(last_error, 502, True)
+            if response.status_code >= 400:
+                last_error = f"Provider rejected request with HTTP {response.status_code}"
+                collector.finish_span(span_id, "error", last_error)
+                raise CategoryRecognitionUpstreamError(last_error, 502, False)
+            body_json = response.json()
+            choices = body_json.get("choices") if isinstance(body_json, dict) else None
+            message = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+            content = str(message.get("content") or choices[0].get("text") or "")
+            try:
+                result = parse_category_recognition_response(content)
+            except Exception as exc:
+                collector.finish_span(span_id, "error", str(exc))
+                raise
+            collector.finish_span(span_id, "ok", metadata={"status_code": response.status_code})
+            collector.finish_span(collector.root_span_id, "ok", metadata={"model": model_name, "attempts": attempt + 1})
+            return result
+        raise CategoryRecognitionUpstreamError(last_error or "Provider request failed", 502, True)
+    except CategoryRecognitionUpstreamError as exc:
+        collector.finish_span(collector.root_span_id, "error", str(exc), {"model": model_name, "retryable": exc.retryable})
+        raise
+    except HTTPException:
+        collector.finish_span(collector.root_span_id, "error", "local recognition failed", {"model": model_name})
+        raise
+    except Exception as exc:
+        collector.finish_span(collector.root_span_id, "error", str(exc), {"model": model_name})
+        raise CategoryRecognitionUpstreamError(str(exc), 502, True) from exc
+    finally:
+        collector.flush(db)
+
+
+def run_category_recognition(db: Session, payload: CategoryRecognitionRequest) -> dict[str, Any]:
+    text = str(payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Recognition text is required")
+    payload.text = text
+    validate_category_library(db, payload.category_library_id)
+    hierarchy_paths = category_hierarchy_paths(db, payload.category_library_id)
+    try:
+        return call_category_recognition_provider(db, payload, hierarchy_paths)
+    except CategoryRecognitionUpstreamError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": str(exc),
+                "suggestions": ["请稍后重试或切换可用的类目识别模型", "可手工选择类目后继续业务流程"],
+                "retryable": exc.retryable,
+            },
+        ) from exc
+
+
+def batch_item_text(item: Any) -> str:
+    if isinstance(item, str):
+        return compact_space(item)
+    if isinstance(item, dict):
+        return compact_space(str(item.get("text") or item.get("name") or item.get("description") or ""))
+    return compact_space(str(item))
+
+
+@app.post("/api/v1/ai/category-recognition/recognize", response_model=CategoryRecognitionResponse)
+def recognize_categories(
+    payload: CategoryRecognitionRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/category-recognition/recognize")),
+) -> CategoryRecognitionResponse:
+    require_super_admin(auth)
+    return CategoryRecognitionResponse(**run_category_recognition(db, payload))
+
+
+@app.post("/api/v1/ai/category-recognition/recognize-async", response_model=CategoryRecognitionJob)
+def recognize_categories_async(
+    payload: CategoryRecognitionRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/category-recognition/recognize-async")),
+) -> CategoryRecognitionJob:
+    require_super_admin(auth)
+    job_id = f"catrec-{uuid.uuid4().hex[:20]}"
+    CATEGORY_RECOGNITION_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "running",
+        "text": payload.text,
+        "category_library_id": payload.category_library_id,
+        "result": None,
+        "error": "",
+    }
+    try:
+        result = run_category_recognition(db, payload)
+        job_result = CategoryRecognitionJobResult(
+            text=payload.text,
+            category_library_id=payload.category_library_id,
+            categories=result["categories"],
+            suggestions=result["suggestions"],
+        )
+        CATEGORY_RECOGNITION_JOBS[job_id].update({"status": "succeeded", "result": job_result, "error": ""})
+    except HTTPException as exc:
+        CATEGORY_RECOGNITION_JOBS[job_id].update({"status": "failed", "error": str(exc.detail)})
+    return CategoryRecognitionJob(**CATEGORY_RECOGNITION_JOBS[job_id])
+
+
+@app.get("/api/v1/ai/category-recognition/jobs/{job_id}", response_model=CategoryRecognitionJob)
+def get_category_recognition_job(
+    job_id: str,
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/ai/category-recognition/jobs/{job_id}")),
+) -> CategoryRecognitionJob:
+    require_super_admin(auth)
+    job = CATEGORY_RECOGNITION_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Category recognition job not found")
+    return CategoryRecognitionJob(**job)
+
+
+@app.post("/api/v1/ai/category-recognition/batch")
+def recognize_categories_batch(
+    payload: CategoryRecognitionBatchRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/category-recognition/batch")),
+) -> dict[str, Any]:
+    require_super_admin(auth)
+    job_id = f"catrec-batch-{uuid.uuid4().hex[:20]}"
+    results: list[dict[str, Any]] = []
+    for item in payload.items:
+        text = batch_item_text(item)
+        if not text:
+            raise HTTPException(status_code=422, detail="Batch item text is required")
+        recognition = run_category_recognition(
+            db,
+            CategoryRecognitionRequest(
+                text=text,
+                category_library_id=payload.category_library_id,
+                model_override=payload.model_override,
+            ),
+        )
+        results.append({"text": text, **recognition})
+    CATEGORY_RECOGNITION_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "succeeded",
+        "text": None,
+        "category_library_id": payload.category_library_id,
+        "result": None,
+        "error": "",
+        "results": results,
+    }
+    return {"job_id": job_id, "status": "succeeded", "results": results}
 
 
 @app.get("/api/v1/categories/template")
@@ -4631,8 +4992,9 @@ def create_category(
     if not name:
         raise HTTPException(status_code=422, detail="Category name is required")
     code = compact_space(payload.code).upper() or next_unique_code(db, Category, "CAT", f"{name}:{now().isoformat()}")
-    if db.query(Category).filter(Category.name == name).first():
-        raise HTTPException(status_code=409, detail="Category name must be unique")
+    duplicate_name = find_category_by_parent(db, library.id, parent.id if parent else None, name)
+    if duplicate_name:
+        raise HTTPException(status_code=409, detail="Category name must be unique within the same parent")
     if db.query(Category).filter(Category.code == code).first():
         raise HTTPException(status_code=409, detail="Category code must be unique")
     category = Category(
@@ -4678,9 +5040,18 @@ def update_category(
         name = compact_space(payload.name)
         if not name:
             raise HTTPException(status_code=422, detail="Category name is required")
-        duplicate = db.query(Category).filter(Category.name == name, Category.id != category.id).first()
+        duplicate = (
+            db.query(Category)
+            .filter(
+                Category.category_library_id == category.category_library_id,
+                Category.parent_category_id == category.parent_category_id,
+                Category.name == name,
+                Category.id != category.id,
+            )
+            .first()
+        )
         if duplicate:
-            raise HTTPException(status_code=409, detail="Category name must be unique")
+            raise HTTPException(status_code=409, detail="Category name must be unique within the same parent")
         category.name = name
     if payload.code is not None:
         code = compact_space(payload.code).upper()
@@ -5944,7 +6315,7 @@ def test_ai_provider(
         "ok": result["ok"],
         "provider": provider.provider,
         "model": provider.model_name,
-        "capabilities": [capability for capability in normalize_capabilities(payload.capabilities) if capability in AI_CAPABILITIES],
+        "capabilities": [capability for capability in provider_payload_capabilities(payload) if capability in AI_CAPABILITIES],
         "status": result["status"],
         "message": result["message"],
     }
@@ -6048,6 +6419,8 @@ def list_traces(
                 trace_id=trace_id,
                 operation_name=root.operation_name,
                 capability=root.capability,
+                provider=root.provider,
+                model=root.model,
                 status="error" if any(span.status == "error" for span in trace_spans) else root.status,
                 start_time=root.start_time.isoformat(),
                 duration_ms=sum(span.duration_ms for span in trace_spans if not span.parent_span_id) or root.duration_ms,
