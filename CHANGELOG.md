@@ -116,3 +116,9 @@
 - Catalog and module names follow i18n language (zh-CN/EN-US)
 - Dark theme compatibility preserved on permissions page
 - Build passes without TypeScript errors
+
+## v11.2.0 — Sprint 35 [MINOR bump]
+- CategoryLibrary CRUD APIs (GET/POST/PUT/DELETE /api/v1/category-libraries)
+- Category write APIs (POST/PUT/DELETE /api/v1/categories)
+- CategoryLibraryList.tsx and CategoryList.tsx connected to backend
+- All new permissions registered in PERMISSION_CATALOG
