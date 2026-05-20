@@ -17,6 +17,8 @@ class ProductName(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    product_name_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     unit: Mapped[str] = mapped_column(String(40), default="")
     category: Mapped[str] = mapped_column(String(160), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -25,6 +27,14 @@ class ProductName(Base):
         back_populates="product_name",
         cascade="all, delete-orphan",
     )
+
+
+class ProductNameCodeSequence(Base):
+    __tablename__ = "product_name_code_sequence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    current_value: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Attribute(Base):

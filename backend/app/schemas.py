@@ -7,9 +7,27 @@ from pydantic import BaseModel, Field
 
 class ProductNameOut(BaseModel):
     id: int
+    product_name_code: str
+    status: str
     name: str
     unit: str
     category: str
+
+
+class ProductNameIn(BaseModel):
+    name: str
+    unit: str = ""
+    category: str = ""
+
+
+class ProductNameUpdate(BaseModel):
+    name: str | None = None
+    unit: str | None = None
+    category: str | None = None
+
+
+class ProductNameStatusUpdate(BaseModel):
+    status: str
 
 
 class AttributeIn(BaseModel):

@@ -48,6 +48,7 @@ from .models import (
     MaterialLibrary,
     ModelConfig,
     ProductName,
+    ProductNameCodeSequence,
     Rule,
     RuleCategory,
     Role,
@@ -113,7 +114,10 @@ from .schemas import (
     MaterialTransitionIn,
     MaterialUpdate,
     ManualStopPurchaseIn,
+    ProductNameIn,
     ProductNameOut,
+    ProductNameStatusUpdate,
+    ProductNameUpdate,
     ProviderConfigIn,
     ProviderConfigOut,
     RecommendIn,
@@ -227,6 +231,8 @@ TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
 USER_STATUSES = {"active", "disabled"}
 ACCOUNT_OWNERSHIPS = {"HCM", "local"}
 ROLE_CODE_PATTERN = re.compile(r"^ROLE_(\d{3,})$")
+PRODUCT_NAME_STATUSES = {"active", "inactive"}
+PRODUCT_NAME_CODE_PATTERN = re.compile(r"^PM(\d{8,})$")
 SYSTEM_CONFIG_KEY = "system_configuration"
 DEFAULT_SYSTEM_NAME = "AI Material Management Platform"
 DEFAULT_SYSTEM_ICON = {
@@ -554,6 +560,14 @@ PERMISSION_CATALOG = [
     {"module": "category_library", "permission_type": "api", "permission_key": "api.PUT./api/v1/category-libraries/{library_id}", "label": "PUT /api/v1/category-libraries/{library_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.DELETE./api/v1/category-libraries/{library_id}", "label": "DELETE /api/v1/category-libraries/{library_id}"},
     {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names", "label": "GET /api/v1/product-names"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.POST./api/v1/product-names", "label": "POST /api/v1/product-names"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names/{product_name_id}", "label": "GET /api/v1/product-names/{product_name_id}"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/product-names/{product_name_id}", "label": "PUT /api/v1/product-names/{product_name_id}"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.PATCH./api/v1/product-names/{product_name_id}/status", "label": "PATCH /api/v1/product-names/{product_name_id}/status"},
+    {"module": "product_name_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/product-names/{product_name_id}", "label": "DELETE /api/v1/product-names/{product_name_id}"},
+    {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.create", "label": "Product Name Create"},
+    {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.edit", "label": "Product Name Edit"},
+    {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.delete", "label": "Product Name Delete"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.GET./api/v1/brands", "label": "GET /api/v1/brands"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.POST./api/v1/brands", "label": "POST /api/v1/brands"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/brands/{brand_id}", "label": "PUT /api/v1/brands/{brand_id}"},
@@ -573,8 +587,10 @@ def startup() -> None:
     ensure_material_code_rule_schema()
     ensure_category_schema()
     ensure_material_library_association_schema()
+    ensure_product_name_schema()
     db = next(get_db())
     try:
+        ensure_product_name_code_sequence(db)
         ensure_role_code_sequence(db)
         ensure_seed_product(db)
         ensure_seed_material_context(db)
@@ -721,12 +737,53 @@ def ensure_material_library_association_schema() -> None:
             )
 
 
+def ensure_product_name_schema() -> None:
+    with engine.begin() as connection:
+        if engine.dialect.name == "sqlite":
+            Base.metadata.create_all(bind=connection)
+            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(product_names)").fetchall()}
+            if "product_name_code" not in existing:
+                connection.exec_driver_sql(
+                    "ALTER TABLE product_names ADD COLUMN product_name_code VARCHAR(12) DEFAULT '' NOT NULL"
+                )
+            if "status" not in existing:
+                connection.exec_driver_sql(
+                    "ALTER TABLE product_names ADD COLUMN status VARCHAR(20) DEFAULT 'active' NOT NULL"
+                )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_product_names_status ON product_names (status)"
+            )
+            ProductNameCodeSequence.__table__.create(bind=connection, checkfirst=True)
+            return
+
+        Base.metadata.create_all(bind=connection)
+        columns = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'product_names'
+                """
+            ).fetchall()
+        }
+        if "product_name_code" not in columns:
+            connection.exec_driver_sql("ALTER TABLE product_names ADD COLUMN product_name_code VARCHAR(12)")
+        if "status" not in columns:
+            connection.exec_driver_sql("ALTER TABLE product_names ADD COLUMN status VARCHAR(20) DEFAULT 'active' NOT NULL")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_product_names_status ON product_names (status)")
+
+
 def ensure_seed_product(db: Session) -> ProductName:
     Base.metadata.create_all(bind=engine)
     product = db.query(ProductName).filter(ProductName.name == SEED_PRODUCT["name"]).first()
     if product:
+        if not product.product_name_code:
+            product.product_name_code = generate_product_name_code(db)
+        if product.status not in PRODUCT_NAME_STATUSES:
+            product.status = "active"
         return product
-    product = ProductName(**SEED_PRODUCT)
+    product = ProductName(**SEED_PRODUCT, product_name_code=generate_product_name_code(db), status="active")
     db.add(product)
     db.commit()
     db.refresh(product)
@@ -1903,6 +1960,98 @@ def generate_role_code(db: Session) -> str:
         if not db.query(Role).filter(Role.code == code).first():
             db.flush()
             return code
+
+
+def highest_generated_product_name_code_value(db: Session) -> int:
+    highest = 0
+    for (code,) in db.query(ProductName.product_name_code).filter(ProductName.product_name_code.like("PM%")).all():
+        match = PRODUCT_NAME_CODE_PATTERN.match(code or "")
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest
+
+
+def ensure_product_name_code_sequence(db: Session) -> ProductNameCodeSequence:
+    ensure_product_name_schema()
+    sequence = (
+        db.query(ProductNameCodeSequence)
+        .filter(ProductNameCodeSequence.id == 1)
+        .with_for_update()
+        .one_or_none()
+    )
+    highest_existing = highest_generated_product_name_code_value(db)
+    if sequence is None:
+        sequence = ProductNameCodeSequence(id=1, current_value=highest_existing, updated_at=now())
+        db.add(sequence)
+        db.flush()
+    elif sequence.current_value < highest_existing:
+        sequence.current_value = highest_existing
+        sequence.updated_at = now()
+        db.flush()
+
+    for product in db.query(ProductName).order_by(ProductName.id).all():
+        if product.product_name_code:
+            if product.status not in PRODUCT_NAME_STATUSES:
+                product.status = "active"
+            continue
+        sequence.current_value += 1
+        product.product_name_code = f"PM{sequence.current_value:08d}"
+        product.status = product.status if product.status in PRODUCT_NAME_STATUSES else "active"
+        sequence.updated_at = now()
+    db.flush()
+
+    db.connection().exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_product_names_product_name_code "
+        "ON product_names (product_name_code)"
+    )
+    return sequence
+
+
+def generate_product_name_code(db: Session) -> str:
+    sequence = ensure_product_name_code_sequence(db)
+    while True:
+        sequence.current_value += 1
+        sequence.updated_at = now()
+        code = f"PM{sequence.current_value:08d}"
+        if not db.query(ProductName).filter(ProductName.product_name_code == code).first():
+            db.flush()
+            return code
+
+
+def validate_product_name_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized not in PRODUCT_NAME_STATUSES:
+        raise HTTPException(status_code=422, detail="status must be active or inactive")
+    return normalized
+
+
+def product_name_to_out(product: ProductName) -> ProductNameOut:
+    return ProductNameOut(
+        id=product.id,
+        product_name_code=product.product_name_code,
+        status=product.status,
+        name=product.name,
+        unit=product.unit,
+        category=product.category,
+    )
+
+
+def product_name_audit_value(product: ProductName) -> dict[str, Any]:
+    return {
+        "id": product.id,
+        "product_name_code": product.product_name_code,
+        "status": product.status,
+        "name": product.name,
+        "unit": product.unit,
+        "category": product.category,
+    }
+
+
+def get_product_name_or_404(db: Session, product_name_id: int) -> ProductName:
+    product = db.get(ProductName, product_name_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product name not found")
+    return product
 
 
 def get_role_or_404(db: Session, role_id: int) -> Role:
@@ -3252,10 +3401,17 @@ def get_or_create_category(db: Session, name: str) -> Category:
 
 
 def get_or_create_product_name(db: Session, name: str, unit: str, category: str) -> ProductName:
+    ensure_product_name_code_sequence(db)
     product = db.query(ProductName).filter(ProductName.name == name).first()
     if product:
         return product
-    product = ProductName(name=name, unit=unit, category=category)
+    product = ProductName(
+        name=name,
+        product_name_code=generate_product_name_code(db),
+        status="active",
+        unit=unit,
+        category=category,
+    )
     db.add(product)
     db.flush()
     return product
@@ -3935,12 +4091,129 @@ def delete_rule(
 
 @app.get("/api/v1/product-names", response_model=list[ProductNameOut])
 def list_product_names(
+    status: str = Query("all"),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/product-names")),
 ) -> list[ProductNameOut]:
+    ensure_product_name_code_sequence(db)
     ensure_seed_product(db)
-    products = db.query(ProductName).order_by(ProductName.id).all()
-    return [ProductNameOut(id=p.id, name=p.name, unit=p.unit, category=p.category) for p in products]
+    normalized_status = status.strip().lower()
+    if normalized_status not in {"all", *PRODUCT_NAME_STATUSES}:
+        raise HTTPException(status_code=422, detail="status must be all, active, or inactive")
+    query = db.query(ProductName)
+    if normalized_status != "all":
+        query = query.filter(ProductName.status == normalized_status)
+    products = query.order_by(ProductName.id).all()
+    return [product_name_to_out(product) for product in products]
+
+
+@app.post("/api/v1/product-names", response_model=ProductNameOut)
+def create_product_name(
+    payload: ProductNameIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/product-names")),
+) -> ProductNameOut:
+    require_button_permission(auth, "button.product_names.create")
+    ensure_product_name_code_sequence(db)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Product name is required")
+    if db.query(ProductName).filter(ProductName.name == name).first():
+        raise HTTPException(status_code=409, detail="Product name must be unique")
+    product = ProductName(
+        name=name,
+        product_name_code=generate_product_name_code(db),
+        status="active",
+        unit=payload.unit.strip(),
+        category=payload.category.strip(),
+    )
+    db.add(product)
+    db.flush()
+    add_audit_log(db, auth, "product_name", "create", {}, product_name_audit_value(product))
+    db.commit()
+    db.refresh(product)
+    return product_name_to_out(product)
+
+
+@app.get("/api/v1/product-names/{product_name_id}", response_model=ProductNameOut)
+def get_product_name(
+    product_name_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/product-names/{product_name_id}")),
+) -> ProductNameOut:
+    ensure_product_name_code_sequence(db)
+    return product_name_to_out(get_product_name_or_404(db, product_name_id))
+
+
+@app.put("/api/v1/product-names/{product_name_id}", response_model=ProductNameOut)
+def update_product_name(
+    product_name_id: int,
+    payload: ProductNameUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/product-names/{product_name_id}")),
+) -> ProductNameOut:
+    require_button_permission(auth, "button.product_names.edit")
+    ensure_product_name_code_sequence(db)
+    product = get_product_name_or_404(db, product_name_id)
+    before = product_name_audit_value(product)
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Product name is required")
+        existing = db.query(ProductName).filter(ProductName.name == name, ProductName.id != product.id).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Product name must be unique")
+        product.name = name
+    if payload.unit is not None:
+        product.unit = payload.unit.strip()
+    if payload.category is not None:
+        product.category = payload.category.strip()
+    db.flush()
+    after = product_name_audit_value(product)
+    if before != after:
+        add_audit_log(db, auth, "product_name", "update", before, after)
+    db.commit()
+    db.refresh(product)
+    return product_name_to_out(product)
+
+
+@app.patch("/api/v1/product-names/{product_name_id}/status", response_model=ProductNameOut)
+def update_product_name_status(
+    product_name_id: int,
+    payload: ProductNameStatusUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PATCH./api/v1/product-names/{product_name_id}/status")),
+) -> ProductNameOut:
+    require_button_permission(auth, "button.product_names.edit")
+    ensure_product_name_code_sequence(db)
+    product = get_product_name_or_404(db, product_name_id)
+    status = validate_product_name_status(payload.status)
+    before = product_name_audit_value(product)
+    product.status = status
+    db.flush()
+    after = product_name_audit_value(product)
+    if before != after:
+        add_audit_log(db, auth, "product_name", "status", before, after)
+    db.commit()
+    db.refresh(product)
+    return product_name_to_out(product)
+
+
+@app.delete("/api/v1/product-names/{product_name_id}")
+def delete_product_name(
+    product_name_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/product-names/{product_name_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.product_names.delete")
+    ensure_product_name_code_sequence(db)
+    product = get_product_name_or_404(db, product_name_id)
+    before = product_name_audit_value(product)
+    product.status = "inactive"
+    db.flush()
+    add_audit_log(db, auth, "product_name", "delete", before, product_name_audit_value(product))
+    db.commit()
+    return {"deleted": True, "id": product_name_id, "soft_deleted": True}
 
 
 @app.get("/api/v1/material-libraries", response_model=list[MaterialLibraryOut])
