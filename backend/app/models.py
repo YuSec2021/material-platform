@@ -97,10 +97,14 @@ class MaterialLibrary(Base):
     auto_code_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     recode_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     current_rule_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    material_library_admin_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id"), nullable=True, index=True)
+    category_library_id: Mapped[int | None] = mapped_column(ForeignKey("category_libraries.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     materials: Mapped[list["Material"]] = relationship(back_populates="material_library")
+    material_library_admin: Mapped["Role | None"] = relationship()
+    category_library: Mapped["CategoryLibrary | None"] = relationship()
     code_rule_versions: Mapped[list["MaterialCodeRuleVersion"]] = relationship(
         back_populates="library",
         cascade="all, delete-orphan",
@@ -491,6 +495,14 @@ class Role(Base):
         back_populates="role",
         cascade="all, delete-orphan",
     )
+
+
+class RoleCodeSequence(Base):
+    __tablename__ = "role_code_sequence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    current_value: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class RoleUser(Base):

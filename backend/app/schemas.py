@@ -124,6 +124,12 @@ class MaterialLibraryOut(BaseModel):
     current_rule_version_id: int | None = None
     code_rule_summary: dict[str, Any] | None = None
     material_count: int = 0
+    material_library_admin_id: int | None = None
+    material_library_admin_name: str | None = None
+    material_library_admin_code: str | None = None
+    category_library_id: int | None = None
+    category_library_name: str | None = None
+    category_library_code: str | None = None
 
 
 class MaterialLibraryIn(BaseModel):
@@ -133,12 +139,16 @@ class MaterialLibraryIn(BaseModel):
     auto_code_enabled: bool = False
     recode_enabled: bool = False
     code_rule: dict[str, Any] | None = None
+    material_library_admin_id: int | None = None
+    category_library_id: int | None = None
 
 
 class MaterialLibraryUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     enabled: bool | None = None
+    material_library_admin_id: int | None = None
+    category_library_id: int | None = None
 
 
 class CategoryLibraryOut(BaseModel):
@@ -722,7 +732,7 @@ class PasswordResetOut(BaseModel):
 
 class RoleIn(BaseModel):
     name: str
-    code: str
+    code: str | None = None
     description: str = ""
     enabled: bool = True
 

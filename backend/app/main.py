@@ -51,6 +51,7 @@ from .models import (
     Rule,
     RuleCategory,
     Role,
+    RoleCodeSequence,
     RoleUser,
     SystemConfig,
     TracerSpan,
@@ -225,6 +226,7 @@ APPLICATION_TYPES = {"new_category", "new_material_code", "stop_purchase", "stop
 TERMINAL_WORKFLOW_STATUSES = {"approved", "rejected"}
 USER_STATUSES = {"active", "disabled"}
 ACCOUNT_OWNERSHIPS = {"HCM", "local"}
+ROLE_CODE_PATTERN = re.compile(r"^ROLE_(\d{3,})$")
 SYSTEM_CONFIG_KEY = "system_configuration"
 DEFAULT_SYSTEM_NAME = "AI Material Management Platform"
 DEFAULT_SYSTEM_ICON = {
@@ -570,14 +572,17 @@ def startup() -> None:
     ensure_audit_log_schema()
     ensure_material_code_rule_schema()
     ensure_category_schema()
+    ensure_material_library_association_schema()
     db = next(get_db())
     try:
+        ensure_role_code_sequence(db)
         ensure_seed_product(db)
         ensure_seed_material_context(db)
         ensure_provider_configs(db)
         ensure_system_config(db)
         ensure_hcm_seed_users(db)
         ensure_rule_engine_seed(db)
+        db.commit()
     finally:
         db.close()
 
@@ -671,6 +676,51 @@ def ensure_category_schema() -> None:
             connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
 
 
+def ensure_material_library_association_schema() -> None:
+    with engine.begin() as connection:
+        if engine.dialect.name == "sqlite":
+            Base.metadata.create_all(bind=connection)
+            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(material_libraries)").fetchall()}
+            if "material_library_admin_id" not in existing:
+                connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN material_library_admin_id INTEGER")
+            if "category_library_id" not in existing:
+                connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN category_library_id INTEGER")
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_material_libraries_material_library_admin_id "
+                "ON material_libraries (material_library_admin_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_material_libraries_category_library_id "
+                "ON material_libraries (category_library_id)"
+            )
+            RoleCodeSequence.__table__.create(bind=connection, checkfirst=True)
+            return
+
+        Base.metadata.create_all(bind=connection)
+        columns = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'material_libraries'
+                """
+            ).fetchall()
+        }
+        if "material_library_admin_id" not in columns:
+            connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN material_library_admin_id INTEGER REFERENCES roles(id)")
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_material_libraries_material_library_admin_id "
+                "ON material_libraries (material_library_admin_id)"
+            )
+        if "category_library_id" not in columns:
+            connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN category_library_id INTEGER REFERENCES category_libraries(id)")
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_material_libraries_category_library_id "
+                "ON material_libraries (category_library_id)"
+            )
+
+
 def ensure_seed_product(db: Session) -> ProductName:
     Base.metadata.create_all(bind=engine)
     product = db.query(ProductName).filter(ProductName.name == SEED_PRODUCT["name"]).first()
@@ -698,6 +748,7 @@ def ensure_default_category_library(db: Session) -> CategoryLibrary:
 def ensure_seed_material_context(db: Session) -> tuple[MaterialLibrary, Category]:
     Base.metadata.create_all(bind=engine)
     ensure_category_schema()
+    ensure_material_library_association_schema()
     library = db.query(MaterialLibrary).filter(MaterialLibrary.code == SEED_LIBRARY["code"]).first()
     if not library:
         library = MaterialLibrary(**SEED_LIBRARY)
@@ -1813,6 +1864,47 @@ def validate_role_uniqueness(db: Session, name: str, code: str, role_id: int | N
         raise HTTPException(status_code=409, detail=f"Role {field} must be unique")
 
 
+def highest_generated_role_code_value(db: Session) -> int:
+    highest = 0
+    for (code,) in db.query(Role.code).filter(Role.code.like("ROLE_%")).all():
+        match = ROLE_CODE_PATTERN.match(code or "")
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest
+
+
+def ensure_role_code_sequence(db: Session) -> RoleCodeSequence:
+    Base.metadata.create_all(bind=engine)
+    sequence = (
+        db.query(RoleCodeSequence)
+        .filter(RoleCodeSequence.id == 1)
+        .with_for_update()
+        .one_or_none()
+    )
+    highest_existing = highest_generated_role_code_value(db)
+    if sequence is None:
+        sequence = RoleCodeSequence(id=1, current_value=highest_existing, updated_at=now())
+        db.add(sequence)
+        db.flush()
+        return sequence
+    if sequence.current_value < highest_existing:
+        sequence.current_value = highest_existing
+        sequence.updated_at = now()
+        db.flush()
+    return sequence
+
+
+def generate_role_code(db: Session) -> str:
+    sequence = ensure_role_code_sequence(db)
+    while True:
+        sequence.current_value += 1
+        sequence.updated_at = now()
+        code = f"ROLE_{sequence.current_value:03d}"
+        if not db.query(Role).filter(Role.code == code).first():
+            db.flush()
+            return code
+
+
 def get_role_or_404(db: Session, role_id: int) -> Role:
     role = db.get(Role, role_id)
     if not role:
@@ -2131,9 +2223,29 @@ def create_code_rule_version(
     return rule_version
 
 
+def validate_material_library_associations(
+    db: Session,
+    material_library_admin_id: int | None,
+    category_library_id: int | None,
+) -> None:
+    if material_library_admin_id is not None and db.get(Role, material_library_admin_id) is None:
+        raise HTTPException(status_code=404, detail="Material library admin role not found")
+    if category_library_id is not None and db.get(CategoryLibrary, category_library_id) is None:
+        raise HTTPException(status_code=404, detail="Category library not found")
+
+
+def material_library_association_snapshot(library: MaterialLibrary) -> dict[str, Any]:
+    return {
+        "material_library_admin_id": library.material_library_admin_id,
+        "category_library_id": library.category_library_id,
+    }
+
+
 def library_to_out(library: MaterialLibrary, db: Session | None = None) -> MaterialLibraryOut:
     active_rule = active_rule_for_library(db, library) if db is not None else None
     material_count = db.query(Material).filter(Material.material_library_id == library.id).count() if db is not None else len(library.materials)
+    admin = library.material_library_admin
+    category_library = library.category_library
     return MaterialLibraryOut(
         id=library.id,
         code=library.code,
@@ -2145,6 +2257,12 @@ def library_to_out(library: MaterialLibrary, db: Session | None = None) -> Mater
         current_rule_version_id=library.current_rule_version_id,
         code_rule_summary=code_rule_summary(active_rule),
         material_count=material_count,
+        material_library_admin_id=library.material_library_admin_id,
+        material_library_admin_name=admin.name if admin else None,
+        material_library_admin_code=admin.code if admin else None,
+        category_library_id=library.category_library_id,
+        category_library_name=category_library.name if category_library else None,
+        category_library_code=category_library.code if category_library else None,
     )
 
 
@@ -3854,6 +3972,7 @@ def create_material_library(
         raise HTTPException(status_code=409, detail="Material library name must be unique")
     if payload.auto_code_enabled:
         normalize_code_rule_config(payload.code_rule)
+    validate_material_library_associations(db, payload.material_library_admin_id, payload.category_library_id)
     library = MaterialLibrary(
         code=next_unique_code(db, MaterialLibrary, "MLIB", f"{name}:{now().isoformat()}"),
         name=name,
@@ -3861,12 +3980,26 @@ def create_material_library(
         enabled=payload.enabled,
         auto_code_enabled=payload.auto_code_enabled,
         recode_enabled=payload.recode_enabled,
+        material_library_admin_id=payload.material_library_admin_id,
+        category_library_id=payload.category_library_id,
     )
     db.add(library)
     db.flush()
     if payload.auto_code_enabled:
         rule_version = create_code_rule_version(db, library, payload.code_rule or {}, "active", auth.username)
         library.current_rule_version_id = rule_version.id
+    add_audit_log(
+        db,
+        auth,
+        "material_library",
+        "create",
+        {},
+        {
+            "id": library.id,
+            "name": library.name,
+            **material_library_association_snapshot(library),
+        },
+    )
     db.commit()
     db.refresh(library)
     return library_to_out(library, db)
@@ -3897,6 +4030,7 @@ def update_material_library(
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
     require_library_scope(auth, library.id)
+    before = material_library_association_snapshot(library)
     if payload.name is not None:
         name = payload.name.strip()
         if not name:
@@ -3909,7 +4043,28 @@ def update_material_library(
         library.description = payload.description.strip()
     if payload.enabled is not None:
         library.enabled = payload.enabled
+    fields_set = payload.model_fields_set
+    if "material_library_admin_id" in fields_set or "category_library_id" in fields_set:
+        next_admin_id = payload.material_library_admin_id if "material_library_admin_id" in fields_set else library.material_library_admin_id
+        next_category_library_id = payload.category_library_id if "category_library_id" in fields_set else library.category_library_id
+        validate_material_library_associations(db, next_admin_id, next_category_library_id)
+        library.material_library_admin_id = next_admin_id
+        library.category_library_id = next_category_library_id
     library.updated_at = now()
+    after = material_library_association_snapshot(library)
+    if before != after:
+        add_audit_log(
+            db,
+            auth,
+            "material_library",
+            "update",
+            before,
+            {
+                "id": library.id,
+                "name": library.name,
+                **after,
+            },
+        )
     db.commit()
     db.refresh(library)
     return library_to_out(library, db)
@@ -5572,12 +5727,27 @@ def create_role(
 ) -> RoleOut:
     require_button_permission(auth, "button.roles.create")
     name = payload.name.strip()
-    code = payload.code.strip()
-    if not name or not code:
-        raise HTTPException(status_code=422, detail="role name and code are required")
+    if not name:
+        raise HTTPException(status_code=422, detail="role name is required")
+    code = generate_role_code(db)
     validate_role_uniqueness(db, name, code)
     role = Role(name=name, code=code, description=payload.description.strip(), enabled=payload.enabled)
     db.add(role)
+    db.flush()
+    add_audit_log(
+        db,
+        auth,
+        "role",
+        "create",
+        {},
+        {
+            "id": role.id,
+            "name": role.name,
+            "code": role.code,
+            "description": role.description,
+            "enabled": role.enabled,
+        },
+    )
     db.commit()
     db.refresh(role)
     return role_to_out(role)
@@ -5602,12 +5772,10 @@ def update_role(
     require_button_permission(auth, "button.roles.edit")
     role = get_role_or_404(db, role_id)
     name = payload.name.strip() if payload.name is not None else role.name
-    code = payload.code.strip() if payload.code is not None else role.code
-    if not name or not code:
-        raise HTTPException(status_code=422, detail="role name and code are required")
-    validate_role_uniqueness(db, name, code, role.id)
+    if not name:
+        raise HTTPException(status_code=422, detail="role name is required")
+    validate_role_uniqueness(db, name, role.code, role.id)
     role.name = name
-    role.code = code
     if payload.description is not None:
         role.description = payload.description.strip()
     if payload.enabled is not None:
