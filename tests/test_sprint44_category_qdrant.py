@@ -19,16 +19,23 @@ class FakeQdrant:
     def __init__(self):
         self.collections: set[str] = set()
         self.points: dict[str, dict[int, dict]] = {}
+        self.collection_put_count: dict[str, int] = {}
 
     def __call__(self, method: str, path: str, **kwargs):
         parsed = urlparse(path)
         clean_path = parsed.path
         if method == "GET" and clean_path == "/collections":
             return httpx.Response(200, json={"result": {"collections": sorted(self.collections)}})
+        if method == "GET" and clean_path.startswith("/collections/") and clean_path.count("/") == 2:
+            name = clean_path.rsplit("/", 1)[1]
+            if name in self.collections:
+                return httpx.Response(200, json={"result": {"status": "green"}})
+            return httpx.Response(404, json={"status": {"error": "not found"}})
         if method == "PUT" and clean_path.startswith("/collections/") and clean_path.count("/") == 2:
             name = clean_path.rsplit("/", 1)[1]
             self.collections.add(name)
             self.points.setdefault(name, {})
+            self.collection_put_count[name] = self.collection_put_count.get(name, 0) + 1
             return httpx.Response(200, json={"result": True})
         if method == "DELETE" and clean_path.startswith("/collections/") and clean_path.count("/") == 2:
             name = clean_path.rsplit("/", 1)[1]
@@ -131,6 +138,7 @@ def test_material_category_match_and_reembed(monkeypatch):
     reembed = client.post(f"/api/v1/category-libraries/{library['id']}/re-embed", headers=SUPER_ADMIN)
     assert reembed.status_code == 200, reembed.text
     assert reembed.json()["processed"] >= 3
+    assert fake.collection_put_count[f"category_library_{library['id']}"] == 1
 
     response = client.post(
         "/api/v1/ai/material-category-match",
@@ -156,3 +164,29 @@ def test_material_category_match_and_reembed(monkeypatch):
     )
     assert empty.status_code == 200, empty.text
     assert empty.json()["matches"] == []
+
+
+def test_category_sync_failure_is_visible(monkeypatch):
+    fake = FakeQdrant()
+    monkeypatch.setattr(main, "qdrant_request", fake)
+
+    library = create_library(unique("sprint44-sync-failure-lib"))
+
+    def failing_qdrant(method: str, path: str, **kwargs):
+        if method == "PUT" and path.endswith("/points?wait=true"):
+            return httpx.Response(500, text="upsert failed")
+        return fake(method, path, **kwargs)
+
+    monkeypatch.setattr(main, "qdrant_request", failing_qdrant)
+    response = client.post(
+        "/api/v1/categories",
+        headers=SUPER_ADMIN,
+        json={
+            "name": unique("sync-failure-category"),
+            "category_library_id": library["id"],
+            "description": "must surface failed Qdrant upsert",
+            "enabled": True,
+        },
+    )
+    assert response.status_code == 502, response.text
+    assert "Qdrant category create sync failed" in response.json()["detail"]

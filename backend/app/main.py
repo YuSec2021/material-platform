@@ -2651,10 +2651,24 @@ def qdrant_request(method: str, path: str, **kwargs: Any) -> httpx.Response:
     return response
 
 
+def qdrant_collection_exists(library_id: int) -> bool:
+    name = qdrant_collection_name(library_id)
+    response = qdrant_request("GET", f"/collections/{name}")
+    if response.status_code == 200:
+        return True
+    if response.status_code == 404:
+        return False
+    raise QdrantSyncError(f"Qdrant collection lookup failed with HTTP {response.status_code}: {response.text[:200]}")
+
+
 def trace_qdrant_error(db: Session, operation: str, error: str, metadata: dict[str, Any] | None = None) -> None:
     collector = SpanCollector(operation, "category_vector")
     collector.finish_span(collector.root_span_id, "error", error, metadata or {})
     collector.flush(db)
+
+
+def qdrant_http_exception(operation: str, exc: QdrantSyncError) -> HTTPException:
+    return HTTPException(status_code=502, detail=f"Qdrant {operation} failed: {exc}")
 
 
 def category_embedding(text: str, dimension: int = CATEGORY_EMBEDDING_DIM) -> list[float]:
@@ -2688,11 +2702,15 @@ def qdrant_health_payload() -> dict[str, Any]:
 
 def create_qdrant_collection(library_id: int) -> None:
     name = qdrant_collection_name(library_id)
+    if qdrant_collection_exists(library_id):
+        return
     response = qdrant_request(
         "PUT",
         f"/collections/{name}",
         json={"vectors": {"size": CATEGORY_EMBEDDING_DIM, "distance": "Cosine"}},
     )
+    if response.status_code == 409:
+        return
     if response.status_code >= 400:
         raise QdrantSyncError(f"Qdrant collection create failed with HTTP {response.status_code}: {response.text[:200]}")
 
@@ -2765,7 +2783,7 @@ def qdrant_sync_category(db: Session, category: Category, operation: str = "upse
         return True
     except QdrantSyncError as exc:
         trace_qdrant_error(db, f"qdrant.category.{operation}", str(exc), {"category_id": category.id, "library_id": library.id})
-        return False
+        raise
 
 
 def qdrant_sync_category_subtree(db: Session, category: Category, operation: str = "update") -> int:
@@ -2792,7 +2810,7 @@ def qdrant_sync_category_subtree(db: Session, category: Category, operation: str
         return len(affected)
     except QdrantSyncError as exc:
         trace_qdrant_error(db, f"qdrant.category.{operation}", str(exc), {"category_id": category.id, "library_id": library.id})
-        return 0
+        raise
 
 
 def reembed_category_library(db: Session, library: CategoryLibrary) -> dict[str, Any]:
@@ -6040,7 +6058,10 @@ def create_category(
     db.add(category)
     db.commit()
     db.refresh(category)
-    qdrant_sync_category(db, category, "create")
+    try:
+        qdrant_sync_category(db, category, "create")
+    except QdrantSyncError as exc:
+        raise qdrant_http_exception("category create sync", exc) from exc
     return category_to_out(category)
 
 
@@ -6101,7 +6122,10 @@ def update_category(
     category.updated_at = now()
     db.commit()
     db.refresh(category)
-    qdrant_sync_category_subtree(db, category, "update")
+    try:
+        qdrant_sync_category_subtree(db, category, "update")
+    except QdrantSyncError as exc:
+        raise qdrant_http_exception("category update sync", exc) from exc
     return category_to_out(category)
 
 
@@ -6129,6 +6153,7 @@ def delete_category(
             delete_category_point(deleted_library_id, deleted_category_id)
         except QdrantSyncError as exc:
             trace_qdrant_error(db, "qdrant.category.delete", str(exc), {"category_id": deleted_category_id, "library_id": deleted_library_id})
+            raise qdrant_http_exception("category delete sync", exc) from exc
     return {"deleted": True, "id": category_id}
 
 
