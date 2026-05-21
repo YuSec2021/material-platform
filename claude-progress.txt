@@ -1,10 +1,10 @@
-Project summary: Sprints 1-38 PASS. All features complete. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v12.2.0.
+Project summary: Sprints 1-42 PASS. All features complete. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v12.6.0.
 
-Sprint 38: AI Agent Configuration in AI Management
-Status: SPRINT PASS. Notes: AI Agent Config page at /ai/agent-configs with provider presets (Qwen/DeepSeek/Moonshot), model dropdown + manual input, masked API key, advanced settings (temperature/max_tokens/timeout), system-wide via capability mapping, zh-CN/en-US i18n. 6/6 criteria PASS.
+Sprint 42: Material Library Permission Isolation
+Status: SPRINT PASS. Notes: Material library admin can only see their own libraries, backend API scoping, frontend filtered UI. 5/5 criteria PASS.
 
-Sprint 37: Backend Category Recognition Agent
-Status: SPRINT PASS. Notes: Sync/async/batch recognition endpoints with AsyncOpenAI via LLM gateway, configurable model, system prompt engineering, robust JSON parsing, retry on 5xx, AITracer logging. 6/6 criteria PASS.
+Sprint 41: Category Management UI Layout Refactor
+Status: SPRINT PASS. Notes: Refactored to material-management style layout with header, filter bar, table card, empty state, pagination, modal dialogs. 4/4 criteria PASS.
 
-Sprint 36: Category Management Tree View and Bulk Import
-Status: SPRINT PASS. Notes: Ant Design Tree hierarchy with expand/collapse/search, bulk CSV import with drag-drop/preview, AI one-click import dialog (10+ lines, auto-focus, editable preview). 7/7 criteria PASS.
+Sprint 40: Product Name PM Code Generation and Status Management
+Status: SPRINT PASS. Notes: PM-prefixed codes PM00000001 sequential, status column (active/inactive), toggle, soft delete. 5/5 criteria PASS.
