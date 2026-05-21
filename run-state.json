@@ -5,10 +5,10 @@
   "last_successful_sprint": 42,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-42-material-lib-permission-isolation",
+  "active_branch": "main",
   "base_branch": "main",
   "last_run_at": "2026-05-21T06:30:00Z",
   "sprint_origin": "major_feature",
-  "current_version": "12.6.0",
+  "current_version": "12.7.0",
   "quality_retry_count": 0
 }
