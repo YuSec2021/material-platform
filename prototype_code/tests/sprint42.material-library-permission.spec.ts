@@ -191,7 +191,7 @@ test("sprint 42 non-super admin sees assigned library data from the real backend
   await page.goto("/material/library");
   await expect(page.getByText(fixture.allowedLibrary.name)).toBeVisible();
   expect(await page.getByText(fixture.deniedLibrary.name).count()).toEqual(0);
-  await expect(page.getByText(/管理员|Admin/)).toBeVisible();
+  await expect(page.getByText(/管理员|Admin/).first()).toBeVisible();
 
   await page.goto("/material/list");
   await expect(page.getByText(fixture.emptyLibrary.name)).toBeVisible();
