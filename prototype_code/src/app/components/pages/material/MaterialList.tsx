@@ -354,8 +354,9 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       return;
     }
     if (selectedLibraryId === "" || !libraries.some((library) => library.id === selectedLibraryId)) {
-      setSelectedLibraryId(libraries[0]!.id);
-      setExpandedLibraryIds([libraries[0]!.id]);
+      const preferredLibrary = libraries.find((library) => (library.material_count ?? 0) > 0) ?? libraries[0]!;
+      setSelectedLibraryId(preferredLibrary.id);
+      setExpandedLibraryIds([preferredLibrary.id]);
     }
   }, [fixedLibraryId, librariesQuery.data, selectedLibraryId]);
 
