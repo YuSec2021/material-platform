@@ -163,6 +163,7 @@ async function login(page: Page, username: string) {
   await page.goto("/login");
   await page.getByLabel(/用户名|Username/).fill(username);
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 15000 });
 }
 
 test("sprint 42 non-super admin sees assigned library data from the real backend", async ({ page }) => {
