@@ -4,13 +4,13 @@ import {
   AlertCircle,
   Bot,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Download,
   Edit,
   FileText,
+  Inbox,
   Loader2,
   Plus,
+  Search,
   Trash2,
   UploadCloud,
 } from "lucide-react";
@@ -27,7 +27,6 @@ import {
 import { useAuth } from "@/app/auth/AuthContext";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
-import { SearchPanel } from "./standardPageUtils";
 
 type CategoryFormState = {
   name: string;
@@ -37,15 +36,13 @@ type CategoryFormState = {
   description: string;
 };
 
-type CategoryTreeNode = Category & {
-  children: CategoryTreeNode[];
-};
-
 type PreviewRow = CategoryImportRow & {
   id: string;
   errors: string[];
   confidence?: number;
 };
+
+const CATEGORY_PAGE_SIZE = 10;
 
 const emptyForm: CategoryFormState = {
   name: "",
@@ -147,39 +144,6 @@ function previewRowsToImportRows(rows: PreviewRow[]): CategoryImportRow[] {
   }));
 }
 
-function buildCategoryTree(categories: Category[], searchTerm: string): CategoryTreeNode[] {
-  const term = searchTerm.trim().toLowerCase();
-  const nodes = new Map<number, CategoryTreeNode>();
-  categories.forEach((category) => {
-    nodes.set(category.id, { ...category, children: [] });
-  });
-  const roots: CategoryTreeNode[] = [];
-  nodes.forEach((node) => {
-    const parent = node.parent_category_id ? nodes.get(node.parent_category_id) : null;
-    if (parent) {
-      parent.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  });
-  const sortTree = (items: CategoryTreeNode[]) => {
-    items.sort((left, right) => left.name.localeCompare(right.name));
-    items.forEach((item) => sortTree(item.children));
-  };
-  sortTree(roots);
-  if (!term) {
-    return roots;
-  }
-  const filterTree = (node: CategoryTreeNode): CategoryTreeNode | null => {
-    const filteredChildren = node.children.map(filterTree).filter(Boolean) as CategoryTreeNode[];
-    const matched = [node.name, node.code, node.description, node.category_library].some((value) =>
-      value.toLowerCase().includes(term),
-    );
-    return matched || filteredChildren.length > 0 ? { ...node, children: filteredChildren } : null;
-  };
-  return roots.map(filterTree).filter(Boolean) as CategoryTreeNode[];
-}
-
 function categoryPath(category: Category, categories: Category[]) {
   const byId = new Map(categories.map((item) => [item.id, item]));
   const path = [category.name];
@@ -195,16 +159,26 @@ function categoryPath(category: Category, categories: Category[]) {
   return path.join(" / ");
 }
 
+function categoryDepth(category: Category, categories: Category[]) {
+  const byId = new Map(categories.map((item) => [item.id, item]));
+  let depth = 1;
+  let parentId = category.parent_category_id;
+  while (parentId) {
+    const parent = byId.get(parentId);
+    if (!parent) {
+      break;
+    }
+    depth += 1;
+    parentId = parent.parent_category_id;
+  }
+  return depth;
+}
+
 function resultSummary(result: CategoryBulkImportResult | null) {
   if (!result) {
     return "";
   }
   return `${result.success_count} / ${result.skipped_count} / ${result.error_count}`;
-}
-
-function depthPaddingClass(depth: number) {
-  const classes = ["pl-3", "pl-9", "pl-16", "pl-24"];
-  return classes[Math.min(depth, classes.length - 1)];
 }
 
 export function CategoryList() {
@@ -214,8 +188,9 @@ export function CategoryList() {
   const isSuperAdmin = Boolean(user?.is_super_admin);
   const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [expandedIds, setExpandedIds] = useState<number[]>([]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [libraryFilter, setLibraryFilter] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [form, setForm] = useState<CategoryFormState>(emptyForm);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -243,14 +218,41 @@ export function CategoryList() {
 
   const categories = query.data ?? [];
   const libraries = librariesQuery.data ?? [];
-  const tree = useMemo(() => buildCategoryTree(categories, searchTerm), [categories, searchTerm]);
-  const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
   const invalidImportRows = importRows.filter((row) => row.errors.length > 0);
   const invalidRecognizedRows = recognizedRows.filter((row) => row.errors.length > 0);
+  const filteredCategories = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return categories
+      .filter((category) => {
+        if (libraryFilter && String(category.category_library_id ?? "") !== libraryFilter) {
+          return false;
+        }
+        if (levelFilter && String(categoryDepth(category, categories)) !== levelFilter) {
+          return false;
+        }
+        if (!term) {
+          return true;
+        }
+        return [
+          category.name,
+          category.code,
+          category.description,
+          category.category_library,
+          categoryPath(category, categories),
+        ].some((value) => value.toLowerCase().includes(term));
+      })
+      .sort((left, right) => categoryPath(left, categories).localeCompare(categoryPath(right, categories)));
+  }, [categories, levelFilter, libraryFilter, searchTerm]);
+  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CATEGORY_PAGE_SIZE));
+  const paginatedCategories = filteredCategories.slice(
+    (currentPage - 1) * CATEGORY_PAGE_SIZE,
+    currentPage * CATEGORY_PAGE_SIZE,
+  );
 
   useEffect(() => {
-    if (!importLibraryId && libraries.length > 0) {
-      setImportLibraryId(String(libraries[0].id));
+    const firstLibrary = libraries[0];
+    if (!importLibraryId && firstLibrary) {
+      setImportLibraryId(String(firstLibrary.id));
     }
   }, [importLibraryId, libraries]);
 
@@ -259,6 +261,14 @@ export function CategoryList() {
       window.setTimeout(() => aiTextareaRef.current?.focus(), 0);
     }
   }, [isAiOpen]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [levelFilter, libraryFilter, searchTerm]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: CategoryPayload) =>
@@ -343,10 +353,6 @@ export function CategoryList() {
     }
   };
 
-  const toggleExpanded = (id: number) => {
-    setExpandedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
-  };
-
   const handleFile = async (file: File) => {
     setImportFileName(file.name);
     setImportResult(null);
@@ -383,69 +389,9 @@ export function CategoryList() {
     }
   };
 
-  const expandAll = () => setExpandedIds(categories.map((category) => category.id));
-  const collapseAll = () => setExpandedIds([]);
   const canSave = Boolean(form.name.trim() && form.categoryLibraryId) && !saveMutation.isPending;
   const isLoading = query.isLoading || librariesQuery.isLoading;
   const isError = query.isError || librariesQuery.isError;
-
-  const renderTreeNode = (node: CategoryTreeNode, depth = 0) => {
-    const expanded = searchTerm.trim() ? true : expandedIds.includes(node.id);
-    const selected = selectedCategoryId === node.id;
-    return (
-      <div key={node.id} role="treeitem" aria-expanded={node.children.length ? expanded : undefined}>
-        <div
-          className={`flex min-h-10 items-center gap-2 border-b border-border py-2 pr-3 text-sm ${depthPaddingClass(depth)} ${
-            selected ? "bg-blue-50 text-blue-700" : "bg-card text-foreground hover:bg-muted/40"
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => toggleExpanded(node.id)}
-            aria-label={expanded ? t("categoryImport.collapse") : t("categoryImport.expand")}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-          >
-            {node.children.length > 0 ? (
-              expanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )
-            ) : (
-              <span className="h-4 w-4" />
-            )}
-          </button>
-          <button type="button" onClick={() => setSelectedCategoryId(node.id)} className="min-w-0 flex-1 text-left">
-            <span className="font-medium">{node.name}</span>
-            <span className="ml-2 text-xs text-muted-foreground">{node.code}</span>
-          </button>
-          <span className="hidden text-xs text-muted-foreground md:inline">{node.category_library}</span>
-          {isSuperAdmin && (
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => openEditForm(node)}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50"
-                aria-label={t("action.edit")}
-              >
-                <Edit className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(node)}
-                disabled={deleteMutation.isPending}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label={t("action.delete")}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-        {expanded && node.children.map((child) => renderTreeNode(child, depth + 1))}
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -487,70 +433,178 @@ export function CategoryList() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-72 flex-1">
-          <SearchPanel value={searchTerm} onChange={setSearchTerm} placeholder={t("field.searchCategories")} />
+      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-ring/40">
+            <Search className="h-5 w-5 text-muted-foreground" />
+            <span className="sr-only">{t("field.searchCategories")}</span>
+            <input
+              type="search"
+              placeholder={t("field.searchCategories")}
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </label>
+          <select
+            value={libraryFilter}
+            onChange={(event) => setLibraryFilter(event.target.value)}
+            className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+            aria-label={t("field.categoryLibrary")}
+          >
+            <option value="">{t("categoryImport.allLibraries")}</option>
+            {libraries.map((library) => (
+              <option key={library.id} value={library.id}>
+                {library.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={levelFilter}
+            onChange={(event) => setLevelFilter(event.target.value)}
+            className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+            aria-label={t("categoryImport.levelFilter")}
+          >
+            <option value="">{t("categoryImport.allLevels")}</option>
+            <option value="1">{t("categoryImport.levelNumber", { level: 1 })}</option>
+            <option value="2">{t("categoryImport.levelNumber", { level: 2 })}</option>
+            <option value="3">{t("categoryImport.levelNumber", { level: 3 })}</option>
+          </select>
         </div>
-        <button
-          type="button"
-          onClick={expandAll}
-          className="rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
-        >
-          {t("categoryImport.expandAll")}
-        </button>
-        <button
-          type="button"
-          onClick={collapseAll}
-          className="rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
-        >
-          {t("categoryImport.collapseAll")}
-        </button>
       </div>
 
       <ApiState
         isLoading={isLoading}
         isError={isError}
-        isEmpty={!isLoading && !isError && tree.length === 0}
+        isEmpty={false}
         emptyLabel={t("state.emptyCategories")}
         onRetry={() => {
           void query.refetch();
           void librariesQuery.refetch();
         }}
       >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" role="tree">
-            <div className="grid grid-cols-[1fr_auto] border-b border-border bg-muted/30 px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
-              <span>{t("categoryImport.treeTitle")}</span>
-              <span>{t("categoryImport.recordCount", { count: categories.length })}</span>
-            </div>
-            <div>{tree.map((node) => renderTreeNode(node))}</div>
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px]">
+              <thead className="border-b border-border bg-muted/40">
+                <tr>
+                  {[
+                    t("categoryImport.categoryName"),
+                    t("field.code"),
+                    t("categoryImport.level"),
+                    t("categoryImport.parentCategory"),
+                    t("field.categoryLibrary"),
+                    t("field.description"),
+                    t("action.operations"),
+                  ].map((header) => (
+                    <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {paginatedCategories.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-14 text-center">
+                      <div className="mx-auto flex max-w-sm flex-col items-center">
+                        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                          <Inbox className="h-6 w-6" />
+                        </div>
+                        <p className="text-sm font-medium text-foreground">{t("state.emptyCategories")}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{t("categoryImport.emptyHint")}</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearchTerm("");
+                            setLibraryFilter("");
+                            setLevelFilter("");
+                          }}
+                          className="mt-4 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
+                        >
+                          {t("categoryImport.resetFilters")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedCategories.map((category) => {
+                    const parent = category.parent_category_id
+                      ? categories.find((item) => item.id === category.parent_category_id)
+                      : null;
+                    return (
+                      <tr key={category.id} className="transition-colors hover:bg-muted/40">
+                        <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
+                        <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">
+                          {t("categoryImport.levelNumber", { level: categoryDepth(category, categories) })}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-foreground">
+                          {parent ? categoryPath(parent, categories) : t("categoryImport.noParent")}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-foreground">{category.category_library || "-"}</td>
+                        <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
+                          <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {isSuperAdmin ? (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditForm(category)}
+                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                                {t("action.edit")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(category)}
+                                disabled={deleteMutation.isPending}
+                                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {t("action.delete")}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-
-          <aside className="rounded-lg border border-border bg-card p-4 shadow-sm">
-            <h2 className="text-sm font-semibold text-foreground">{t("categoryImport.selectedContext")}</h2>
-            {selectedCategory ? (
-              <dl className="mt-4 space-y-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">{t("field.category")}</dt>
-                  <dd className="mt-1 font-medium text-foreground">{categoryPath(selectedCategory, categories)}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">{t("field.code")}</dt>
-                  <dd className="mt-1 text-foreground">{selectedCategory.code}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">{t("field.categoryLibrary")}</dt>
-                  <dd className="mt-1 text-foreground">{selectedCategory.category_library}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">{t("field.description")}</dt>
-                  <dd className="mt-1 text-foreground">{selectedCategory.description || t("categoryImport.noDescription")}</dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="mt-4 text-sm text-muted-foreground">{t("categoryImport.noSelection")}</p>
-            )}
-          </aside>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+            <div className="text-sm text-muted-foreground">
+              {t("categoryImport.paginationSummary", {
+                page: currentPage,
+                totalPages,
+                total: filteredCategories.length,
+              })}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={currentPage === 1}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("categoryImport.previousPage")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                disabled={currentPage === totalPages}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {t("categoryImport.nextPage")}
+              </button>
+            </div>
+          </div>
         </div>
       </ApiState>
 
@@ -586,7 +640,7 @@ export function CategoryList() {
               type="text"
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           <label className="space-y-1 text-sm text-foreground">
@@ -596,7 +650,7 @@ export function CategoryList() {
               value={form.code}
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
               placeholder={editingCategory ? "" : t("field.autoGenerated")}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           <label className="space-y-1 text-sm text-foreground">
@@ -604,7 +658,7 @@ export function CategoryList() {
             <select
               value={form.categoryLibraryId}
               onChange={(event) => setForm((current) => ({ ...current, categoryLibraryId: event.target.value }))}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="">{t("field.selectCategoryLibrary")}</option>
               {libraries.map((library) => (
@@ -619,7 +673,7 @@ export function CategoryList() {
             <select
               value={form.parentCategoryId}
               onChange={(event) => setForm((current) => ({ ...current, parentCategoryId: event.target.value }))}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="">{t("categoryImport.noParent")}</option>
               {categories
@@ -641,7 +695,7 @@ export function CategoryList() {
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
         </div>
@@ -680,7 +734,7 @@ export function CategoryList() {
               <select
                 value={importLibraryId}
                 onChange={(event) => setImportLibraryId(event.target.value)}
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 {libraries.map((library) => (
                   <option key={library.id} value={library.id}>
@@ -707,7 +761,7 @@ export function CategoryList() {
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             className={`flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center ${
-              isDragging ? "border-blue-500 bg-blue-50" : "border-border bg-muted/20 hover:bg-muted/30"
+              isDragging ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30" : "border-border bg-muted/20 hover:bg-muted/30"
             }`}
           >
             <UploadCloud className="mb-2 h-8 w-8 text-blue-600" />
@@ -775,7 +829,7 @@ export function CategoryList() {
             <select
               value={importLibraryId}
               onChange={(event) => setImportLibraryId(event.target.value)}
-              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               {libraries.map((library) => (
                 <option key={library.id} value={library.id}>
@@ -792,7 +846,7 @@ export function CategoryList() {
               onChange={(event) => setAiText(event.target.value)}
               rows={12}
               placeholder={t("categoryImport.aiPlaceholder")}
-              className="max-h-80 w-full resize-y overflow-y-auto rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+              className="max-h-80 w-full resize-y overflow-y-auto rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           <button
@@ -861,8 +915,10 @@ function ImportPreviewTable({
                   <input
                     value={row[key] ?? ""}
                     onChange={(event) => onChange(row.id, key, event.target.value)}
-                    className={`w-full rounded-md border px-2 py-1 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40 ${
-                      row.errors.length > 0 && key === "一级类目" ? "border-amber-300 bg-amber-50" : "border-border"
+                    className={`w-full rounded-md border px-2 py-1 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40 ${
+                      row.errors.length > 0 && key === "一级类目"
+                        ? "border-amber-300 bg-amber-50 dark:bg-amber-950/30"
+                        : "border-border bg-background"
                     }`}
                   />
                 </td>
