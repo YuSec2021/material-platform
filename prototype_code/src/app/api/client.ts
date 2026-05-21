@@ -51,6 +51,7 @@ export type CategoryLibrary = {
   name: string;
   description: string;
   enabled: boolean;
+  qdrant_enabled: boolean;
 };
 
 export type BrandLogo = {
@@ -138,9 +139,15 @@ export type MaterialLibrary = {
     effective_time?: string | null;
   } | null;
   material_count?: number;
+  material_library_admin_ids?: number[];
+  material_library_admin_names?: string[];
+  material_library_admin_codes?: string[];
   material_library_admin_id?: number | null;
   material_library_admin_name?: string | null;
   material_library_admin_code?: string | null;
+  category_library_ids?: number[];
+  category_library_names?: string[];
+  category_library_codes?: string[];
   category_library_id?: number | null;
   category_library_name?: string | null;
   category_library_code?: string | null;
@@ -177,6 +184,8 @@ export type MaterialLibraryPayload = {
   auto_code_enabled?: boolean;
   recode_enabled?: boolean;
   code_rule?: Record<string, unknown> | null;
+  material_library_admin_ids?: number[];
+  category_library_ids?: number[];
   material_library_admin_id?: number | null;
   category_library_id?: number | null;
 };
@@ -186,6 +195,7 @@ export type CategoryLibraryPayload = {
   code?: string;
   description: string;
   enabled?: boolean;
+  qdrant_enabled?: boolean;
 };
 
 export type CategoryPayload = {

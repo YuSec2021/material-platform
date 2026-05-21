@@ -13,12 +13,14 @@ type CategoryLibraryFormState = {
   name: string;
   code: string;
   description: string;
+  qdrantEnabled: boolean;
 };
 
 const emptyForm: CategoryLibraryFormState = {
   name: "",
   code: "",
   description: "",
+  qdrantEnabled: false,
 };
 
 function libraryToForm(library: CategoryLibrary): CategoryLibraryFormState {
@@ -26,6 +28,7 @@ function libraryToForm(library: CategoryLibrary): CategoryLibraryFormState {
     name: library.name,
     code: library.code,
     description: library.description,
+    qdrantEnabled: library.qdrant_enabled,
   };
 }
 
@@ -35,6 +38,7 @@ function formToPayload(form: CategoryLibraryFormState): CategoryLibraryPayload {
     code: form.code.trim(),
     description: form.description.trim(),
     enabled: true,
+    qdrant_enabled: form.qdrantEnabled,
   };
 }
 
@@ -114,6 +118,10 @@ export function CategoryLibraryList() {
     { header: t("field.name"), accessor: "name" as keyof CategoryLibrary },
     { header: t("field.code"), accessor: "code" as keyof CategoryLibrary },
     { header: t("field.description"), accessor: "description" as keyof CategoryLibrary },
+    {
+      header: t("field.qdrantEnabled"),
+      accessor: (row: CategoryLibrary) => (row.qdrant_enabled ? t("status.enabled") : t("status.disabled")),
+    },
     {
       header: t("field.status"),
       accessor: (row: CategoryLibrary) => (row.enabled ? t("status.enabled") : t("status.disabled")),
@@ -226,6 +234,15 @@ export function CategoryLibraryList() {
               rows={3}
               className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-foreground md:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.qdrantEnabled}
+              onChange={(event) => setForm((current) => ({ ...current, qdrantEnabled: event.target.checked }))}
+              className="h-4 w-4 rounded border-border"
+            />
+            {t("field.qdrantEnabled")}
           </label>
         </div>
       </Modal>

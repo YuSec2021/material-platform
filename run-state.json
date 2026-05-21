@@ -1,13 +1,13 @@
 {
-  "mode": "complete",
-  "current_sprint": 42,
+  "mode": "implementing",
+  "current_sprint": 43,
   "retry_count": 0,
   "last_successful_sprint": 42,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "main",
+  "active_branch": "codex/sprint-43-material-library-multi-select",
   "base_branch": "main",
-  "last_run_at": "2026-05-21T06:30:00Z",
+  "last_run_at": "2026-05-21T10:05:00Z",
   "sprint_origin": "major_feature",
   "current_version": "12.7.0",
   "quality_retry_count": 0

@@ -5,8 +5,10 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   apiClient,
+  type CategoryLibrary,
   type MaterialLibrary,
   type MaterialLibraryPayload,
+  type Role,
 } from "@/app/api/client";
 import { useAuth } from "@/app/auth/AuthContext";
 import { Badge } from "@/app/components/ui/badge";
@@ -43,6 +45,8 @@ type LibraryFormState = {
   description: string;
   enabled: boolean;
   autoCodeEnabled: boolean;
+  materialLibraryAdminIds: number[];
+  categoryLibraryIds: number[];
   separator: string;
   segments: CodeRuleSegment[];
 };
@@ -66,6 +70,8 @@ const emptyForm: LibraryFormState = {
   description: "",
   enabled: true,
   autoCodeEnabled: false,
+  materialLibraryAdminIds: [],
+  categoryLibraryIds: [],
   separator: "",
   segments: [],
 };
@@ -100,6 +106,8 @@ function libraryToForm(library: MaterialLibrary): LibraryFormState {
     name: library.name,
     description: library.description,
     enabled: library.enabled,
+    materialLibraryAdminIds: library.material_library_admin_ids ?? (library.material_library_admin_id ? [library.material_library_admin_id] : []),
+    categoryLibraryIds: library.category_library_ids ?? (library.category_library_id ? [library.category_library_id] : []),
   };
 }
 
@@ -215,6 +223,8 @@ function formToPayload(form: LibraryFormState, includeCodeRule: boolean): Materi
     name: form.name.trim(),
     description: form.description.trim(),
     enabled: form.enabled,
+    material_library_admin_ids: form.materialLibraryAdminIds,
+    category_library_ids: form.categoryLibraryIds,
   };
 
   if (includeCodeRule) {
@@ -296,6 +306,132 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
   return next;
 }
 
+type MultiSelectOption = {
+  id: number;
+  label: string;
+  meta?: string;
+};
+
+function namesFromSelection(names: string[] | undefined, fallback?: string | null) {
+  const visibleNames = names?.filter(Boolean) ?? [];
+  if (visibleNames.length > 0) {
+    return visibleNames;
+  }
+  return fallback ? [fallback] : [];
+}
+
+function AssociationTags({ names, emptyLabel }: { names: string[]; emptyLabel: string }) {
+  if (names.length === 0) {
+    return <span className="text-xs text-muted-foreground">{emptyLabel}</span>;
+  }
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {names.map((name) => (
+        <Badge key={name} variant="outline" className="border-blue-100 bg-blue-50 text-blue-700">
+          {name}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function SearchableMultiSelect({
+  label,
+  required,
+  options,
+  selectedIds,
+  searchValue,
+  onSearchChange,
+  onChange,
+  emptyLabel,
+  validationMessage,
+  showValidation,
+}: {
+  label: string;
+  required?: boolean;
+  options: MultiSelectOption[];
+  selectedIds: number[];
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  onChange: (ids: number[]) => void;
+  emptyLabel: string;
+  validationMessage: string;
+  showValidation: boolean;
+}) {
+  const selectedOptions = options.filter((option) => selectedIds.includes(option.id));
+  const term = searchValue.trim().toLowerCase();
+  const filteredOptions = term
+    ? options.filter((option) => `${option.label} ${option.meta ?? ""}`.toLowerCase().includes(term))
+    : options;
+
+  const toggle = (id: number) => {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
+  };
+
+  return (
+    <div className="space-y-2 text-sm text-foreground">
+      <div className="font-medium">
+        {label}
+        {required && <span className="ml-1 text-red-600">*</span>}
+      </div>
+      <div className="rounded-md border border-border bg-card p-3">
+        <div className="flex min-h-8 flex-wrap gap-1.5">
+          {selectedOptions.length === 0 ? (
+            <span className="text-sm text-muted-foreground">{emptyLabel}</span>
+          ) : (
+            selectedOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => toggle(option.id)}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100"
+              >
+                {option.label}
+                <X className="h-3 w-3" />
+              </button>
+            ))
+          )}
+        </div>
+        <input
+          type="search"
+          value={searchValue}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={label}
+          className="mt-2 w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+        />
+        <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+          {filteredOptions.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+              {emptyLabel}
+            </div>
+          ) : (
+            filteredOptions.map((option) => (
+              <label
+                key={option.id}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(option.id)}
+                  onChange={() => toggle(option.id)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-foreground">{option.label}</span>
+                  {option.meta && <span className="block truncate text-xs text-muted-foreground">{option.meta}</span>}
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+      </div>
+      {showValidation && selectedIds.length === 0 && (
+        <p className="text-sm text-red-600">{validationMessage}</p>
+      )}
+    </div>
+  );
+}
+
 export function MaterialLibraryList() {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -306,10 +442,22 @@ export function MaterialLibraryList() {
   const [selectedLibrary, setSelectedLibrary] = useState<MaterialLibrary | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [categoryLibrarySearch, setCategoryLibrarySearch] = useState("");
 
   const query = useQuery({
     queryKey: ["material-libraries"],
     queryFn: apiClient.materialLibraries,
+    retry: false,
+  });
+  const rolesQuery = useQuery({
+    queryKey: ["roles"],
+    queryFn: apiClient.roles,
+    retry: false,
+  });
+  const categoryLibrariesQuery = useQuery({
+    queryKey: ["category-libraries"],
+    queryFn: apiClient.categoryLibraries,
     retry: false,
   });
 
@@ -322,6 +470,27 @@ export function MaterialLibraryList() {
     () => (showValidation ? validateRule(form, preview, t) : []),
     [form, preview, showValidation, t],
   );
+  const associationValidationMessages = useMemo(() => {
+    if (!showValidation) {
+      return [];
+    }
+    const messages: string[] = [];
+    if (form.materialLibraryAdminIds.length === 0) {
+      messages.push(t("validation.materialLibraryAdminsRequired"));
+    }
+    if (form.categoryLibraryIds.length === 0) {
+      messages.push(t("validation.categoryLibrariesRequired"));
+    }
+    return messages;
+  }, [form.categoryLibraryIds.length, form.materialLibraryAdminIds.length, showValidation, t]);
+  const roleOptions = useMemo<MultiSelectOption[]>(
+    () => (rolesQuery.data ?? []).map((role: Role) => ({ id: role.id, label: role.name, meta: role.code })),
+    [rolesQuery.data],
+  );
+  const categoryLibraryOptions = useMemo<MultiSelectOption[]>(
+    () => (categoryLibrariesQuery.data ?? []).map((library: CategoryLibrary) => ({ id: library.id, label: library.name, meta: library.code })),
+    [categoryLibrariesQuery.data],
+  );
 
   const saveMutation = useMutation({
     mutationFn: (payload: MaterialLibraryPayload) =>
@@ -333,6 +502,8 @@ export function MaterialLibraryList() {
       setEditingLibrary(null);
       setForm(emptyForm);
       setShowValidation(false);
+      setAdminSearch("");
+      setCategoryLibrarySearch("");
       toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["material-libraries"] });
     },
@@ -412,6 +583,8 @@ export function MaterialLibraryList() {
     setEditingLibrary(null);
     setForm(emptyForm);
     setShowValidation(false);
+    setAdminSearch("");
+    setCategoryLibrarySearch("");
     setIsFormOpen(true);
   };
 
@@ -419,6 +592,8 @@ export function MaterialLibraryList() {
     setEditingLibrary(library);
     setForm(libraryToForm(library));
     setShowValidation(false);
+    setAdminSearch("");
+    setCategoryLibrarySearch("");
     setIsFormOpen(true);
   };
 
@@ -426,7 +601,7 @@ export function MaterialLibraryList() {
     const nextPreview = buildPreview(form, t("codeRule.previewMissingMapping"));
     const nextValidation = validateRule(form, nextPreview, t);
     setShowValidation(true);
-    if (!form.name.trim() || nextValidation.length > 0) {
+    if (!form.name.trim() || form.materialLibraryAdminIds.length === 0 || form.categoryLibraryIds.length === 0 || nextValidation.length > 0) {
       return;
     }
     saveMutation.mutate(formToPayload(form, isCreateMode));
@@ -533,6 +708,22 @@ export function MaterialLibraryList() {
               </button>
               <p className="mb-3 font-mono text-sm text-muted-foreground">{item.code}</p>
               <p className="min-h-10 text-sm text-muted-foreground">{item.description || t("codeRule.noDescription")}</p>
+              <div className="mt-4 space-y-3 border-t border-border pt-3">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t("field.materialLibraryAdmins")}</p>
+                  <AssociationTags
+                    names={namesFromSelection(item.material_library_admin_names, item.material_library_admin_name)}
+                    emptyLabel={t("field.noMaterialLibraryAdmins")}
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{t("field.categoryLibraries")}</p>
+                  <AssociationTags
+                    names={namesFromSelection(item.category_library_names, item.category_library_name)}
+                    emptyLabel={t("field.noCategoryLibraries")}
+                  />
+                </div>
+              </div>
               {item.auto_code_enabled && (
                 <div className="mt-4 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                   <span className="font-medium">{t("codeRule.autoCoding")}</span>
@@ -627,6 +818,34 @@ export function MaterialLibraryList() {
                 className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               />
             </label>
+            <div className="md:col-span-2">
+              <SearchableMultiSelect
+                label={t("field.materialLibraryAdmins")}
+                required
+                options={roleOptions}
+                selectedIds={form.materialLibraryAdminIds}
+                searchValue={adminSearch}
+                onSearchChange={setAdminSearch}
+                onChange={(ids) => setForm((current) => ({ ...current, materialLibraryAdminIds: ids }))}
+                emptyLabel={t("field.noMaterialLibraryAdmins")}
+                validationMessage={t("validation.materialLibraryAdminsRequired")}
+                showValidation={showValidation}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <SearchableMultiSelect
+                label={t("field.categoryLibraries")}
+                required
+                options={categoryLibraryOptions}
+                selectedIds={form.categoryLibraryIds}
+                searchValue={categoryLibrarySearch}
+                onSearchChange={setCategoryLibrarySearch}
+                onChange={(ids) => setForm((current) => ({ ...current, categoryLibraryIds: ids }))}
+                emptyLabel={t("field.noCategoryLibraries")}
+                validationMessage={t("validation.categoryLibrariesRequired")}
+                showValidation={showValidation}
+              />
+            </div>
             <label className="flex items-center gap-2 text-sm text-foreground">
               <input
                 type="checkbox"
@@ -650,6 +869,14 @@ export function MaterialLibraryList() {
               </label>
             )}
           </div>
+
+          {associationValidationMessages.length > 0 && (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {associationValidationMessages.map((message) => (
+                <p key={message}>{message}</p>
+              ))}
+            </div>
+          )}
 
           {isCreateMode && form.autoCodeEnabled && (
             <section className="space-y-4 rounded-lg border border-blue-100 bg-slate-50 p-4">

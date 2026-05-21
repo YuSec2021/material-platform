@@ -1170,6 +1170,28 @@ export function MaterialLibraryDetail({
                   {library.auto_code_enabled ? t("status.enabled") : t("status.disabled")}
                 </dd>
               </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">{t("field.materialLibraryAdmins")}</dt>
+                <dd className="mt-1 flex flex-wrap gap-1.5 text-sm text-foreground">
+                  {(library.material_library_admin_names?.length ? library.material_library_admin_names : library.material_library_admin_name ? [library.material_library_admin_name] : []).map((name) => (
+                    <Badge key={name} variant="outline" className="border-blue-100 bg-blue-50 text-blue-700">
+                      {name}
+                    </Badge>
+                  ))}
+                  {!library.material_library_admin_names?.length && !library.material_library_admin_name && "-"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">{t("field.categoryLibraries")}</dt>
+                <dd className="mt-1 flex flex-wrap gap-1.5 text-sm text-foreground">
+                  {(library.category_library_names?.length ? library.category_library_names : library.category_library_name ? [library.category_library_name] : []).map((name) => (
+                    <Badge key={name} variant="outline" className="border-blue-100 bg-blue-50 text-blue-700">
+                      {name}
+                    </Badge>
+                  ))}
+                  {!library.category_library_names?.length && !library.category_library_name && "-"}
+                </dd>
+              </div>
               <div className="md:col-span-3">
                 <dt className="text-sm text-muted-foreground">{t("field.description")}</dt>
                 <dd className="mt-1 text-sm text-foreground">{library.description || t("codeRule.noDescription")}</dd>

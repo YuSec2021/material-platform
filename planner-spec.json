@@ -317,6 +317,27 @@
       "module": "standard_management",
       "description": "Extend product name management with: (1) PM-prefixed product name code in format PM######## (8-digit zero-padded sequential counter, e.g., PM00000001), auto-generated on creation, never recycled; (2) status column with values active/inactive; (3) status toggle edit allowing users to switch between active and inactive; (4) soft delete that deactivates the product name without removing the record (sets status to inactive, code preserved). Backend: extend product_name model with code (unique, non-null) and status fields; add sequence counter; add PATCH toggle and soft-delete endpoints. Frontend: add code column (read-only, auto-displayed), add status switch, connect to toggle and delete APIs.",
       "priority": "P0"
+    },
+    {
+      "id": "F32",
+      "name": "Material Library Multi-Select Form Support",
+      "module": "material_management",
+      "description": "Extend material library management to support multi-select form fields and stricter validation. (1) Multi-select material library admins: replace single-select material_library_admin_id with a many-to-many junction table material_library_admin linking material_library to role, allowing multiple admin roles per library. (2) Multi-select category library association: replace single-select category_library_id with a many-to-many junction table material_library_category_library linking material_library to category_library, requiring at least one category library per material library. (3) Required field red-asterisk marking: add visual red asterisk (*) indicator in all frontend forms for fields marked as required (material_library_admin_ids must have at least one, category_library_ids must have at least one). Backend: update schema, migrations, CRUD APIs to accept/return array fields. Frontend: update create/edit material library dialogs with multi-select components (Ant Design Select with mode=multiple), red-asterisk CSS styling on required labels, and client-side validation ensuring non-empty arrays.",
+      "priority": "P0"
+    },
+    {
+      "id": "F33",
+      "name": "Material AI Category Auto-Matching",
+      "module": "material_management",
+      "description": "When creating a new material in a material library that has associated category libraries (from F32), automatically trigger AI-powered category matching to suggest the top matching category from the linked category libraries. (1) Backend API: POST /api/v1/ai/material-category-match accepting {material_name, brand, description, category_library_ids[]}, performing vector similarity search against Qdrant collections, returning top-3 matched categories with confidence scores and full category path. (2) Default selection: the matched category with the highest confidence is pre-selected in the material creation form; users can manually override the selection. (3) UI display: show matched categories as selectable chips/badges with category path and confidence percentage (e.g., '办公用品 > 纸张 > 复印纸 92%'), sorted by confidence descending. (4) Fallback: if no category libraries are linked to the material library, skip AI matching and use the existing category selection workflow. (5) Integrate with the existing LLM gateway and embedding pipeline for category embedding retrieval.",
+      "priority": "P0"
+    },
+    {
+      "id": "F34",
+      "name": "Qdrant Vector Database Integration for Category Embeddings",
+      "module": "ai_infrastructure",
+      "description": "Integrate Qdrant vector database to store and retrieve category embeddings, enabling AI-powered semantic search for material-category matching. (1) Qdrant collection management: create one Qdrant collection per category library (collection naming: category_library_{id}); store category records as points with payload (category_id, level1/2/3 names, path_string) and dense vector embedding. (2) Category embedding pipeline: when a new category is created or updated in a category library that has Qdrant integration enabled, generate text embedding (concatenation of level1/level2/level3 names and description) via the embedding service and upsert the point into Qdrant. (3) Delete synchronization: when a category is deleted, remove the corresponding point from Qdrant. (4) Material-to-category matching endpoint: POST /api/v1/ai/material-category-match queries the Qdrant collection(s) corresponding to the specified category_library_ids using the material's name+brand+description as the search vector; returns top-N results with score and category metadata. (5) Re-embedding job: admin-triggered bulk re-embedding endpoint to regenerate all category embeddings for a given category library (useful after model upgrades). (6) Configuration: per-category-library flag qdrant_enabled to control whether embeddings are generated; graceful skip if Qdrant is unavailable.",
+      "priority": "P0"
     }
   ],
   "sprints": [
@@ -842,6 +863,66 @@
         "F29-zh-CN and en-US i18n for empty state messages explaining why a user sees no libraries, access denied messages, and library access role labels",
         "F29-Remove any hardcoded library references or demo data that bypass the permission filter",
         "F29-Frontend test coverage: Playwright tests verifying that a non-super_admin user sees only their assigned library/libraries and cannot access other libraries' data"
+      ]
+    },
+    {
+      "id": 43,
+      "title": "Material Library Multi-Select Form Support (Backend + Frontend)",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F32-Backend schema migration: drop the single-FK fields material_library_admin_id and category_library_id from material_library table; create two junction tables -- material_library_admin (material_library_id, role_id, PRIMARY KEY) and material_library_category_library (material_library_id, category_library_id, PRIMARY KEY); add a qdrant_enabled boolean column to category_library for Qdrant integration control",
+        "F32-Backend API updates: POST and PUT /api/v1/material-libraries accept material_library_admin_ids (array of role IDs, non-empty) and category_library_ids (array of category library IDs, non-empty, at least one required); GET /api/v1/material-libraries returns both arrays with joined role names and category library names; DELETE validation ensures admin_ids and category_library_ids arrays are properly managed on library deletion",
+        "F32-Backend permission isolation update: adapt the permission filtering logic from Sprint 42 to work with the many-to-many admin junction table instead of single admin_id",
+        "F32-Frontend create/edit dialog: replace single-select dropdown for 物料库管理员 with Ant Design Select mode=multiple component (searchable, tag display); replace single-select dropdown for 关联类目库 with mode=multiple select (searchable); both fields display red asterisk (*) to indicate required status",
+        "F32-Frontend validation: client-side validation ensuring material_library_admin_ids is non-empty (at least one admin role required) and category_library_ids is non-empty (at least one category library required); show inline validation error messages on submit attempt with empty arrays",
+        "F32-Frontend list display: material library list DataTable adds columns showing admin role names (comma-separated tags) and category library names (comma-separated tags); detail view shows full lists",
+        "F32-zh-CN and en-US i18n: add i18n keys for multi-select labels, required field asterisks, validation messages, and column headers; ensure bilingual form labels and error messages are consistent",
+        "F32-Audit logging: all changes to admin and category library associations logged to audit_log with before/after arrays"
+      ]
+    },
+    {
+      "id": 44,
+      "title": "AI Category Matching and Qdrant Vector Integration",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F34-Qdrant collection management: create QdrantClient wrapper service; on category library creation with qdrant_enabled=true, create a dedicated Qdrant collection named category_library_{id} with appropriate vector dimension (matching embedding model); on category library deletion, delete the collection",
+        "F34-Category embedding pipeline: when a category is created or updated in a Qdrant-enabled category library, generate a text embedding by concatenating level1_name + level2_name + level3_name + description, call the embedding service, and upsert the point into the corresponding Qdrant collection with payload (category_id, level1, level2, level3, path_string); use category ID as the unique point ID for upsert idempotency",
+        "F34-Category delete synchronization: when a category is deleted from a Qdrant-enabled category library, delete the corresponding point from Qdrant by point ID",
+        "F34-Material-to-category matching endpoint: POST /api/v1/ai/material-category-match accepts {material_name, brand, description, category_library_ids[]}; generates a query vector from the material fields; queries the Qdrant collections for the specified category_library_ids (multi-collection search); returns top-3 results sorted by similarity score with category metadata (id, path_string, level1/2/3, score); falls back gracefully if Qdrant is unavailable",
+        "F34-Bulk re-embedding admin endpoint: POST /api/v1/category-libraries/:id/re-embed triggers regeneration of all category embeddings for a given category library; useful after embedding model upgrades; returns job status with progress count",
+        "F33-Frontend AI category matching UI: in the create material form, after the user fills in material_name (and optionally brand/description), show a 'AI智能匹配类目' button; clicking it calls POST /api/v1/ai/material-category-match with the material fields and category_library_ids from the current material library",
+        "F33-Matching result display: render matched categories as selectable chips/badges showing full category path and confidence percentage (e.g., '办公用品 > 纸张 > 复印纸 92%'); top-1 result is pre-selected; user can select a different category or skip AI matching entirely",
+        "F33-Frontend integration: if the material library has no associated category libraries, hide the AI matching button; if Qdrant matching returns empty results, show a '未找到匹配类目' message; display loading spinner during AI matching",
+        "F33-F33-i18n: add zh-CN/en-US keys for AI matching button label, result chips, confidence display, loading state, empty result message, and error messages",
+        "F34-Qdrant connection health: expose a lightweight GET /api/v1/health/qdrant endpoint that pings Qdrant and returns status; use it for monitoring; log Qdrant errors with AITracer"
+      ]
+    },
+    {
+      "id": 45,
+      "title": "Multi-Select and AI Matching Polish, Testing, and Documentation",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F32-F33-F34-End-to-end flow testing: Playwright tests covering the complete material library creation with multi-select admins and category libraries, followed by material creation with AI category matching; verify red asterisks, validation, matching chips, and default Top-1 selection",
+        "F32-Edit flow: test editing an existing material library to add/remove admins and category libraries; verify permission isolation still works correctly with updated multi-admin associations",
+        "F34-Qdrant data consistency: test that category create/update/delete operations correctly sync to Qdrant; test bulk re-embedding job and verify all points are updated",
+        "F33-AI matching edge cases: test material creation in a library with no category libraries (button hidden), with Qdrant unavailable (graceful error), with no matching results (empty state), and with only one category library vs multiple (multi-collection search)",
+        "F32-F33-F34-i18n verification: switch between zh-CN and en-US throughout the multi-select forms and AI matching UI; verify all labels, messages, chips, and error texts are properly translated",
+        "F32-F33-F34-Responsive and accessibility: verify multi-select components work on different viewport sizes; ensure AI matching results are keyboard-navigable; check color contrast for confidence scores and status indicators",
+        "F32-F33-F34-Performance: multi-select with large role/category library lists should use virtual scrolling or pagination; Qdrant search timeout should be configurable and not block the material form submission",
+        "F32-F33-F34-Documentation: add inline API documentation comments; update any relevant API reference docs for changed endpoints; document Qdrant collection naming conventions and vector dimension requirements",
+        "F32-F33-F34-Bug fixes: address any issues discovered during testing of the three sprints; ensure no regressions in existing Sprint 42 permission isolation or other completed features"
       ]
     }
   ]

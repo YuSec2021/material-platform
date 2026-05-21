@@ -115,6 +115,16 @@ class MaterialLibrary(Base):
     materials: Mapped[list["Material"]] = relationship(back_populates="material_library")
     material_library_admin: Mapped["Role | None"] = relationship()
     category_library: Mapped["CategoryLibrary | None"] = relationship()
+    material_library_admins: Mapped[list["Role"]] = relationship(
+        "Role",
+        secondary="material_library_admin_roles",
+        order_by="Role.id",
+    )
+    category_libraries: Mapped[list["CategoryLibrary"]] = relationship(
+        "CategoryLibrary",
+        secondary="material_library_category_libraries",
+        order_by="CategoryLibrary.id",
+    )
     code_rule_versions: Mapped[list["MaterialCodeRuleVersion"]] = relationship(
         back_populates="library",
         cascade="all, delete-orphan",
@@ -130,10 +140,36 @@ class CategoryLibrary(Base):
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    qdrant_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     categories: Mapped[list["Category"]] = relationship(back_populates="category_library")
+
+
+class MaterialLibraryAdminRole(Base):
+    __tablename__ = "material_library_admin_roles"
+
+    material_library_id: Mapped[int] = mapped_column(
+        ForeignKey("material_libraries.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialLibraryCategoryLibrary(Base):
+    __tablename__ = "material_library_category_libraries"
+
+    material_library_id: Mapped[int] = mapped_column(
+        ForeignKey("material_libraries.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    category_library_id: Mapped[int] = mapped_column(
+        ForeignKey("category_libraries.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Category(Base):

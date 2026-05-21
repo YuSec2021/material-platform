@@ -46,6 +46,8 @@ from .models import (
     MaterialCodeRuleVersion,
     MaterialCodeSerial,
     MaterialLibrary,
+    MaterialLibraryAdminRole,
+    MaterialLibraryCategoryLibrary,
     ModelConfig,
     ProductName,
     ProductNameCodeSequence,
@@ -696,11 +698,16 @@ def ensure_material_library_association_schema() -> None:
     with engine.begin() as connection:
         if engine.dialect.name == "sqlite":
             Base.metadata.create_all(bind=connection)
+            MaterialLibraryAdminRole.__table__.create(bind=connection, checkfirst=True)
+            MaterialLibraryCategoryLibrary.__table__.create(bind=connection, checkfirst=True)
             existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(material_libraries)").fetchall()}
             if "material_library_admin_id" not in existing:
                 connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN material_library_admin_id INTEGER")
             if "category_library_id" not in existing:
                 connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN category_library_id INTEGER")
+            category_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(category_libraries)").fetchall()}
+            if "qdrant_enabled" not in category_columns:
+                connection.exec_driver_sql("ALTER TABLE category_libraries ADD COLUMN qdrant_enabled BOOLEAN DEFAULT 0 NOT NULL")
             connection.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_material_libraries_material_library_admin_id "
                 "ON material_libraries (material_library_admin_id)"
@@ -709,10 +716,28 @@ def ensure_material_library_association_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_material_libraries_category_library_id "
                 "ON material_libraries (category_library_id)"
             )
+            connection.exec_driver_sql(
+                """
+                INSERT OR IGNORE INTO material_library_admin_roles (material_library_id, role_id, created_at)
+                SELECT id, material_library_admin_id, CURRENT_TIMESTAMP
+                FROM material_libraries
+                WHERE material_library_admin_id IS NOT NULL
+                """
+            )
+            connection.exec_driver_sql(
+                """
+                INSERT OR IGNORE INTO material_library_category_libraries (material_library_id, category_library_id, created_at)
+                SELECT id, category_library_id, CURRENT_TIMESTAMP
+                FROM material_libraries
+                WHERE category_library_id IS NOT NULL
+                """
+            )
             RoleCodeSequence.__table__.create(bind=connection, checkfirst=True)
             return
 
         Base.metadata.create_all(bind=connection)
+        MaterialLibraryAdminRole.__table__.create(bind=connection, checkfirst=True)
+        MaterialLibraryCategoryLibrary.__table__.create(bind=connection, checkfirst=True)
         columns = {
             row[0]
             for row in connection.exec_driver_sql(
@@ -735,6 +760,38 @@ def ensure_material_library_association_schema() -> None:
                 "CREATE INDEX IF NOT EXISTS ix_material_libraries_category_library_id "
                 "ON material_libraries (category_library_id)"
             )
+        category_columns = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'category_libraries'
+                """
+            ).fetchall()
+        }
+        if "qdrant_enabled" not in category_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE category_libraries ADD COLUMN qdrant_enabled BOOLEAN NOT NULL DEFAULT false"
+            )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO material_library_admin_roles (material_library_id, role_id, created_at)
+            SELECT id, material_library_admin_id, NOW()
+            FROM material_libraries
+            WHERE material_library_admin_id IS NOT NULL
+            ON CONFLICT DO NOTHING
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO material_library_category_libraries (material_library_id, category_library_id, created_at)
+            SELECT id, category_library_id, NOW()
+            FROM material_libraries
+            WHERE category_library_id IS NOT NULL
+            ON CONFLICT DO NOTHING
+            """
+        )
 
 
 def ensure_product_name_schema() -> None:
@@ -1806,10 +1863,17 @@ def effective_auth_for_user(user: User, db: Session) -> AuthContext:
     if role_ids:
         administered_library_ids = {
             library_id
+            for (library_id,) in db.query(MaterialLibraryAdminRole.material_library_id)
+            .filter(MaterialLibraryAdminRole.role_id.in_(role_ids))
+            .all()
+        }
+        legacy_administered_library_ids = {
+            library_id
             for (library_id,) in db.query(MaterialLibrary.id)
             .filter(MaterialLibrary.material_library_admin_id.in_(role_ids))
             .all()
         }
+        administered_library_ids.update(legacy_administered_library_ids)
         scope_ids.update(administered_library_ids)
         if administered_library_ids:
             permissions.update(NON_SUPER_READ_PERMISSIONS)
@@ -2413,21 +2477,86 @@ def create_code_rule_version(
     return rule_version
 
 
+def unique_int_ids(values: list[int] | None) -> list[int]:
+    if values is None:
+        return []
+    seen: set[int] = set()
+    ids: list[int] = []
+    for value in values:
+        item_id = int(value)
+        if item_id not in seen:
+            ids.append(item_id)
+            seen.add(item_id)
+    return ids
+
+
+def material_library_ids_from_payload(
+    payload: MaterialLibraryIn | MaterialLibraryUpdate,
+    current_admin_ids: list[int] | None = None,
+    current_category_ids: list[int] | None = None,
+) -> tuple[list[int] | None, list[int] | None]:
+    fields_set = payload.model_fields_set
+    admin_ids: list[int] | None = None
+    category_ids: list[int] | None = None
+
+    if "material_library_admin_ids" in fields_set:
+        admin_ids = unique_int_ids(payload.material_library_admin_ids)
+        if not admin_ids:
+            raise HTTPException(status_code=422, detail="material_library_admin_ids is required")
+    elif "material_library_admin_id" in fields_set:
+        admin_ids = [] if payload.material_library_admin_id is None else [payload.material_library_admin_id]
+    elif current_admin_ids is not None:
+        admin_ids = current_admin_ids
+
+    if "category_library_ids" in fields_set:
+        category_ids = unique_int_ids(payload.category_library_ids)
+        if not category_ids:
+            raise HTTPException(status_code=422, detail="category_library_ids is required")
+    elif "category_library_id" in fields_set:
+        category_ids = [] if payload.category_library_id is None else [payload.category_library_id]
+    elif current_category_ids is not None:
+        category_ids = current_category_ids
+
+    return admin_ids, category_ids
+
+
 def validate_material_library_associations(
     db: Session,
-    material_library_admin_id: int | None,
-    category_library_id: int | None,
-) -> None:
-    if material_library_admin_id is not None and db.get(Role, material_library_admin_id) is None:
+    material_library_admin_ids: list[int],
+    category_library_ids: list[int],
+) -> tuple[list[Role], list[CategoryLibrary]]:
+    roles = db.query(Role).filter(Role.id.in_(material_library_admin_ids)).order_by(Role.id).all() if material_library_admin_ids else []
+    if len(roles) != len(set(material_library_admin_ids)):
         raise HTTPException(status_code=404, detail="Material library admin role not found")
-    if category_library_id is not None and db.get(CategoryLibrary, category_library_id) is None:
+    libraries = (
+        db.query(CategoryLibrary).filter(CategoryLibrary.id.in_(category_library_ids)).order_by(CategoryLibrary.id).all()
+        if category_library_ids
+        else []
+    )
+    if len(libraries) != len(set(category_library_ids)):
         raise HTTPException(status_code=404, detail="Category library not found")
+    return roles, libraries
+
+
+def apply_material_library_associations(
+    library: MaterialLibrary,
+    roles: list[Role],
+    category_libraries: list[CategoryLibrary],
+) -> None:
+    library.material_library_admins = roles
+    library.category_libraries = category_libraries
+    library.material_library_admin_id = roles[0].id if roles else None
+    library.category_library_id = category_libraries[0].id if category_libraries else None
 
 
 def material_library_association_snapshot(library: MaterialLibrary) -> dict[str, Any]:
+    admin_ids = [role.id for role in library.material_library_admins]
+    category_ids = [category_library.id for category_library in library.category_libraries]
     return {
-        "material_library_admin_id": library.material_library_admin_id,
-        "category_library_id": library.category_library_id,
+        "material_library_admin_ids": admin_ids,
+        "category_library_ids": category_ids,
+        "material_library_admin_id": admin_ids[0] if admin_ids else library.material_library_admin_id,
+        "category_library_id": category_ids[0] if category_ids else library.category_library_id,
     }
 
 
@@ -2440,8 +2569,10 @@ def library_access_role(library: MaterialLibrary, auth: AuthContext | None = Non
 def library_to_out(library: MaterialLibrary, db: Session | None = None, auth: AuthContext | None = None) -> MaterialLibraryOut:
     active_rule = active_rule_for_library(db, library) if db is not None else None
     material_count = db.query(Material).filter(Material.material_library_id == library.id).count() if db is not None else len(library.materials)
-    admin = library.material_library_admin
-    category_library = library.category_library
+    admins = list(library.material_library_admins)
+    category_libraries = list(library.category_libraries)
+    admin = admins[0] if admins else library.material_library_admin
+    category_library = category_libraries[0] if category_libraries else library.category_library
     access_role, access_role_label = library_access_role(library, auth)
     return MaterialLibraryOut(
         id=library.id,
@@ -2454,10 +2585,16 @@ def library_to_out(library: MaterialLibrary, db: Session | None = None, auth: Au
         current_rule_version_id=library.current_rule_version_id,
         code_rule_summary=code_rule_summary(active_rule),
         material_count=material_count,
-        material_library_admin_id=library.material_library_admin_id,
+        material_library_admin_ids=[role.id for role in admins],
+        material_library_admin_names=[role.name for role in admins],
+        material_library_admin_codes=[role.code for role in admins],
+        material_library_admin_id=admin.id if admin else library.material_library_admin_id,
         material_library_admin_name=admin.name if admin else None,
         material_library_admin_code=admin.code if admin else None,
-        category_library_id=library.category_library_id,
+        category_library_ids=[item.id for item in category_libraries],
+        category_library_names=[item.name for item in category_libraries],
+        category_library_codes=[item.code for item in category_libraries],
+        category_library_id=category_library.id if category_library else library.category_library_id,
         category_library_name=category_library.name if category_library else None,
         category_library_code=category_library.code if category_library else None,
         access_role=access_role,
@@ -2472,6 +2609,7 @@ def category_library_to_out(library: CategoryLibrary) -> CategoryLibraryOut:
         name=library.name,
         description=library.description,
         enabled=library.enabled,
+        qdrant_enabled=library.qdrant_enabled,
     )
 
 
@@ -4295,7 +4433,8 @@ def create_material_library(
         raise HTTPException(status_code=409, detail="Material library name must be unique")
     if payload.auto_code_enabled:
         normalize_code_rule_config(payload.code_rule)
-    validate_material_library_associations(db, payload.material_library_admin_id, payload.category_library_id)
+    admin_ids, category_ids = material_library_ids_from_payload(payload)
+    roles, category_libraries = validate_material_library_associations(db, admin_ids or [], category_ids or [])
     library = MaterialLibrary(
         code=next_unique_code(db, MaterialLibrary, "MLIB", f"{name}:{now().isoformat()}"),
         name=name,
@@ -4303,11 +4442,10 @@ def create_material_library(
         enabled=payload.enabled,
         auto_code_enabled=payload.auto_code_enabled,
         recode_enabled=payload.recode_enabled,
-        material_library_admin_id=payload.material_library_admin_id,
-        category_library_id=payload.category_library_id,
     )
     db.add(library)
     db.flush()
+    apply_material_library_associations(library, roles, category_libraries)
     db.query(MaterialCodeRuleVersion).filter(MaterialCodeRuleVersion.library_id == library.id).delete()
     if payload.auto_code_enabled:
         rule_version = create_code_rule_version(db, library, payload.code_rule or {}, "active", auth.username)
@@ -4368,14 +4506,23 @@ def update_material_library(
     if payload.enabled is not None:
         library.enabled = payload.enabled
     fields_set = payload.model_fields_set
-    if "material_library_admin_id" in fields_set or "category_library_id" in fields_set:
-        next_admin_id = payload.material_library_admin_id if "material_library_admin_id" in fields_set else library.material_library_admin_id
-        next_category_library_id = payload.category_library_id if "category_library_id" in fields_set else library.category_library_id
-        if not auth.is_super_admin and next_admin_id not in auth.role_ids:
-            raise HTTPException(status_code=403, detail="Material library admin role is outside the user's permission scope")
-        validate_material_library_associations(db, next_admin_id, next_category_library_id)
-        library.material_library_admin_id = next_admin_id
-        library.category_library_id = next_category_library_id
+    if {
+        "material_library_admin_ids",
+        "material_library_admin_id",
+        "category_library_ids",
+        "category_library_id",
+    } & fields_set:
+        next_admin_ids, next_category_library_ids = material_library_ids_from_payload(
+            payload,
+            [role.id for role in library.material_library_admins],
+            [category_library.id for category_library in library.category_libraries],
+        )
+        next_admin_ids = next_admin_ids or []
+        next_category_library_ids = next_category_library_ids or []
+        if not auth.is_super_admin and not set(next_admin_ids).issubset(auth.role_ids):
+            raise HTTPException(status_code=403, detail="Material library admin roles are outside the user's permission scope")
+        roles, category_libraries = validate_material_library_associations(db, next_admin_ids, next_category_library_ids)
+        apply_material_library_associations(library, roles, category_libraries)
     library.updated_at = now()
     after = material_library_association_snapshot(library)
     if before != after:
@@ -4895,6 +5042,7 @@ def create_category_library(
         name=name,
         description=payload.description.strip(),
         enabled=payload.enabled,
+        qdrant_enabled=payload.qdrant_enabled,
     )
     db.add(library)
     db.commit()
@@ -4945,6 +5093,8 @@ def update_category_library(
         library.description = payload.description.strip()
     if payload.enabled is not None:
         library.enabled = payload.enabled
+    if payload.qdrant_enabled is not None:
+        library.qdrant_enabled = payload.qdrant_enabled
     library.updated_at = now()
     db.commit()
     db.refresh(library)
