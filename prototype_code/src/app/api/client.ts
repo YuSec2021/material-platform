@@ -444,6 +444,37 @@ export type MaterialMatchResult = {
   results?: MaterialMatch[];
 };
 
+export type MaterialCategoryMatchPayload = {
+  material_name: string;
+  brand?: string;
+  description?: string;
+  category_library_ids: number[];
+};
+
+export type MaterialCategoryMatch = {
+  id: number;
+  category_id: number;
+  path_string: string;
+  level1: string;
+  level2?: string | null;
+  level3?: string | null;
+  score: number;
+  confidence: number;
+  category: {
+    id: number;
+    path_string: string;
+    level1: string;
+    level2?: string | null;
+    level3?: string | null;
+  };
+};
+
+export type MaterialCategoryMatchResult = {
+  matches: MaterialCategoryMatch[];
+  results?: MaterialCategoryMatch[];
+  message?: string;
+};
+
 type QueryFunctionContextLike = {
   queryKey: unknown;
 };
@@ -1242,6 +1273,12 @@ export const apiClient = {
   },
   matchMaterials(payload: MaterialMatchPayload) {
     return request<MaterialMatchResult>("/ai/material-match", {
+      method: "POST",
+      body: payload,
+    });
+  },
+  matchMaterialCategory(payload: MaterialCategoryMatchPayload) {
+    return request<MaterialCategoryMatchResult>("/ai/material-category-match", {
       method: "POST",
       body: payload,
     });

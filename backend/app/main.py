@@ -104,6 +104,8 @@ from .schemas import (
     MaterialCodeMappingOut,
     MaterialGovernanceImportIn,
     MaterialGovernancePreviewIn,
+    MaterialCategoryMatchIn,
+    MaterialCategoryMatchOut,
     MaterialMatchIn,
     MaterialIn,
     MaterialCodeRuleVersionIn,
@@ -554,6 +556,7 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize-async", "label": "POST /api/v1/ai/category-recognition/recognize-async"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/ai/category-recognition/jobs/{job_id}", "label": "GET /api/v1/ai/category-recognition/jobs/{job_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/batch", "label": "POST /api/v1/ai/category-recognition/batch"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/material-category-match", "label": "POST /api/v1/ai/material-category-match"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}", "label": "PUT /api/v1/categories/{category_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}", "label": "DELETE /api/v1/categories/{category_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries", "label": "GET /api/v1/category-libraries"},
@@ -561,6 +564,7 @@ PERMISSION_CATALOG = [
     {"module": "category_library", "permission_type": "api", "permission_key": "api.GET./api/v1/category-libraries/{library_id}", "label": "GET /api/v1/category-libraries/{library_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.PUT./api/v1/category-libraries/{library_id}", "label": "PUT /api/v1/category-libraries/{library_id}"},
     {"module": "category_library", "permission_type": "api", "permission_key": "api.DELETE./api/v1/category-libraries/{library_id}", "label": "DELETE /api/v1/category-libraries/{library_id}"},
+    {"module": "category_library", "permission_type": "api", "permission_key": "api.POST./api/v1/category-libraries/{library_id}/re-embed", "label": "POST /api/v1/category-libraries/{library_id}/re-embed"},
     {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names", "label": "GET /api/v1/product-names"},
     {"module": "product_name_management", "permission_type": "api", "permission_key": "api.POST./api/v1/product-names", "label": "POST /api/v1/product-names"},
     {"module": "product_name_management", "permission_type": "api", "permission_key": "api.GET./api/v1/product-names/{product_name_id}", "label": "GET /api/v1/product-names/{product_name_id}"},
@@ -2626,6 +2630,246 @@ def category_to_out(category: Category) -> CategoryOut:
     )
 
 
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333").rstrip("/")
+CATEGORY_EMBEDDING_DIM = int(os.environ.get("CATEGORY_EMBEDDING_DIM", "64"))
+
+
+class QdrantSyncError(Exception):
+    pass
+
+
+def qdrant_collection_name(library_id: int) -> str:
+    return f"category_library_{library_id}"
+
+
+def qdrant_request(method: str, path: str, **kwargs: Any) -> httpx.Response:
+    url = f"{QDRANT_URL}{path}"
+    try:
+        response = httpx.request(method, url, timeout=5, **kwargs)
+    except httpx.RequestError as exc:
+        raise QdrantSyncError(str(exc)) from exc
+    return response
+
+
+def trace_qdrant_error(db: Session, operation: str, error: str, metadata: dict[str, Any] | None = None) -> None:
+    collector = SpanCollector(operation, "category_vector")
+    collector.finish_span(collector.root_span_id, "error", error, metadata or {})
+    collector.flush(db)
+
+
+def category_embedding(text: str, dimension: int = CATEGORY_EMBEDDING_DIM) -> list[float]:
+    tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", text.lower())
+    if not tokens:
+        tokens = [text.lower().strip() or "empty"]
+    features = tokens[:]
+    features.extend("".join(tokens[index : index + 2]) for index in range(max(0, len(tokens) - 1)))
+    features.extend("".join(tokens[index : index + 3]) for index in range(max(0, len(tokens) - 2)))
+    vector = [0.0] * dimension
+    for feature in features:
+        digest = sha256(feature.encode("utf-8")).digest()
+        slot = int.from_bytes(digest[:4], "big") % dimension
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[slot] += sign
+    norm = sum(value * value for value in vector) ** 0.5
+    if norm == 0:
+        return [0.0] * dimension
+    return [round(value / norm, 6) for value in vector]
+
+
+def qdrant_health_payload() -> dict[str, Any]:
+    try:
+        response = qdrant_request("GET", "/collections")
+    except QdrantSyncError as exc:
+        return {"status": "unavailable", "available": False, "message": str(exc)}
+    if response.status_code >= 400:
+        return {"status": "unavailable", "available": False, "message": f"Qdrant HTTP {response.status_code}"}
+    return {"status": "available", "available": True, "url": QDRANT_URL}
+
+
+def create_qdrant_collection(library_id: int) -> None:
+    name = qdrant_collection_name(library_id)
+    response = qdrant_request(
+        "PUT",
+        f"/collections/{name}",
+        json={"vectors": {"size": CATEGORY_EMBEDDING_DIM, "distance": "Cosine"}},
+    )
+    if response.status_code >= 400:
+        raise QdrantSyncError(f"Qdrant collection create failed with HTTP {response.status_code}: {response.text[:200]}")
+
+
+def delete_qdrant_collection(library_id: int) -> None:
+    name = qdrant_collection_name(library_id)
+    response = qdrant_request("DELETE", f"/collections/{name}")
+    if response.status_code not in {200, 202, 404}:
+        raise QdrantSyncError(f"Qdrant collection delete failed with HTTP {response.status_code}: {response.text[:200]}")
+
+
+def category_payload(category: Category, by_id: dict[int, Category]) -> dict[str, Any]:
+    path = category_path_for(category, by_id)
+    return {
+        "category_id": category.id,
+        "level1": path[0] if len(path) > 0 else "",
+        "level2": path[1] if len(path) > 1 else None,
+        "level3": path[2] if len(path) > 2 else None,
+        "path_string": " > ".join(path),
+    }
+
+
+def category_embedding_text(category: Category, payload: dict[str, Any]) -> str:
+    parts = [
+        str(payload.get("path_string") or ""),
+        category.description or "",
+        category.code or "",
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def upsert_category_point(library_id: int, category: Category, by_id: dict[int, Category]) -> None:
+    payload = category_payload(category, by_id)
+    vector = category_embedding(category_embedding_text(category, payload))
+    response = qdrant_request(
+        "PUT",
+        f"/collections/{qdrant_collection_name(library_id)}/points?wait=true",
+        json={"points": [{"id": category.id, "vector": vector, "payload": payload}]},
+    )
+    if response.status_code >= 400:
+        raise QdrantSyncError(f"Qdrant point upsert failed with HTTP {response.status_code}: {response.text[:200]}")
+
+
+def delete_category_point(library_id: int, category_id: int) -> None:
+    response = qdrant_request(
+        "POST",
+        f"/collections/{qdrant_collection_name(library_id)}/points/delete?wait=true",
+        json={"points": [category_id]},
+    )
+    if response.status_code not in {200, 202, 404}:
+        raise QdrantSyncError(f"Qdrant point delete failed with HTTP {response.status_code}: {response.text[:200]}")
+
+
+def enabled_library_for_category(db: Session, category: Category) -> CategoryLibrary | None:
+    library = category.category_library or db.get(CategoryLibrary, category.category_library_id)
+    if library and library.qdrant_enabled:
+        return library
+    return None
+
+
+def qdrant_sync_category(db: Session, category: Category, operation: str = "upsert") -> bool:
+    library = enabled_library_for_category(db, category)
+    if not library:
+        return False
+    categories = db.query(Category).filter(Category.category_library_id == library.id).all()
+    by_id = {item.id: item for item in categories}
+    try:
+        create_qdrant_collection(library.id)
+        upsert_category_point(library.id, category, by_id)
+        return True
+    except QdrantSyncError as exc:
+        trace_qdrant_error(db, f"qdrant.category.{operation}", str(exc), {"category_id": category.id, "library_id": library.id})
+        return False
+
+
+def qdrant_sync_category_subtree(db: Session, category: Category, operation: str = "update") -> int:
+    library = enabled_library_for_category(db, category)
+    if not library:
+        return 0
+    categories = db.query(Category).filter(Category.category_library_id == library.id).all()
+    by_id = {item.id: item for item in categories}
+    child_ids_by_parent: dict[int | None, list[int]] = {}
+    for item in categories:
+        child_ids_by_parent.setdefault(item.parent_category_id, []).append(item.id)
+    pending = [category.id]
+    affected: list[Category] = []
+    while pending:
+        current_id = pending.pop()
+        current = by_id.get(current_id)
+        if current:
+            affected.append(current)
+            pending.extend(child_ids_by_parent.get(current.id, []))
+    try:
+        create_qdrant_collection(library.id)
+        for item in affected:
+            upsert_category_point(library.id, item, by_id)
+        return len(affected)
+    except QdrantSyncError as exc:
+        trace_qdrant_error(db, f"qdrant.category.{operation}", str(exc), {"category_id": category.id, "library_id": library.id})
+        return 0
+
+
+def reembed_category_library(db: Session, library: CategoryLibrary) -> dict[str, Any]:
+    categories = db.query(Category).filter(Category.category_library_id == library.id).order_by(Category.id).all()
+    by_id = {item.id: item for item in categories}
+    processed = 0
+    failed = 0
+    errors: list[str] = []
+    try:
+        create_qdrant_collection(library.id)
+        for category in categories:
+            try:
+                upsert_category_point(library.id, category, by_id)
+                processed += 1
+            except QdrantSyncError as exc:
+                failed += 1
+                errors.append(str(exc))
+    except QdrantSyncError as exc:
+        failed = len(categories)
+        errors.append(str(exc))
+    if errors:
+        trace_qdrant_error(db, "qdrant.category.reembed", errors[0], {"library_id": library.id, "failed": failed})
+    status = "succeeded" if failed == 0 else "failed"
+    return {
+        "job_id": f"reembed-{library.id}-{uuid.uuid4().hex[:12]}",
+        "status": status,
+        "category_library_id": library.id,
+        "total": len(categories),
+        "processed": processed,
+        "succeeded": processed,
+        "failed": failed,
+        "errors": errors[:3],
+    }
+
+
+def search_category_collection(library_id: int, query_vector: list[float], limit: int = 3) -> list[dict[str, Any]]:
+    response = qdrant_request(
+        "POST",
+        f"/collections/{qdrant_collection_name(library_id)}/points/search",
+        json={"vector": query_vector, "limit": limit, "with_payload": True},
+    )
+    if response.status_code == 404:
+        return []
+    if response.status_code >= 400:
+        raise QdrantSyncError(f"Qdrant search failed with HTTP {response.status_code}: {response.text[:200]}")
+    data = response.json()
+    return data.get("result", []) if isinstance(data, dict) else []
+
+
+def category_match_item(raw: dict[str, Any]) -> dict[str, Any] | None:
+    payload = raw.get("payload") if isinstance(raw, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    category_id = int(payload.get("category_id") or raw.get("id") or 0)
+    if category_id <= 0:
+        return None
+    score = clamp_confidence(raw.get("score"))
+    item = {
+        "id": category_id,
+        "category_id": category_id,
+        "path_string": str(payload.get("path_string") or ""),
+        "level1": str(payload.get("level1") or ""),
+        "level2": payload.get("level2"),
+        "level3": payload.get("level3"),
+        "score": score,
+        "confidence": score,
+    }
+    item["category"] = {
+        "id": category_id,
+        "path_string": item["path_string"],
+        "level1": item["level1"],
+        "level2": item["level2"],
+        "level3": item["level3"],
+    }
+    return item
+
+
 def rule_category_to_out(category: RuleCategory, rule_count: int | None = None) -> RuleCategoryRead:
     count = len(category.rules) if rule_count is None else rule_count
     return RuleCategoryRead(
@@ -4048,6 +4292,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/v1/health/qdrant")
+def qdrant_health(db: Session = Depends(get_db)) -> dict[str, Any]:
+    payload = qdrant_health_payload()
+    if not payload["available"]:
+        trace_qdrant_error(db, "qdrant.health", str(payload.get("message") or "unavailable"))
+    return payload
+
+
 def auth_to_out(auth: AuthContext) -> AuthUserOut:
     roles = [role_summary(link.role) for link in sorted(auth.user.role_links, key=lambda link: link.role.name)] if auth.user else []
     return AuthUserOut(
@@ -5047,6 +5299,11 @@ def create_category_library(
     db.add(library)
     db.commit()
     db.refresh(library)
+    if library.qdrant_enabled:
+        try:
+            create_qdrant_collection(library.id)
+        except QdrantSyncError as exc:
+            trace_qdrant_error(db, "qdrant.collection.create", str(exc), {"library_id": library.id})
     return category_library_to_out(library)
 
 
@@ -5093,11 +5350,20 @@ def update_category_library(
         library.description = payload.description.strip()
     if payload.enabled is not None:
         library.enabled = payload.enabled
+    qdrant_before = library.qdrant_enabled
     if payload.qdrant_enabled is not None:
         library.qdrant_enabled = payload.qdrant_enabled
     library.updated_at = now()
     db.commit()
     db.refresh(library)
+    if payload.qdrant_enabled is not None and payload.qdrant_enabled != qdrant_before:
+        if library.qdrant_enabled:
+            reembed_category_library(db, library)
+        else:
+            try:
+                delete_qdrant_collection(library.id)
+            except QdrantSyncError as exc:
+                trace_qdrant_error(db, "qdrant.collection.delete", str(exc), {"library_id": library.id})
     return category_library_to_out(library)
 
 
@@ -5113,9 +5379,30 @@ def delete_category_library(
         raise HTTPException(status_code=404, detail="Category library not found")
     if db.query(Category).filter(Category.category_library_id == library.id).first():
         raise HTTPException(status_code=409, detail="Category library cannot be deleted while it contains categories")
+    qdrant_enabled = library.qdrant_enabled
     db.delete(library)
     db.commit()
+    if qdrant_enabled:
+        try:
+            delete_qdrant_collection(library_id)
+        except QdrantSyncError as exc:
+            trace_qdrant_error(db, "qdrant.collection.delete", str(exc), {"library_id": library_id})
     return {"deleted": True, "id": library_id}
+
+
+@app.post("/api/v1/category-libraries/{library_id}/re-embed")
+def reembed_category_library_endpoint(
+    library_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/category-libraries/{library_id}/re-embed")),
+) -> dict[str, Any]:
+    require_super_admin(auth)
+    library = db.get(CategoryLibrary, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    if not library.qdrant_enabled:
+        raise HTTPException(status_code=422, detail="Qdrant is not enabled for this category library")
+    return reembed_category_library(db, library)
 
 
 @app.get("/api/v1/categories", response_model=list[CategoryOut])
@@ -5705,6 +5992,8 @@ async def bulk_import_categories(
             )
 
     db.commit()
+    if library.qdrant_enabled and success_details:
+        reembed_category_library(db, library)
     return {
         "category_library_id": library.id,
         "success_count": len(success_details),
@@ -5751,6 +6040,7 @@ def create_category(
     db.add(category)
     db.commit()
     db.refresh(category)
+    qdrant_sync_category(db, category, "create")
     return category_to_out(category)
 
 
@@ -5811,6 +6101,7 @@ def update_category(
     category.updated_at = now()
     db.commit()
     db.refresh(category)
+    qdrant_sync_category_subtree(db, category, "update")
     return category_to_out(category)
 
 
@@ -5828,8 +6119,16 @@ def delete_category(
         raise HTTPException(status_code=409, detail="Category cannot be deleted while it contains materials")
     if db.query(Category).filter(Category.parent_category_id == category.id).first():
         raise HTTPException(status_code=409, detail="Category cannot be deleted while it contains child categories")
+    library = enabled_library_for_category(db, category)
+    deleted_category_id = category.id
+    deleted_library_id = library.id if library else None
     db.delete(category)
     db.commit()
+    if deleted_library_id is not None:
+        try:
+            delete_category_point(deleted_library_id, deleted_category_id)
+        except QdrantSyncError as exc:
+            trace_qdrant_error(db, "qdrant.category.delete", str(exc), {"category_id": deleted_category_id, "library_id": deleted_library_id})
     return {"deleted": True, "id": category_id}
 
 
@@ -6958,6 +7257,60 @@ def match_materials_alias(
     auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/match")),
 ) -> dict[str, Any]:
     return match_materials(payload, db, auth)
+
+
+@app.post("/api/v1/ai/material-category-match", response_model=MaterialCategoryMatchOut)
+def match_material_category(
+    payload: MaterialCategoryMatchIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/ai/material-category-match")),
+) -> MaterialCategoryMatchOut:
+    require_super_admin(auth)
+    material_name = compact_space(payload.material_name)
+    if not material_name:
+        raise HTTPException(status_code=422, detail="material_name is required")
+    library_ids = unique_int_ids(payload.category_library_ids)
+    if not library_ids:
+        return MaterialCategoryMatchOut(matches=[], results=[], message="No category libraries selected")
+
+    libraries = db.query(CategoryLibrary).filter(CategoryLibrary.id.in_(library_ids)).order_by(CategoryLibrary.id).all()
+    found_ids = {library.id for library in libraries}
+    missing_ids = [library_id for library_id in library_ids if library_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Category library not found: {missing_ids[0]}")
+
+    enabled_libraries = [library for library in libraries if library.qdrant_enabled]
+    if not enabled_libraries:
+        return MaterialCategoryMatchOut(matches=[], results=[], message="No Qdrant-enabled category libraries selected")
+
+    query_text = " ".join(
+        part
+        for part in [
+            material_name,
+            compact_space(payload.brand),
+            compact_space(payload.description),
+        ]
+        if part
+    )
+    vector = category_embedding(query_text)
+    candidates: list[dict[str, Any]] = []
+    for library in enabled_libraries:
+        try:
+            for raw in search_category_collection(library.id, vector, 3):
+                item = category_match_item(raw)
+                if item:
+                    candidates.append(item)
+        except QdrantSyncError as exc:
+            trace_qdrant_error(db, "qdrant.category.search", str(exc), {"library_id": library.id})
+
+    deduped: dict[int, dict[str, Any]] = {}
+    for item in candidates:
+        existing = deduped.get(item["category_id"])
+        if existing is None or item["score"] > existing["score"]:
+            deduped[item["category_id"]] = item
+    matches = sorted(deduped.values(), key=lambda item: item["score"], reverse=True)[:3]
+    message = "" if matches else "No matching categories found"
+    return MaterialCategoryMatchOut(matches=matches, results=matches, message=message)
 
 
 @app.get("/api/v1/ai/agent-configs", response_model=list[AgentConfigOut])

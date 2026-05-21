@@ -20,6 +20,7 @@ import {
   type Brand,
   type Category,
   type Material,
+  type MaterialCategoryMatch,
   type MaterialCodeRuleVersion,
   type MaterialLibrary,
   type MaterialPayload,
@@ -297,6 +298,9 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const [lifecycleAction, setLifecycleAction] = useState<LifecycleAction>("stop_purchase");
   const [lifecycleReason, setLifecycleReason] = useState("");
   const [lifecycleFeedback, setLifecycleFeedback] = useState("");
+  const [categoryMatches, setCategoryMatches] = useState<MaterialCategoryMatch[]>([]);
+  const [selectedAiCategoryId, setSelectedAiCategoryId] = useState<number | null>(null);
+  const [categoryMatchMessage, setCategoryMatchMessage] = useState("");
 
   const materialsQuery = useQuery({
     queryKey: ["materials", searchTerm, statusFilter, selectedLibraryId],
@@ -375,6 +379,15 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const dynamicAttributes = attributesQuery.data ?? [];
   const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
   const selectedCategory = categories.find((category) => category.id === form.category_id);
+  const linkedCategoryLibraryIds = useMemo(() => {
+    const ids = selectedLibrary?.category_library_ids?.length
+      ? selectedLibrary.category_library_ids
+      : selectedLibrary?.category_library_id
+        ? [selectedLibrary.category_library_id]
+        : [];
+    return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
+  }, [selectedLibrary]);
+  const canUseAiCategoryMatch = !editingMaterial && linkedCategoryLibraryIds.length > 0;
 
   const currentRuleQuery = useQuery({
     queryKey: ["material-code-rule-current", form.material_library_id],
@@ -388,6 +401,12 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     [currentRuleQuery.data, form, materialRows, selectedCategory],
   );
 
+  const resetCategoryMatchState = () => {
+    setCategoryMatches([]);
+    setSelectedAiCategoryId(null);
+    setCategoryMatchMessage("");
+  };
+
   const saveMutation = useMutation({
     mutationFn: (payload: MaterialPayload) =>
       editingMaterial ? apiClient.updateMaterial(editingMaterial.id, payload) : apiClient.createMaterial(payload),
@@ -400,6 +419,38 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
     onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
+  });
+
+  const categoryMatchMutation = useMutation({
+    mutationFn: () =>
+      apiClient.matchMaterialCategory({
+        material_name: form.name.trim(),
+        brand: selectedName<Brand>(brands, form.brand_id),
+        description: form.description.trim(),
+        category_library_ids: linkedCategoryLibraryIds,
+      }),
+    onMutate: () => {
+      setCategoryMatches([]);
+      setSelectedAiCategoryId(null);
+      setCategoryMatchMessage("");
+    },
+    onSuccess: (result) => {
+      const matches = result.matches ?? result.results ?? [];
+      setCategoryMatches(matches);
+      if (matches.length > 0) {
+        const topMatch = matches[0]!;
+        setSelectedAiCategoryId(topMatch.category_id);
+        setForm((current) => ({ ...current, category_id: topMatch.category_id }));
+        setCategoryMatchMessage("");
+      } else {
+        setCategoryMatchMessage(t("material.aiCategoryEmpty"));
+      }
+    },
+    onError: (error) => {
+      setCategoryMatches([]);
+      setSelectedAiCategoryId(null);
+      setCategoryMatchMessage(`${t("material.aiCategoryError")}: ${error.message}`);
+    },
   });
 
   const deleteMutation = useMutation({
@@ -429,6 +480,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
 
   const openCreateForm = () => {
     setEditingMaterial(null);
+    resetCategoryMatchState();
     setForm({
       ...emptyForm,
       material_library_id: selectedLibraryId,
@@ -440,6 +492,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
 
   const openEditForm = (material: Material) => {
     setEditingMaterial(material);
+    resetCategoryMatchState();
     setForm(materialToForm(material));
     setImageFeedback("");
     setIsFormOpen(true);
@@ -809,9 +862,14 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               <span>{t("field.library")}</span>
               <select
                 value={form.material_library_id}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, material_library_id: event.target.value ? Number(event.target.value) : "" }))
-                }
+                onChange={(event) => {
+                  resetCategoryMatchState();
+                  setForm((current) => ({
+                    ...current,
+                    material_library_id: event.target.value ? Number(event.target.value) : "",
+                    category_id: "",
+                  }));
+                }}
                 className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">请选择物料库</option>
@@ -826,9 +884,10 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               <span>{t("field.category")}</span>
               <select
                 value={form.category_id}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setSelectedAiCategoryId(null);
                   setForm((current) => ({ ...current, category_id: event.target.value ? Number(event.target.value) : "" }))
-                }
+                }}
                 className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">请选择类目</option>
@@ -896,6 +955,59 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               />
             </label>
           </div>
+
+          {canUseAiCategoryMatch && (
+            <section className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium text-foreground">{t("material.aiCategoryTitle")}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("material.aiCategoryHelp")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => categoryMatchMutation.mutate()}
+                  disabled={!form.name.trim() || categoryMatchMutation.isPending}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {categoryMatchMutation.isPending ? t("material.aiCategoryLoading") : t("material.aiCategoryAction")}
+                </button>
+              </div>
+              {categoryMatchMutation.isPending && (
+                <p className="mt-3 text-sm text-blue-700">{t("material.aiCategoryLoading")}</p>
+              )}
+              {!categoryMatchMutation.isPending && categoryMatchMessage && (
+                <p className={categoryMatchMutation.isError ? "mt-3 text-sm text-red-600" : "mt-3 text-sm text-muted-foreground"}>
+                  {categoryMatchMessage}
+                </p>
+              )}
+              {categoryMatches.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {categoryMatches.map((match) => {
+                    const selected = selectedAiCategoryId === match.category_id || form.category_id === match.category_id;
+                    return (
+                      <button
+                        key={match.category_id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAiCategoryId(match.category_id);
+                          setForm((current) => ({ ...current, category_id: match.category_id }));
+                        }}
+                        className={`inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm ${
+                          selected ? "border-blue-500 bg-white text-blue-700" : "border-blue-200 bg-white/70 text-foreground hover:bg-white"
+                        }`}
+                      >
+                        <span className="truncate">{match.path_string}</span>
+                        <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
+                          {t("material.aiCategoryConfidence", { value: Math.round(match.confidence * 100) })}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="rounded-lg border border-border p-4">
             <div className="mb-3 flex items-center justify-between">

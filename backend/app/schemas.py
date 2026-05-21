@@ -442,6 +442,39 @@ class MaterialMatchIn(BaseModel):
     top_k: int = 3
 
 
+class MaterialCategoryMatchIn(BaseModel):
+    material_name: str
+    brand: str = ""
+    description: str = ""
+    category_library_ids: list[int] = Field(default_factory=list)
+
+
+class MaterialCategoryMatchCategory(BaseModel):
+    id: int
+    path_string: str
+    level1: str
+    level2: str | None = None
+    level3: str | None = None
+
+
+class MaterialCategoryMatchItem(BaseModel):
+    category: MaterialCategoryMatchCategory
+    id: int
+    category_id: int
+    path_string: str
+    level1: str
+    level2: str | None = None
+    level3: str | None = None
+    score: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class MaterialCategoryMatchOut(BaseModel):
+    matches: list[MaterialCategoryMatchItem] = Field(default_factory=list)
+    results: list[MaterialCategoryMatchItem] = Field(default_factory=list)
+    message: str = ""
+
+
 class CategoryRecognitionRequest(BaseModel):
     text: str
     category_library_id: int | None = None
