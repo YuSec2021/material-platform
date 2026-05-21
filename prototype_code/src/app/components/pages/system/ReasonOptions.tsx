@@ -23,9 +23,9 @@ function normalizeReasons(reasons: ReasonOption[]) {
 
 function ReasonSection({ title, inputValue, reasons, onInputChange, onAdd, onRemove }: ReasonSectionProps) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-6">
+    <section className="rounded-lg border border-border bg-card p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-lg text-gray-900">{title}</h2>
+        <h2 className="text-lg text-foreground">{title}</h2>
       </div>
       <div className="mb-4 flex gap-2">
         <input
@@ -33,7 +33,7 @@ function ReasonSection({ title, inputValue, reasons, onInputChange, onAdd, onRem
           value={inputValue}
           onChange={(event) => onInputChange(event.target.value)}
           placeholder={`新增${title}`}
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          className="flex-1 rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
         />
         <button
           type="button"
@@ -46,13 +46,13 @@ function ReasonSection({ title, inputValue, reasons, onInputChange, onAdd, onRem
       </div>
       <div className="flex flex-col gap-2">
         {reasons.length === 0 ? (
-          <p className="rounded-md border border-gray-200 bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">
+          <p className="rounded-md border border-border bg-muted/40 px-3 py-4 text-center text-sm text-muted-foreground">
             暂无原因选项
           </p>
         ) : (
           reasons.map((reason, index) => (
-            <div key={`${reason.name}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2">
-              <span className="text-sm text-gray-900">{reason.name}</span>
+            <div key={`${reason.name}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+              <span className="text-sm text-foreground">{reason.name}</span>
               <button
                 type="button"
                 onClick={() => onRemove(index)}
@@ -147,8 +147,8 @@ export function ReasonOptions() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl text-gray-900">原因选项维护</h1>
-        <p className="mt-1 text-sm text-gray-500">停采和停用原因独立编辑，并通过系统配置接口统一保存。</p>
+        <h1 className="text-2xl text-foreground">原因选项维护</h1>
+        <p className="mt-1 text-sm text-muted-foreground">停采和停用原因独立编辑，并通过系统配置接口统一保存。</p>
       </div>
 
       <ApiState
@@ -194,7 +194,7 @@ export function ReasonOptions() {
             type="button"
             onClick={handleSave}
             disabled={saveMutation.isPending}
-            className="rounded-md bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="rounded-md bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
             {saveMutation.isPending ? "保存中..." : "保存设置"}
           </button>

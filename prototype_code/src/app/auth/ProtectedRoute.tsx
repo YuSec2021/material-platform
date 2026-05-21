@@ -7,7 +7,7 @@ export function ProtectedRoute() {
 
   if (auth.status === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-sm text-gray-600">
+      <div className="flex min-h-screen items-center justify-center bg-muted/40 text-sm text-muted-foreground">
         正在恢复登录状态...
       </div>
     );

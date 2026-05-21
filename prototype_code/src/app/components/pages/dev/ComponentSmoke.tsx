@@ -40,8 +40,8 @@ export function ComponentSmoke() {
     <section className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-2xl font-semibold text-gray-900">Component Smoke</h3>
-          <p className="mt-1 text-sm text-gray-500">
+          <h3 className="text-2xl font-semibold text-foreground">Component Smoke</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
             Loaded shadcn/ui modules: {loadedComponentCount}
           </p>
         </div>
@@ -49,7 +49,7 @@ export function ComponentSmoke() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <Button onClick={() => toast.success("Toast component ready")}>Toast</Button>
             <Dialog>
@@ -86,24 +86,24 @@ export function ComponentSmoke() {
             </Select>
             <div className="flex items-center gap-3">
               <Checkbox id="component-smoke-checkbox" defaultChecked />
-              <label htmlFor="component-smoke-checkbox" className="text-sm text-gray-700">
+              <label htmlFor="component-smoke-checkbox" className="text-sm text-foreground">
                 Checkbox
               </label>
             </div>
             <div className="flex items-center gap-3">
               <Switch id="component-smoke-switch" defaultChecked />
-              <label htmlFor="component-smoke-switch" className="text-sm text-gray-700">
+              <label htmlFor="component-smoke-switch" className="text-sm text-foreground">
                 Switch
               </label>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-700">Slider</span>
+              <span className="text-sm text-foreground">Slider</span>
               <Slider defaultValue={[64]} max={100} step={1} className="max-w-40" />
             </div>
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <Tabs defaultValue="table">
             <TabsList>
               <TabsTrigger value="table">Table</TabsTrigger>

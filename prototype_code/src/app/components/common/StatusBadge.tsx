@@ -6,7 +6,7 @@ interface StatusBadgeProps {
 const statusConfig = {
   normal: 'bg-green-100 text-green-700',
   'stop-purchase': 'bg-orange-100 text-orange-700',
-  'stop-use': 'bg-gray-100 text-gray-700',
+  'stop-use': 'bg-accent text-foreground',
   draft: 'bg-blue-100 text-blue-700',
   pending: 'bg-yellow-100 text-yellow-700',
   approved: 'bg-green-100 text-green-700',

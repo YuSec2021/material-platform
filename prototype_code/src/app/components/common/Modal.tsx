@@ -79,15 +79,15 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
         role="dialog"
         aria-modal="true"
         aria-labelledby="app-modal-title"
-        className={`relative bg-white rounded-lg shadow-xl w-full ${sizeClasses[size]} mx-4 max-h-[90vh] flex flex-col`}
+        className={`relative bg-card rounded-lg shadow-xl w-full ${sizeClasses[size]} mx-4 max-h-[90vh] flex flex-col`}
       >
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 id="app-modal-title" className="text-lg text-gray-900">{title}</h3>
+        <div className="flex items-center justify-between p-6 border-b border-border">
+          <h3 id="app-modal-title" className="text-lg text-foreground">{title}</h3>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+            className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
           >
             <X className="w-5 h-5" />
           </button>
@@ -96,7 +96,7 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
           {children}
         </div>
         {footer && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-border">
             {footer}
           </div>
         )}

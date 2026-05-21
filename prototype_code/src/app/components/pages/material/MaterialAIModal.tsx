@@ -287,10 +287,10 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
     <Modal isOpen={isOpen} onClose={onClose} title={modalTitle(type)} size="xl" footer={footer}>
       {type === "治理" && (
         <div className="space-y-5">
-          <label className="block rounded-lg border-2 border-dashed border-gray-300 p-5 text-center text-sm text-gray-600 hover:border-blue-400">
-            <FileInput className="mx-auto mb-2 h-8 w-8 text-gray-400" />
-            <span className="block font-medium text-gray-900">上传 Excel 或 CSV 文件</span>
-            <span className="mt-1 block text-xs text-gray-500">{governanceFile?.name ?? "支持 .csv 和 .xlsx"}</span>
+          <label className="block rounded-lg border-2 border-dashed border-border p-5 text-center text-sm text-muted-foreground hover:border-blue-400">
+            <FileInput className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+            <span className="block font-medium text-foreground">上传 Excel 或 CSV 文件</span>
+            <span className="mt-1 block text-xs text-muted-foreground">{governanceFile?.name ?? "支持 .csv 和 .xlsx"}</span>
             <input
               type="file"
               accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -324,12 +324,12 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
             </div>
           )}
           {governanceItems.length === 0 && !governancePreviewMutation.isPending && (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">暂无预览行</div>
+            <div className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">暂无预览行</div>
           )}
           {governanceItems.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-gray-200">
+            <div className="overflow-hidden rounded-lg border border-border">
               <table className="w-full min-w-[720px] text-sm">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 text-left">源行</th>
                     <th className="px-3 py-2 text-left">Before</th>
@@ -337,11 +337,11 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
                     <th className="px-3 py-2 text-left">状态</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
+                <tbody className="divide-y divide-border bg-card">
                   {governanceItems.map((item, index) => (
                     <tr key={`${valueText(item.source_row)}-${index}`}>
                       <td className="px-3 py-2">{valueText(item.source_row ?? index + 1)}</td>
-                      <td className="px-3 py-2 text-gray-600">{valueText(item.original ?? item.raw ?? item.source ?? governanceFile?.name)}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{valueText(item.original ?? item.raw ?? item.source ?? governanceFile?.name)}</td>
                       <td className="px-3 py-2">
                         {valueText(item.name)} / {valueText(item.product_name)} / {valueText(item.category)}
                       </td>
@@ -366,7 +366,7 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
 
       {type === "添加" && (
         <div className="space-y-5">
-          <label className="space-y-2 text-sm text-gray-700">
+          <label className="space-y-2 text-sm text-foreground">
             <span>物料描述</span>
             <textarea
               value={description}
@@ -375,7 +375,7 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
                 setDescriptionError("");
               }}
               rows={5}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               placeholder="例如：新增一款华为工业交换机，8口千兆，导轨安装..."
             />
           </label>
@@ -393,19 +393,19 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
           )}
           {addPreviewMutation.isError && <p className="text-sm text-red-600">预览失败：{addPreviewMutation.error.message}</p>}
           {addPreview && (
-            <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="space-y-4 rounded-lg border border-border bg-muted/40 p-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <p className="text-xs text-gray-500">Linked category path</p>
-                  <p className="mt-1 text-sm text-gray-900">{previewText(addPreview, "category")}</p>
+                  <p className="text-xs text-muted-foreground">Linked category path</p>
+                  <p className="mt-1 text-sm text-foreground">{previewText(addPreview, "category")}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Linked product name</p>
-                  <p className="mt-1 text-sm text-gray-900">{previewText(addPreview, "product_name")}</p>
+                  <p className="text-xs text-muted-foreground">Linked product name</p>
+                  <p className="mt-1 text-sm text-foreground">{previewText(addPreview, "product_name")}</p>
                 </div>
               </div>
               <div>
-                <p className="mb-2 text-xs text-gray-500">Recommended attribute values</p>
+                <p className="mb-2 text-xs text-muted-foreground">Recommended attribute values</p>
                 <div className="flex flex-wrap gap-2">
                   {attributeEntries(addPreview).map(([key, value]) => (
                     <Badge key={key} variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
@@ -428,14 +428,14 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
 
       {type === "匹配" && (
         <div className="space-y-5">
-          <label className="space-y-2 text-sm text-gray-700">
+          <label className="space-y-2 text-sm text-foreground">
             <span>匹配查询</span>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={matchQuery}
                 onChange={(event) => setMatchQuery(event.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="min-w-0 flex-1 rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                 placeholder="输入物料名称、品牌、规格或描述"
               />
               <Button type="button" onClick={() => matchMutation.mutate()} disabled={!matchQuery.trim() || matchMutation.isPending || !libraryId}>
@@ -453,7 +453,7 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
           )}
           {matchMutation.isError && <p className="text-sm text-red-600">匹配失败：{matchMutation.error.message}</p>}
           {matchResult !== null && matches.length === 0 && (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-600">暂无匹配结果</div>
+            <div className="rounded-md border border-border bg-muted/40 p-6 text-center text-sm text-muted-foreground">暂无匹配结果</div>
           )}
           {matches.length > 0 && (
             <div className="space-y-3">
@@ -461,12 +461,12 @@ export function MaterialAIModal({ isOpen, type, selectedLibraryId, selectedCateg
                 const identity = matchIdentity(match);
                 const percent = confidencePercent(match);
                 return (
-                  <div key={`${identity.code}-${index}`} className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div key={`${identity.code}-${index}`} className="rounded-lg border border-border bg-card p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="font-mono text-xs text-gray-500">{identity.code}</p>
-                        <p className="mt-1 text-sm font-medium text-gray-900">{identity.name}</p>
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="font-mono text-xs text-muted-foreground">{identity.code}</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{identity.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
                           {identity.productName} / {identity.brand}
                         </p>
                       </div>

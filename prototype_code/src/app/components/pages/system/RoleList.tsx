@@ -185,7 +185,7 @@ export function RoleList() {
     {
       header: "启用状态",
       accessor: (row: Role) => (
-        <span className={`rounded px-2 py-1 text-xs ${row.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+        <span className={`rounded px-2 py-1 text-xs ${row.enabled ? "bg-green-100 text-green-700" : "bg-accent text-foreground"}`}>
           {row.enabled ? "已启用" : "已停用"}
         </span>
       ),
@@ -222,7 +222,7 @@ export function RoleList() {
             type="button"
             onClick={() => toggleMutation.mutate(row)}
             disabled={toggleMutation.isPending}
-            className="rounded-md border border-orange-200 px-2.5 py-1.5 text-xs text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:text-gray-400"
+            className="rounded-md border border-orange-200 px-2.5 py-1.5 text-xs text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:text-muted-foreground"
           >
             {row.enabled ? "停用" : "启用"}
           </button>
@@ -230,7 +230,7 @@ export function RoleList() {
             type="button"
             onClick={() => handleDelete(row)}
             disabled={deleteMutation.isPending}
-            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-400"
+            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-muted-foreground"
           >
             <Trash2 className="h-3.5 w-3.5" />
             删除
@@ -244,8 +244,8 @@ export function RoleList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">角色管理</h1>
-          <p className="mt-1 text-sm text-gray-500">角色数据来自后端 API，支持 CRUD、启停和用户绑定。</p>
+          <h1 className="text-2xl text-foreground">角色管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">角色数据来自后端 API，支持 CRUD、启停和用户绑定。</p>
         </div>
         <button
           type="button"
@@ -257,9 +257,9 @@ export function RoleList() {
         </button>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <label className="flex max-w-md items-center gap-2 text-sm text-gray-700">
-          <Search className="h-5 w-5 text-gray-400" />
+      <div className="rounded-lg border border-border bg-card p-4">
+        <label className="flex max-w-md items-center gap-2 text-sm text-foreground">
+          <Search className="h-5 w-5 text-muted-foreground" />
           <input
             type="text"
             placeholder="搜索角色名称、代码或描述..."
@@ -296,7 +296,7 @@ export function RoleList() {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               取消
             </button>
@@ -304,7 +304,7 @@ export function RoleList() {
               type="button"
               onClick={handleSubmit}
               disabled={saveMutation.isPending || !form.name.trim() || !form.code.trim()}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? "保存中..." : "保存"}
             </button>
@@ -312,39 +312,39 @@ export function RoleList() {
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>角色名称</span>
             <input
               type="text"
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>角色代码</span>
             <input
               type="text"
               value={form.code}
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700 md:col-span-2">
+          <label className="flex flex-col gap-1 text-sm text-foreground md:col-span-2">
             <span>描述</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
               checked={form.enabled}
               onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-              className="h-4 w-4 rounded border-gray-300"
+              className="h-4 w-4 rounded border-border"
             />
             启用角色
           </label>
@@ -363,7 +363,7 @@ export function RoleList() {
         size="lg"
       >
         <div className="flex flex-col gap-5">
-          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
             当前角色用户数会在添加或移除后同步刷新。
           </div>
           <ApiState
@@ -379,7 +379,7 @@ export function RoleList() {
               <select
                 value={selectedUserId}
                 onChange={(event) => setSelectedUserId(event.target.value)}
-                className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="flex-1 rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">选择可绑定用户</option>
                 {availableUsers.map((user: User) => (
@@ -392,31 +392,31 @@ export function RoleList() {
                 type="button"
                 onClick={addSelectedUser}
                 disabled={!selectedUserId || addUserMutation.isPending}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
               >
                 添加
               </button>
             </div>
 
-            <div className="rounded-lg border border-gray-200">
-              <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700">
+            <div className="rounded-lg border border-border">
+              <div className="border-b border-border bg-muted/40 px-4 py-3 text-sm font-medium text-foreground">
                 已绑定用户
               </div>
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y divide-border">
                 {boundUsers.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-sm text-gray-500">暂无已绑定用户</p>
+                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">暂无已绑定用户</p>
                 ) : (
                   boundUsers.map((user) => (
                     <div key={user.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                       <div>
-                        <p className="font-medium text-gray-900">{user.display_name}</p>
-                        <p className="text-gray-500">{user.username} / {user.department || "未设置部门"}</p>
+                        <p className="font-medium text-foreground">{user.display_name}</p>
+                        <p className="text-muted-foreground">{user.username} / {user.department || "未设置部门"}</p>
                       </div>
                       <button
                         type="button"
                         onClick={() => removeBoundUser(user)}
                         disabled={removeUserMutation.isPending}
-                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-muted-foreground"
                       >
                         移除
                       </button>

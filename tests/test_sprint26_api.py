@@ -147,7 +147,7 @@ class Sprint26CodeRuleApiTest(unittest.TestCase):
         self.assertEqual(current.status_code, 200, current.text)
         self.assertEqual(current.json()["id"], activated.json()["id"])
 
-    def test_regular_user_can_read_libraries_but_not_create_rule_versions(self):
+    def test_regular_user_can_read_endpoint_but_not_unassigned_libraries_or_create_rule_versions(self):
         library = self.create_auto_library("REG")
         login = client.post("/api/v1/auth/login", json={"username": "regular_user"})
         self.assertEqual(login.status_code, 200, login.text)
@@ -155,7 +155,7 @@ class Sprint26CodeRuleApiTest(unittest.TestCase):
 
         listed = client.get("/api/v1/material-libraries", headers={"X-Username": "regular_user"})
         self.assertEqual(listed.status_code, 200, listed.text)
-        self.assertTrue(any(item["id"] == library["id"] for item in listed.json()))
+        self.assertFalse(any(item["id"] == library["id"] for item in listed.json()))
 
         forbidden = client.post(
             f"/api/v1/material-libraries/{library['id']}/code-rules/versions",

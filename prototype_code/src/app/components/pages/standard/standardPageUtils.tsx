@@ -22,7 +22,7 @@ export function DisabledBackendButton({ children, icon, compact = false }: Disab
         disabled
         aria-label={`${String(children)} ${BACKEND_NOT_IMPLEMENTED}`}
         title={BACKEND_NOT_IMPLEMENTED}
-        className={`inline-flex cursor-not-allowed items-center gap-2 rounded-md border border-gray-200 bg-gray-100 text-gray-400 opacity-80 ${spacing}`}
+        className={`inline-flex cursor-not-allowed items-center gap-2 rounded-md border border-border bg-accent text-muted-foreground opacity-80 ${spacing}`}
       >
         {icon}
         {children}
@@ -44,7 +44,7 @@ export function SearchPanel({
   placeholder: string;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <label className="sr-only" htmlFor="standard-search">
         搜索
       </label>
@@ -54,7 +54,7 @@ export function SearchPanel({
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
       />
     </div>
   );

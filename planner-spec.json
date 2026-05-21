@@ -56,7 +56,15 @@
     },
     "spacing": {
       "unit": "4px",
-      "scale": ["4px", "8px", "12px", "16px", "24px", "32px", "48px"],
+      "scale": [
+        "4px",
+        "8px",
+        "12px",
+        "16px",
+        "24px",
+        "32px",
+        "48px"
+      ],
       "component_padding": "16px",
       "card_margin": "16px",
       "section_gap": "24px"
@@ -81,13 +89,15 @@
     "llm": "统一模型网关 - DashScope(Qwen3-Max) / Azure OpenAI / 本地vLLM / Ollama, OpenAI兼容格式",
     "embedding": "text-embedding-3-small (OpenAI) 或本地 BGE 模型, 维度 256/768 可选",
     "deployment": "Docker Compose (私有化) / 阿里云 OSS (SaaS) + Nginx负载均衡",
-    "observability": "AITracer自研链路追踪框架 (tracer.spans表) + structlog JSON日志 -> ELK"
+    "observability": "AITracer自研链路追踪框架 (tracer.spans衡) + structlog JSON日志 -> ELK"
   },
   "verification": {
     "mode": "browser",
     "base_url": "http://localhost:5173",
     "command": "npx playwright test",
-    "tools_required": ["Playwright MCP or npx playwright"],
+    "tools_required": [
+      "Playwright MCP or npx playwright"
+    ],
     "test_scope": "E2E browser tests covering CRUD flows, AI trigger points, and approval workflows"
   },
   "features": [
@@ -109,7 +119,7 @@
       "id": "F03",
       "name": "Product Name Management",
       "module": "standard_management",
-      "description": "CRUD for product names with auto-generated codes. Fields: name, unit, aliases, definition, description examples, up to 3 example images. Strongly bound to category and attributes.",
+      "description": "CRUD for product names with auto-generated codes. Fields: name, unit, aliases, definition, description examples, up to 3 example images. Strongly bound to category and attributes. Extended with PM-prefixed product name codes (PM + 8-digit sequential counter, no reuse) and status column (active/inactive) with soft delete support.",
       "priority": "P0"
     },
     {
@@ -130,7 +140,7 @@
       "id": "F06",
       "name": "Material Library Management",
       "module": "material_management",
-      "description": "Top-level material container CRUD (super admin only). Fields: name, auto-generated code, description, optional library admin. Deletion only allowed when empty.",
+      "description": "Top-level material container CRUD (super admin only). Fields: name, auto-generated code, description, optional library admin. Deletion only allowed when empty. Extended with single admin assignment and category library association.",
       "priority": "P0"
     },
     {
@@ -193,7 +203,7 @@
       "id": "F15",
       "name": "Role and Permission Management",
       "module": "system_admin",
-      "description": "Role CRUD with enable/disable. Role-user binding. Feature permission configuration: directory/button/API-level access control covering material archives, attribute management, material library modules.",
+      "description": "Role CRUD with enable/disable. Role-user binding. Feature permission configuration: directory/button/API-level access control covering material archives, attribute management, material library modules. Extended with auto-generated role codes in ROLE_### format (sequential, non-reusable).",
       "priority": "P0"
     },
     {
@@ -250,6 +260,62 @@
       "name": "Material Library Code Rule Management (Frontend)",
       "module": "material_management",
       "description": "Frontend pages for material library-level code rule management. New material library creation page with code rule configuration wizard (segment builder with fixed text, category path, attribute codes, date, serial number segments), live preview showing generated example codes, and serial number strategy settings. Material library detail tabs: current code rule view, version history list with status (draft, active, deprecated), edit rule form generating new version with change reason, recode preview table (old code, new code, status, error reason), recode execution confirmation, code mapping history list with filters, batch rollback UI with risk warnings, and Excel export for code mappings. zh-CN/en-US i18n throughout.",
+      "priority": "P0"
+    },
+    {
+      "id": "F24",
+      "name": "Category Management Tree View and Bulk Import",
+      "module": "standard_management",
+      "description": "Hierarchical tree display for categories with expand/collapse navigation across three levels (一级类目/二级类目/三级类目). Bulk import with downloadable CSV template (columns: 一级类目, 二级类目, 三级类目). AI one-click import via popup input dialog (10+ lines visible, scrollable, auto-focus at cursor). Backend batch import processing with validation, duplicate detection, and rollback support. Frontend tree visualization using Ant Design Tree component with search, filter, and inline edit capabilities.",
+      "priority": "P0"
+    },
+    {
+      "id": "F25",
+      "name": "Backend Category Recognition Agent",
+      "module": "ai_infrastructure",
+      "description": "Simple async workflow that calls AsyncOpenAI with configurable model (default: qwen3.6-plus) to recognize categories from unstructured natural language input. Parses free-form text describing product categories and maps them to the existing category hierarchy (一级/二级/三级). Returns structured category path with confidence scores. Integrates with the existing LLM gateway for provider/model selection. Supports both single-input and batch recognition modes.",
+      "priority": "P0"
+    },
+    {
+      "id": "F26",
+      "name": "AI Agent Configuration",
+      "module": "ai_infrastructure",
+      "description": "Unified AI agent configuration interface in the AI Management section. Configure AI provider (Qwen/千问, DeepSeek, Moonshot/月之暗面, etc.), model selection via dropdown with manual input fallback, and API key management with masked display. Settings apply system-wide to all AI features (category recognition, material analysis, attribute recommendation, etc.). Provider presets with sensible defaults for common providers. Model capability hints and compatibility warnings.",
+      "priority": "P0"
+    },
+    {
+      "id": "F27",
+      "name": "Role Code Auto-Generation",
+      "module": "system_admin",
+      "description": "When creating a new role, automatically generate a role code in format ROLE_### (e.g., ROLE_001, ROLE_002). The counter increments sequentially from the highest existing role code number. Deleted role codes are not reused. Backend auto-generation logic on role creation; frontend displays the auto-generated code as read-only field.",
+      "priority": "P0"
+    },
+    {
+      "id": "F28",
+      "name": "Material Library Admin Single-Select and Category Library Association",
+      "module": "material_management",
+      "description": "Material library management extended with two new fields: (1) material_library_admin_id -- a single-select foreign key to the role table, restricting the library to exactly one admin role; (2) category_library_id -- a single-select foreign key to the category library table, linking each material library to exactly one category library. Backend schema changes, CRUD API updates, and frontend form integration with single-select dropdown components.",
+      "priority": "P0"
+    },
+    {
+      "id": "F29",
+      "name": "Material Library Permission Isolation",
+      "module": "material_management",
+      "description": "Material library admins can only view and manage material libraries and materials that they are assigned as admin for. Backend API filtering enforces that GET /api/v1/material-libraries and GET /api/v1/materials queries are automatically scoped to the logged-in user's admin libraries. Super admins can see all libraries. Frontend sidebar, navigation, and list pages reflect only accessible libraries.",
+      "priority": "P0"
+    },
+    {
+      "id": "F30",
+      "name": "Category Management UI Layout Refactor",
+      "module": "standard_management",
+      "description": "Refactor the category management frontend page layout to match the existing material management page layout style. Use the same structural patterns: page header with title and action buttons, DataTable with consistent column styling, create/edit forms in modal dialogs, search/filter bar, pagination, empty state, and dark-theme CSS variable utilities. Apply to the category list page and any create/edit category dialogs.",
+      "priority": "P0"
+    },
+    {
+      "id": "F31",
+      "name": "Product Name Code and Status Management",
+      "module": "standard_management",
+      "description": "Extend product name management with: (1) PM-prefixed product name code in format PM######## (8-digit zero-padded sequential counter, e.g., PM00000001), auto-generated on creation, never recycled; (2) status column with values active/inactive; (3) status toggle edit allowing users to switch between active and inactive; (4) soft delete that deactivates the product name without removing the record (sets status to inactive, code preserved). Backend: extend product_name model with code (unique, non-null) and status fields; add sequence counter; add PATCH toggle and soft-delete endpoints. Frontend: add code column (read-only, auto-displayed), add status switch, connect to toggle and delete APIs.",
       "priority": "P0"
     }
   ],
@@ -366,7 +432,7 @@
       "id": 11,
       "title": "System Configuration and Audit Logging",
       "features": [
-        "F16-System configuration (system info, reason options, approval mode)",
+        "F16-System system_info (name, icon)",
         "F20-Operational audit log (backend + frontend list view)",
         "F20-Before/after value diff view",
         "Excel export for compliance audit",
@@ -576,6 +642,206 @@
         "F23-Code mapping export: full-featured export with date range filter, batch filter, old_code/new_code search, and format selection (CSV/Excel)",
         "F23-i18n complete coverage: zh-CN and en-US for every label, button, message, table header, validation error, status badge, and empty state in all code rule and recode pages",
         "F23-Responsive layout and mobile-friendly considerations for list views"
+      ]
+    },
+    {
+      "id": 33,
+      "title": "Global Dark Theme Adaptation for Feature Pages",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Replace hardcoded light-theme Tailwind gray/white classes in functional TSX pages with the existing CSS variable utilities used by TraceDebugPage, including bg-background, bg-card, bg-muted, bg-accent, text-foreground, text-muted-foreground, border-border, and ring-ring where appropriate.",
+        "Cover Standard Management pages: category library, category, product name, attribute, and brand pages.",
+        "Cover Material Management pages: material library and materials pages.",
+        "Cover Application Workflow pages: category application, material code application, stop purchase application, and stop use application pages.",
+        "Cover System Administration pages: users, roles, permissions, system info, reason options, and approval mode pages.",
+        "Cover AI Management pages: providers, capability mappings, and token usage pages.",
+        "Cover Rule Engine pages: rule categories and rule list/create/edit pages.",
+        "Do not change API behavior, routing, data fetching, permissions, form logic, or the already-completed TraceDebugPage and MainLayout dark-theme implementation."
+      ]
+    },
+    {
+      "id": 34,
+      "title": "Permission Config UI: Chinese Operation Labels",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Replace raw API path + HTTP method display in PermissionConfig.tsx with Chinese operation labels (view/create/update/delete)",
+        "Add i18n permission label translations in i18n.ts for zh-CN and en-US",
+        "Catalog names follow the current i18n language setting (zh-CN show Chinese, en-US show English)",
+        "Do not change backend API behavior or permission logic"
+      ]
+    },
+    {
+      "id": 35,
+      "title": "Category Library and Category CRUD APIs",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Implement backend CRUD APIs for category libraries: GET/POST /api/v1/category-libraries, GET/PUT/DELETE /api/v1/category-libraries/{id}.",
+        "Implement backend create/update/delete APIs for categories: POST /api/v1/categories, PUT /api/v1/categories/{id}, DELETE /api/v1/categories/{id}; keep existing GET /api/v1/categories behavior compatible.",
+        "Register the new category library and category write APIs in PERMISSION_CATALOG with list/create/update/delete operation mappings.",
+        "Connect CategoryLibraryList.tsx to the category library APIs with DataTable listing, create/edit dialogs, delete confirmation, empty state, and success/error feedback.",
+        "Connect CategoryList.tsx to the category create/update/delete APIs with category library selection through category_library_id.",
+        "Add zh-CN and en-US i18n keys for category library and category CRUD labels, validation, errors, and operation feedback.",
+        "Create or adjust database initialization/migration only if the CategoryLibrary or Category persistence model is missing required fields.",
+        "Keep out of scope: frontend tree visualization, category-material association logic, and fine-grained permission enforcement beyond existing logged-in access."
+      ]
+    },
+    {
+      "id": 36,
+      "title": "Category Management Tree View and Bulk Import (Frontend + Backend)",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F24-Backend bulk import API: POST /api/v1/categories/bulk-import accepting CSV file or JSON array of {一级类目, 二级类目, 三级类目} entries; validates hierarchy (一级 required, 二级/三级 optional), detects duplicates, creates missing categories, returns structured result with success count, skipped count, and error list",
+        "F24-Downloadable CSV template: GET /api/v1/categories/template returns a CSV file with headers 一级类目, 二级类目, 三级类目 and 3 example rows",
+        "F24-Frontend tree display: Ant Design Tree component showing category hierarchy with expand/collapse, lazy loading for large trees, inline search filter, and selection for category selection workflows",
+        "F24-Frontend bulk import page: upload CSV dialog with drag-and-drop zone, column preview table, validation results before confirm, and batch execute with progress indicator",
+        "F24-AI one-click import: popup dialog with large textarea (10+ lines visible, scrollable), auto-focus on cursor, placeholder text with usage hints, send button that calls the Category Recognition Agent backend",
+        "F24-AI import result handling: parse agent response, show structured preview with recognized categories in tree format, allow user to edit/confirm before batch creation",
+        "F24-zh-CN and en-US i18n for all labels, button text, validation messages, and empty states",
+        "F24-Super admin only for bulk import and AI import; regular users have read-only tree view access"
+      ]
+    },
+    {
+      "id": 37,
+      "title": "Backend Category Recognition Agent",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl/httpx against /api/v1/ai/category-recognition endpoints"
+      },
+      "features": [
+        "F25-Sync endpoint: POST /api/v1/ai/category-recognition/recognize accepting a JSON body with {text: string, category_library_id?: number}; returns {categories: [{level1, level2?, level3?, confidence}], suggestions: string[]}",
+        "F25-Async endpoint: POST /api/v1/ai/category-recognition/recognize-async accepting same body; returns batch job id; client polls GET /api/v1/ai/category-recognition/jobs/:id for result",
+        "F25-Batch endpoint: POST /api/v1/ai/category-recognition/batch recognizing up to 100 text entries in a single call; returns array of results with job_id for tracking",
+        "F25-AsyncOpenAI integration: calls the configured AI provider with system prompt instructing the model to parse natural language product descriptions and map them to the existing category hierarchy; uses capability: category_recognition from the LLM gateway",
+        "F25-Configurable model: reads from ai_agent_config table (provider, model_name, api_key, base_url); falls back to qwen3.6-plus as default; supports override via request parameter",
+        "F25-System prompt engineering: model receives category hierarchy context (up to 50 top-level categories with their subcategories), examples of correct mappings, and instructions to return structured JSON",
+        "F25-Response parsing: robust JSON extraction from LLM response with fallback to regex parsing; returns confidence score (0.0-1.0) per category; handles ambiguous input by returning multiple candidate paths",
+        "F25-Error handling: timeout after 30s, retry once on 5xx, return structured error with fallback suggestions; log all calls to AITracer",
+        "F25-Pydantic v2 schemas: CategoryRecognitionRequest, CategoryRecognitionResponse, CategoryRecognitionBatchRequest, CategoryRecognitionJob, CategoryRecognitionJobResult"
+      ]
+    },
+    {
+      "id": 38,
+      "title": "AI Agent Configuration in AI Management",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F26-Backend data model: ai_agent_config table (id, config_key, provider, model_name, base_url, api_key_encrypted, temperature, max_tokens, timeout, enabled, created_at, updated_at); supports multiple named configs for different agent roles",
+        "F26-Backend API: GET/POST/PUT/DELETE /api/v1/ai/agent-configs; PATCH /api/v1/ai/agent-configs/:id/toggle; GET /api/v1/ai/agent-configs/:id/test for connection test",
+        "F26-Frontend AI Agent Configuration page under AI Management navigation: list of agent configurations with name, provider badge, model, enabled status, last test time",
+        "F26-Provider presets: dropdown selector with built-in presets for Qwen (千问/DashScope), DeepSeek, Moonshot (月之暗面/Kimi), OpenAI, and custom; selecting a preset auto-fills base_url and displays model recommendations",
+        "F26-Model selection: dropdown with common models per provider (qwen-max, qwen-plus, qwen-turbo for DashScope; deepseek-chat, deepseek-reasoner for DeepSeek; moonshot-v1-8k, moonshot-v1-32k for Moonshot), plus manual input option for custom model names",
+        "F26-API key input: password-type input with masked display by default; show/hide toggle; connection test on save validates the key against the provider endpoint",
+        "F26-Advanced settings: temperature slider (0-2), max_tokens input (1-32000), timeout input (5-120s)",
+        "F26-System-wide application: AI Agent Configuration drives all AI features including category recognition (F25), material analysis, attribute recommendation, and any future LLM-powered features; capability-to-agent-config mapping in the configuration",
+        "F26-Zh-CN and en-US i18n for all labels, provider names, model names, validation messages, and status text",
+        "F26-Super admin only; non-super_admin users see read-only view"
+      ]
+    },
+    {
+      "id": 39,
+      "title": "Backend: Role Code Auto-Generation, Material Library Admin Single-Select, and Category Library Association",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl/httpx against /api/v1/roles and /api/v1/material-libraries endpoints"
+      },
+      "features": [
+        "F27-Backend role code sequence table: role_code_sequence (id, current_value, updated_at); initialized with the highest existing role code number; concurrency-safe with row-level lock on sequence reads",
+        "F27-Role code auto-generation: on role creation, fetch and increment current_value from role_code_sequence with FOR UPDATE; format as ROLE_### (zero-padded to 3 digits, supports overflow to 4+ digits); return generated code in role creation response",
+        "F27-Backend role CRUD update: POST /api/v1/roles accepts optional role_code (ignored, auto-generated); role code displayed as read-only in role list/detail responses",
+        "F28-Extend material_library model: add material_library_admin_id (nullable FK to role, single admin), add category_library_id (nullable FK to category_library); update database migration for both fields",
+        "F28-Extend material_library API: POST /api/v1/material-libraries accepts material_library_admin_id and category_library_id in body; PUT /api/v1/material-libraries/:id updates both fields; GET /api/v1/material-libraries returns admin role name and category library name in response",
+        "F28-Frontend form update: 新建物料库 dialog includes single-select dropdown for 物料库管理员 (searchable role select, one selection only) and single-select dropdown for 关联类目库 (category library select, one selection only); edit form loads existing associations",
+        "F28-Frontend list display: material library list adds admin and category library name columns; detail view shows linked admin role and category library",
+        "F28-zh-CN and en-US i18n for new form labels, column headers, validation messages, and empty option text",
+        "F27-F28-Audit logging: all role code generation and library association changes logged to audit_log with before/after values"
+      ]
+    },
+    {
+      "id": 40,
+      "title": "Product Name PM Code Generation and Status Management (Frontend + Backend)",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F31-Backend model extension: extend product_name table with product_name_code (VARCHAR(12), unique, non-null, immutable after creation) and status (VARCHAR(20), default 'active', values: active/inactive); add product_name_code_sequence table (id, current_value, updated_at) initialized to highest existing counter",
+        "F31-Backend code generation: on product name creation, fetch and increment product_name_code_sequence with FOR UPDATE; format as PM######## (8-digit zero-padded, e.g., PM00000001); code is immutable after creation",
+        "F31-Backend API updates: POST /api/v1/product-names auto-assigns PM code; GET /api/v1/product-names includes code and status in list and detail responses; GET /api/v1/product-names/:id includes code and status",
+        "F31-Backend PATCH /api/v1/product-names/:id/status: toggle status between active and inactive; requires active product name for status=active transition",
+        "F31-Backend DELETE /api/v1/product-names/:id: soft delete (sets status to inactive); actual record preserved; hard delete blocked; audit_log entry for deactivation",
+        "F31-Frontend: product name list DataTable adds product_name_code column (read-only, displayed with mono font) and status column (badge with active=green, inactive=gray); code column is first or second column",
+        "F31-Frontend: create product name dialog shows auto-generated PM code as read-only text (not editable by user); form still accepts name, unit, category, attributes, etc.",
+        "F31-Frontend: status toggle in list row actions or inline switch that calls PATCH /api/v1/product-names/:id/status; confirmation dialog for deactivating (switching to inactive); toast feedback on success/failure",
+        "F31-Frontend: delete action in row actions calls soft delete endpoint; confirmation dialog with product name name; row removed from list on success",
+        "F31-Frontend: filter by status in product name list (all/active/inactive tabs or dropdown); inactive product names are hidden by default with option to show",
+        "F31-zh-CN and en-US i18n for code column header (品名编码), status labels (启用/禁用, active/inactive), toggle confirm messages, and soft delete confirmation",
+        "F31-Extend existing product name create/edit pages to include code display and status management without changing other business logic"
+      ]
+    },
+    {
+      "id": 41,
+      "title": "Category Management UI Layout Refactor to Material Management Style",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F30-Refactor category list page: adopt the same page structure as the material management list page -- top page header with 模块名称 (类目管理) and 新建类目 action button, followed by search/filter bar, then DataTable, then pagination, consistent with material management patterns",
+        "F30-Replace current category form with modal dialogs matching material management dialogs: use the same Dialog or Modal component, same field layout, same validation, same submit/cancel button structure, same overlay brightness",
+        "F30-Apply dark-theme CSS variable utilities (bg-background, bg-card, text-foreground, border-border, etc.) to category pages consistent with other feature pages",
+        "F30-Consistent column styling: category table columns use the same header styling, row hover effects, and cell padding as material management table",
+        "F30-Consistent empty state: match the empty state design (icon, message, action button) used in material management and other standard management pages",
+        "F30-Consistent search/filter bar: use the same search input component and filter dropdown styling as material management page",
+        "F30-Consistent pagination: use the same pagination component and styling as material management page",
+        "F30-Ensure category creation/editing UX flow matches material creation/editing flow: open dialog, fill form, submit, show loading state, show success toast, refresh list",
+        "F30-zh-CN and en-US i18n: ensure all labels, placeholders, button text, validation messages, and empty states are consistent with the rest of the UI",
+        "F30-Do not change backend APIs, routing logic, permission checks, or data fetching behavior -- only refactor frontend layout and component patterns"
+      ]
+    },
+    {
+      "id": 42,
+      "title": "Material Library Permission Isolation (Backend + Frontend)",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F29-Backend API filtering: GET /api/v1/material-libraries automatically filters results to only libraries where the current user has admin role (material_library_admin_id matches a role assigned to the user); super_admin users bypass filter and see all libraries",
+        "F29-Backend material list filtering: GET /api/v1/materials automatically filters results to only materials in libraries where the current user has admin role; super_admin bypass",
+        "F29-Backend material detail/detail APIs: verify the material's library is accessible to the current user before returning data; return 403 if inaccessible",
+        "F29-Backend create/update constraints: POST/PUT /api/v1/materials and POST/PUT /api/v1/material-libraries verify the user has admin rights to the target library; non-admins cannot create materials in libraries they do not administer",
+        "F29-Frontend sidebar filtering: when rendering the material library navigation entries, show only libraries accessible to the current user (matching backend filter); super_admin sees all entries with a visual indicator",
+        "F29-Frontend material library list: the material library list page shows only accessible libraries; non-admin users see a filtered list with no indication that other libraries exist",
+        "F29-Frontend material list: material list pages filter by the accessible libraries; if user has no admin role for any library, show empty state with appropriate message",
+        "F29-Frontend create material flow: when creating a new material, the library selection dropdown shows only accessible libraries; user cannot see or select inaccessible libraries",
+        "F29-Frontend permission indicators: in list views, show a badge or icon indicating the user's relationship to the library (admin / read-only / no access) if applicable",
+        "F29-zh-CN and en-US i18n for empty state messages explaining why a user sees no libraries, access denied messages, and library access role labels",
+        "F29-Remove any hardcoded library references or demo data that bypass the permission filter",
+        "F29-Frontend test coverage: Playwright tests verifying that a non-super_admin user sees only their assigned library/libraries and cannot access other libraries' data"
       ]
     }
   ]

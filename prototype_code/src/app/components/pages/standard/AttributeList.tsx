@@ -210,8 +210,8 @@ export function AttributeList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">属性管理</h1>
-          <p className="mt-1 text-sm text-gray-500">属性数据来自后端 API，支持新增、编辑、删除和变更日志查看。</p>
+          <h1 className="text-2xl text-foreground">属性管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">属性数据来自后端 API，支持新增、编辑、删除和变更日志查看。</p>
         </div>
         <button
           type="button"
@@ -236,10 +236,10 @@ export function AttributeList() {
       </ApiState>
 
       {openChangeAttribute && (
-        <section className="rounded-lg border border-gray-200 bg-white p-5">
+        <section className="rounded-lg border border-border bg-card p-5">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-medium text-gray-900">变更日志：{openChangeAttribute.name}</h2>
-            <button type="button" onClick={() => setOpenChangeAttribute(null)} className="text-sm text-gray-500 hover:text-gray-700">
+            <h2 className="text-base font-medium text-foreground">变更日志：{openChangeAttribute.name}</h2>
+            <button type="button" onClick={() => setOpenChangeAttribute(null)} className="text-sm text-muted-foreground hover:text-foreground">
               收起
             </button>
           </div>
@@ -254,11 +254,11 @@ export function AttributeList() {
               {(changesQuery.data ?? []).map((change) => (
                 <li key={change.id} className="relative">
                   <span className="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-white bg-blue-600" />
-                  <div className="rounded-md bg-gray-50 p-3">
-                    <p className="text-sm font-medium text-gray-900">
+                  <div className="rounded-md bg-muted/40 p-3">
+                    <p className="text-sm font-medium text-foreground">
                       v{change.version} {change.changed_fields.join("、")}
                     </p>
-                    <p className="mt-1 text-xs text-gray-500">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {change.operator} · {change.created_at}
                     </p>
                   </div>
@@ -279,7 +279,7 @@ export function AttributeList() {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               取消
             </button>
@@ -287,7 +287,7 @@ export function AttributeList() {
               type="button"
               onClick={handleSubmit}
               disabled={!form.name.trim() || saveMutation.isPending}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? "保存中..." : "保存"}
             </button>
@@ -295,21 +295,21 @@ export function AttributeList() {
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>属性名称</span>
             <input
               type="text"
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>属性类型</span>
             <select
               value={form.data_type}
               onChange={(event) => setForm((current) => ({ ...current, data_type: event.target.value }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               {ATTRIBUTE_TYPES.map((type) => (
                 <option key={type} value={type}>
@@ -318,41 +318,41 @@ export function AttributeList() {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
               checked={form.required}
               onChange={(event) => setForm((current) => ({ ...current, required: event.target.checked }))}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+              className="h-4 w-4 rounded border-border text-blue-600"
             />
             是否必填
           </label>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>默认值</span>
             <input
               type="text"
               value={form.default_value}
               onChange={(event) => setForm((current) => ({ ...current, default_value: event.target.value }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+          <label className="space-y-1 text-sm text-foreground md:col-span-2">
             <span>选项</span>
             <textarea
               value={form.optionsText}
               onChange={(event) => setForm((current) => ({ ...current, optionsText: event.target.value }))}
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               placeholder="每行一个选项，或用逗号分隔"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+          <label className="space-y-1 text-sm text-foreground md:col-span-2">
             <span>提示文本</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           {saveMutation.isError && (

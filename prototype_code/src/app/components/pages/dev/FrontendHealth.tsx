@@ -96,8 +96,8 @@ export function FrontendHealth() {
     <section className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-2xl font-semibold text-gray-900">Frontend Health</h3>
-          <p className="mt-1 text-sm text-gray-500">Sprint 13 infrastructure checks</p>
+          <h3 className="text-2xl font-semibold text-foreground">Frontend Health</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Sprint 13 infrastructure checks</p>
         </div>
         <Button onClick={runProxyHealthCheck} disabled={proxyState === "checking"}>
           {proxyState === "checking" ? "Checking proxy" : "Run proxy health check"}
@@ -127,16 +127,16 @@ export function FrontendHealth() {
         </TableBody>
       </Table>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={proxyResult?.ok ? "default" : "secondary"}>
             Proxy {proxyState}
           </Badge>
-          <span className="text-sm text-gray-700">Request URL: /api/v1/product-names</span>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-foreground">Request URL: /api/v1/product-names</span>
+          <span className="text-sm text-foreground">
             HTTP status: {proxyResult ? proxyResult.status : "not checked"}
           </span>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-foreground">
             JSON array: {Array.isArray(proxyResult?.data) ? "yes" : "not checked"}
           </span>
         </div>

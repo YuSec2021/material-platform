@@ -194,7 +194,7 @@ export function UserList() {
               onClick={() => openEditForm(row)}
               disabled={!local}
               title={local ? "编辑本地用户" : "HCM 用户不可编辑"}
-              className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+              className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
             >
               <Edit className="h-3.5 w-3.5" />
               编辑
@@ -204,7 +204,7 @@ export function UserList() {
               onClick={() => handleResetPassword(row)}
               disabled={!local || resetMutation.isPending}
               title={local ? "重置本地密码" : "HCM 用户不可重置密码"}
-              className="inline-flex items-center gap-1 rounded-md border border-orange-200 px-2.5 py-1.5 text-xs text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+              className="inline-flex items-center gap-1 rounded-md border border-orange-200 px-2.5 py-1.5 text-xs text-orange-700 hover:bg-orange-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
             >
               <KeyRound className="h-3.5 w-3.5" />
               重置密码
@@ -214,7 +214,7 @@ export function UserList() {
               onClick={() => handleDelete(row)}
               disabled={!local || deleteMutation.isPending}
               title={local ? "删除本地用户" : "HCM 用户不可删除"}
-              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
             >
               <Trash2 className="h-3.5 w-3.5" />
               删除
@@ -229,8 +229,8 @@ export function UserList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">用户管理</h1>
-          <p className="mt-1 text-sm text-gray-500">HCM 用户只读，本地用户支持新增、编辑、重置密码和删除。</p>
+          <h1 className="text-2xl text-foreground">用户管理</h1>
+          <p className="mt-1 text-sm text-muted-foreground">HCM 用户只读，本地用户支持新增、编辑、重置密码和删除。</p>
         </div>
         <button
           type="button"
@@ -242,9 +242,9 @@ export function UserList() {
         </button>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <label className="flex max-w-md items-center gap-2 text-sm text-gray-700">
-          <Search className="h-5 w-5 text-gray-400" />
+      <div className="rounded-lg border border-border bg-card p-4">
+        <label className="flex max-w-md items-center gap-2 text-sm text-foreground">
+          <Search className="h-5 w-5 text-muted-foreground" />
           <input
             type="text"
             placeholder="搜索用户名、姓名、单位、部门或班组..."
@@ -290,7 +290,7 @@ export function UserList() {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               取消
             </button>
@@ -298,7 +298,7 @@ export function UserList() {
               type="button"
               onClick={handleSubmit}
               disabled={saveMutation.isPending || !form.display_name.trim() || (!editingUser && !form.username.trim())}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? "保存中..." : "保存"}
             </button>
@@ -306,67 +306,67 @@ export function UserList() {
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>用户名</span>
             <input
               type="text"
               value={form.username}
               readOnly={Boolean(editingUser)}
               onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 read-only:bg-gray-50 read-only:text-gray-500"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40 read-only:bg-muted/40 read-only:text-muted-foreground"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>姓名</span>
             <input
               type="text"
               value={form.display_name}
               onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>单位</span>
             <input
               type="text"
               value={form.unit}
               onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>部门</span>
             <input
               type="text"
               value={form.department}
               onChange={(event) => setForm((current) => ({ ...current, department: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>班组</span>
             <input
               type="text"
               value={form.team}
               onChange={(event) => setForm((current) => ({ ...current, team: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>邮箱</span>
             <input
               type="email"
               value={form.email}
               onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>状态</span>
             <select
               value={form.status}
               onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="active">active</option>
               <option value="disabled">disabled</option>

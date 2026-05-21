@@ -79,8 +79,8 @@ export function ApiClientHealth() {
     <section className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-2xl font-semibold text-gray-900">API Client Health</h3>
-          <p className="mt-1 text-sm text-gray-500">Sprint 14 auth and typed client checks</p>
+          <h3 className="text-2xl font-semibold text-foreground">API Client Health</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Sprint 14 auth and typed client checks</p>
         </div>
         <Button onClick={runCurrentUserCheck} disabled={currentUserQuery.isFetching}>
           {currentUserQuery.isFetching ? "Checking current user" : "Run current-user check"}
@@ -110,19 +110,19 @@ export function ApiClientHealth() {
         </TableBody>
       </Table>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={currentUserQuery.isSuccess ? "default" : "secondary"}>
             Current user {currentUserQuery.fetchStatus}
           </Badge>
-          <span className="text-sm text-gray-700">Request URL: /api/v1/auth/me</span>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-foreground">Request URL: /api/v1/auth/me</span>
+          <span className="text-sm text-foreground">
             Last client URL: {health.lastRequestUrl ?? "not checked"}
           </span>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-foreground">
             HTTP status: {health.lastResponseStatus ?? "not checked"}
           </span>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-foreground">
             Username: {currentUser?.username ?? "not checked"}
           </span>
         </div>

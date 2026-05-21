@@ -24,15 +24,15 @@ export function DataTable<T extends { id: string | number }>({
   emptyMessage = "暂无数据",
 }: DataTableProps<T>) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200">
+    <div className="bg-card rounded-lg border border-border">
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="bg-muted/40 border-b border-border">
             <tr>
               {columns.map((column, index) => (
                 <th
                   key={index}
-                  className="px-6 py-3 text-left text-xs text-gray-500 uppercase tracking-wider"
+                  className="px-6 py-3 text-left text-xs text-muted-foreground uppercase tracking-wider"
                   style={{ width: column.width }}
                 >
                   {column.header}
@@ -40,18 +40,18 @@ export function DataTable<T extends { id: string | number }>({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-border">
             {data.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={columns.length} className="px-6 py-12 text-center text-muted-foreground">
                   {emptyMessage}
                 </td>
               </tr>
             ) : (
               data.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={row.id} className="hover:bg-muted/40 transition-colors">
                   {columns.map((column, colIndex) => (
-                    <td key={colIndex} className="px-6 py-4 text-sm text-gray-900">
+                    <td key={colIndex} className="px-6 py-4 text-sm text-foreground">
                       {typeof column.accessor === 'function'
                         ? column.accessor(row)
                         : String(row[column.accessor])}
@@ -65,22 +65,22 @@ export function DataTable<T extends { id: string | number }>({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
-          <div className="text-sm text-gray-700">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-border">
+          <div className="text-sm text-foreground">
             第 {currentPage} 页，共 {totalPages} 页
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => onPageChange?.(currentPage - 1)}
               disabled={currentPage === 1}
-              className="px-3 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-1 rounded border border-border text-sm text-foreground hover:bg-muted/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={() => onPageChange?.(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-1 rounded border border-border text-sm text-foreground hover:bg-muted/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ChevronRight className="w-4 h-4" />
             </button>

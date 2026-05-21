@@ -1697,10 +1697,46 @@ class AuthContext:
     display_name: str
     permissions: set[str]
     library_scope_ids: set[int] | None
+    role_ids: set[int]
     is_super_admin: bool = False
 
     def has(self, permission_key: str) -> bool:
         return self.is_super_admin or permission_key in self.permissions
+
+
+NON_SUPER_READ_PERMISSIONS = {
+    "api.GET./api/v1/category-libraries",
+    "api.GET./api/v1/category-libraries/{library_id}",
+    "api.GET./api/v1/categories",
+    "api.GET./api/v1/product-names",
+    "api.GET./api/v1/product-names/{product_name_id}",
+    "api.GET./api/v1/brands",
+    "api.GET./api/v1/attributes",
+    "api.GET./api/v1/material-libraries",
+    "api.GET./api/v1/material-libraries/{library_id}",
+    "api.GET./api/v1/materials",
+    "api.GET./api/v1/materials/{material_id}",
+}
+
+LIBRARY_ADMIN_PERMISSIONS = {
+    "api.POST./api/v1/materials",
+    "api.PUT./api/v1/materials/{material_id}",
+    "api.DELETE./api/v1/materials/{material_id}",
+    "api.PATCH./api/v1/materials/{material_id}/stop-purchase",
+    "api.POST./api/v1/materials/{material_id}/transition",
+    "api.POST./api/v1/materials/governance/preview",
+    "api.POST./api/v1/materials/governance/import",
+    "api.POST./api/v1/materials/ai-add/preview",
+    "api.POST./api/v1/materials/ai-add/confirm",
+    "api.POST./api/v1/materials/match",
+    "api.PUT./api/v1/material-libraries/{library_id}",
+    "button.material_archives.create",
+    "button.material_archives.edit",
+    "button.material_archives.delete",
+    "button.material_archives.approval",
+    "button.material_archives.import",
+    "button.material_library.edit",
+}
 
 
 def permission_catalog_entries(db: Session | None = None) -> list[PermissionEntry]:
@@ -1733,25 +1769,19 @@ def super_admin_auth(db: Session | None = None) -> AuthContext:
         display_name="Seeded Administrator",
         permissions=permissions,
         library_scope_ids=scope_ids,
+        role_ids=set(),
         is_super_admin=True,
     )
 
 
 def regular_user_auth() -> AuthContext:
-    permissions = {
-        "api.GET./api/v1/category-libraries",
-        "api.GET./api/v1/category-libraries/{library_id}",
-        "api.GET./api/v1/categories",
-        "api.GET./api/v1/material-libraries",
-        "api.GET./api/v1/material-libraries/{library_id}",
-        "api.GET./api/v1/materials",
-    }
     return AuthContext(
         user=None,
         username="regular_user",
         display_name="Regular User",
-        permissions=permissions,
-        library_scope_ids=None,
+        permissions=set(NON_SUPER_READ_PERMISSIONS),
+        library_scope_ids=set(),
+        role_ids=set(),
         is_super_admin=False,
     )
 
@@ -1759,27 +1789,38 @@ def regular_user_auth() -> AuthContext:
 def effective_auth_for_user(user: User, db: Session) -> AuthContext:
     if user.status != "active":
         raise HTTPException(status_code=403, detail="User account is disabled")
-    permissions: set[str] = set()
+    permissions: set[str] = set(NON_SUPER_READ_PERMISSIONS) if user.account_ownership == "HCM" else set()
     scope_ids: set[int] = set()
-    has_scope_permissions = False
     enabled_roles = [link.role for link in user.role_links if link.role.enabled]
+    role_ids = {role.id for role in enabled_roles}
     for role in enabled_roles:
         for permission in role.permissions:
             if not permission.enabled:
                 continue
             permissions.add(permission.permission_key)
             if permission.permission_key.startswith("scope.material_library."):
-                has_scope_permissions = True
                 try:
                     scope_ids.add(int(permission.permission_key.rsplit(".", 1)[1]))
                 except ValueError:
                     continue
+    if role_ids:
+        administered_library_ids = {
+            library_id
+            for (library_id,) in db.query(MaterialLibrary.id)
+            .filter(MaterialLibrary.material_library_admin_id.in_(role_ids))
+            .all()
+        }
+        scope_ids.update(administered_library_ids)
+        if administered_library_ids:
+            permissions.update(NON_SUPER_READ_PERMISSIONS)
+            permissions.update(LIBRARY_ADMIN_PERMISSIONS)
     return AuthContext(
         user=user,
         username=user.username,
         display_name=user.display_name,
         permissions=permissions,
-        library_scope_ids=scope_ids if has_scope_permissions else None,
+        library_scope_ids=scope_ids,
+        role_ids=role_ids,
         is_super_admin=False,
     )
 
@@ -1825,7 +1866,7 @@ def require_super_admin(auth: AuthContext) -> None:
 
 
 def is_library_in_scope(auth: AuthContext, library_id: int) -> bool:
-    return auth.is_super_admin or auth.library_scope_ids is None or library_id in auth.library_scope_ids
+    return auth.is_super_admin or library_id in (auth.library_scope_ids or set())
 
 
 def require_library_scope(auth: AuthContext, library_id: int) -> None:
@@ -2390,11 +2431,18 @@ def material_library_association_snapshot(library: MaterialLibrary) -> dict[str,
     }
 
 
-def library_to_out(library: MaterialLibrary, db: Session | None = None) -> MaterialLibraryOut:
+def library_access_role(library: MaterialLibrary, auth: AuthContext | None = None) -> tuple[str, str]:
+    if auth is None or auth.is_super_admin or is_library_in_scope(auth, library.id):
+        return "admin", "Admin"
+    return "no_access", "No access"
+
+
+def library_to_out(library: MaterialLibrary, db: Session | None = None, auth: AuthContext | None = None) -> MaterialLibraryOut:
     active_rule = active_rule_for_library(db, library) if db is not None else None
     material_count = db.query(Material).filter(Material.material_library_id == library.id).count() if db is not None else len(library.materials)
     admin = library.material_library_admin
     category_library = library.category_library
+    access_role, access_role_label = library_access_role(library, auth)
     return MaterialLibraryOut(
         id=library.id,
         code=library.code,
@@ -2412,6 +2460,8 @@ def library_to_out(library: MaterialLibrary, db: Session | None = None) -> Mater
         category_library_id=library.category_library_id,
         category_library_name=category_library.name if category_library else None,
         category_library_code=category_library.code if category_library else None,
+        access_role=access_role,
+        access_role_label=access_role_label,
     )
 
 
@@ -4223,10 +4273,10 @@ def list_material_libraries(
 ) -> list[MaterialLibraryOut]:
     ensure_seed_material_context(db)
     query = db.query(MaterialLibrary)
-    if not auth.is_super_admin and auth.library_scope_ids is not None:
+    if not auth.is_super_admin:
         query = query.filter(MaterialLibrary.id.in_(auth.library_scope_ids or {-1}))
     libraries = query.order_by(MaterialLibrary.id).all()
-    return [library_to_out(library, db) for library in libraries]
+    return [library_to_out(library, db, auth) for library in libraries]
 
 
 @app.post("/api/v1/material-libraries", response_model=MaterialLibraryOut)
@@ -4258,6 +4308,7 @@ def create_material_library(
     )
     db.add(library)
     db.flush()
+    db.query(MaterialCodeRuleVersion).filter(MaterialCodeRuleVersion.library_id == library.id).delete()
     if payload.auto_code_enabled:
         rule_version = create_code_rule_version(db, library, payload.code_rule or {}, "active", auth.username)
         library.current_rule_version_id = rule_version.id
@@ -4275,7 +4326,7 @@ def create_material_library(
     )
     db.commit()
     db.refresh(library)
-    return library_to_out(library, db)
+    return library_to_out(library, db, auth)
 
 
 @app.get("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
@@ -4288,7 +4339,7 @@ def get_material_library(
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
     require_library_scope(auth, library.id)
-    return library_to_out(library, db)
+    return library_to_out(library, db, auth)
 
 
 @app.put("/api/v1/material-libraries/{library_id}", response_model=MaterialLibraryOut)
@@ -4320,6 +4371,8 @@ def update_material_library(
     if "material_library_admin_id" in fields_set or "category_library_id" in fields_set:
         next_admin_id = payload.material_library_admin_id if "material_library_admin_id" in fields_set else library.material_library_admin_id
         next_category_library_id = payload.category_library_id if "category_library_id" in fields_set else library.category_library_id
+        if not auth.is_super_admin and next_admin_id not in auth.role_ids:
+            raise HTTPException(status_code=403, detail="Material library admin role is outside the user's permission scope")
         validate_material_library_associations(db, next_admin_id, next_category_library_id)
         library.material_library_admin_id = next_admin_id
         library.category_library_id = next_category_library_id
@@ -4340,7 +4393,7 @@ def update_material_library(
         )
     db.commit()
     db.refresh(library)
-    return library_to_out(library, db)
+    return library_to_out(library, db, auth)
 
 
 @app.get("/api/v1/material-libraries/{library_id}/code-rules/current", response_model=MaterialCodeRuleVersionOut)
@@ -6436,12 +6489,17 @@ def list_materials(
     search: str = "",
     status: str = "",
     product_name_id: int | None = None,
+    material_library_id: int | None = None,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials")),
 ) -> list[MaterialOut]:
     ensure_seed_material_context(db)
     query = db.query(Material).join(ProductName).join(MaterialLibrary).join(Category)
-    if not auth.is_super_admin and auth.library_scope_ids is not None:
+    if material_library_id:
+        if not is_library_in_scope(auth, material_library_id):
+            return []
+        query = query.filter(Material.material_library_id == material_library_id)
+    elif not auth.is_super_admin:
         query = query.filter(Material.material_library_id.in_(auth.library_scope_ids or {-1}))
     if product_name_id:
         query = query.filter(Material.product_name_id == product_name_id)

@@ -1,10 +1,10 @@
-Project summary: Sprints 12-31 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v10.0.0 (major bump after Sprint 31 complete — major feature done).
+Project summary: Sprints 1-38 PASS. All features complete. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v12.2.0.
 
-Sprint 31: Frontend: Recode Integration and Code Rule Wizard Polish
-Status: SPRINT PASS. Notes: Auto-code preview before save, drag-reorder segment builder, attribute autocomplete + CSV import, serial scope preview, conflict highlighting + force-execute confirm, mapping export with CSV/Excel + filters, complete zh-CN/en-US i18n + 390px responsive.
+Sprint 38: AI Agent Configuration in AI Management
+Status: SPRINT PASS. Notes: AI Agent Config page at /ai/agent-configs with provider presets (Qwen/DeepSeek/Moonshot), model dropdown + manual input, masked API key, advanced settings (temperature/max_tokens/timeout), system-wide via capability mapping, zh-CN/en-US i18n. 6/6 criteria PASS.
 
-Sprint 30: Frontend: Batch Recoding Preview, Execution, and Code Mapping
-Status: SPRINT PASS. Notes: Preview modal with pass/fail rows, guarded execute confirmation, recode records + batch detail tabs, code mapping with search/filters/export, selected-material recode with checkbox selection, per-batch rollback with warning dialog.
+Sprint 37: Backend Category Recognition Agent
+Status: SPRINT PASS. Notes: Sync/async/batch recognition endpoints with AsyncOpenAI via LLM gateway, configurable model, system prompt engineering, robust JSON parsing, retry on 5xx, AITracer logging. 6/6 criteria PASS.
 
-Sprint 29: Frontend: Material Library Detail - Code Rule View, Version Management, and Edit
-Status: SPRINT PASS. Notes: Detail tabs, current rule visualization, version table/detail, edit modal with preview/change reason/effective modes, read-only for regular users, i18n; 3/3 Playwright tests pass.
+Sprint 36: Category Management Tree View and Bulk Import
+Status: SPRINT PASS. Notes: Ant Design Tree hierarchy with expand/collapse/search, bulk CSV import with drag-drop/preview, AI one-click import dialog (10+ lines, auto-focus, editable preview). 7/7 criteria PASS.

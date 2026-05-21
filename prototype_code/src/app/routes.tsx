@@ -8,7 +8,7 @@ import { ApiClientHealth } from "./components/pages/dev/ApiClientHealth";
 import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
 import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
-import { AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
+import { AiAgentConfigsPage, AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
 import { RuleCategoryListPage, RuleFormPage, RuleListPage } from "./components/pages/rules/RuleEnginePages";
 
 // 标准管理
@@ -100,11 +100,14 @@ export const router = createBrowserRouter([
           { path: "system/reason-options", Component: ReasonOptions },
           { path: "system/approval-mode", Component: ApprovalMode },
 
+          { path: "ai/agent-configs", Component: AiAgentConfigsPage },
+
           // AI管理
           {
             path: "ai",
             Component: SuperAdminRoute,
             children: [
+              { path: "agent-configs", Component: AiAgentConfigsPage },
               { path: "providers", Component: AiProvidersPage },
               { path: "capability-mappings", Component: AiCapabilityMappingsPage },
               { path: "token-usage", Component: AiTokenUsagePage },

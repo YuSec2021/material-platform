@@ -1,13 +1,14 @@
 {
   "mode": "contract",
-  "current_sprint": 32,
+  "current_sprint": 42,
   "retry_count": 0,
-  "last_successful_sprint": 31,
+  "last_successful_sprint": 41,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-31-frontend-ui",
+  "active_branch": "codex/sprint-42-material-lib-permission-isolation",
   "base_branch": "main",
-  "last_run_at": "2026-05-18T00:00:00Z",
-  "sprint_origin": "minor_feature",
-  "current_version": "9.2.0"
+  "last_run_at": "2026-05-21T01:05:00Z",
+  "sprint_origin": "major_feature",
+  "current_version": "12.5.0",
+  "quality_retry_count": 0
 }

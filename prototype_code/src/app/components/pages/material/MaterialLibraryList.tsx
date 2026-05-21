@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Edit, Package, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Edit, Package, Plus, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -8,6 +8,7 @@ import {
   type MaterialLibrary,
   type MaterialLibraryPayload,
 } from "@/app/api/client";
+import { useAuth } from "@/app/auth/AuthContext";
 import { Badge } from "@/app/components/ui/badge";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
@@ -100,6 +101,16 @@ function libraryToForm(library: MaterialLibrary): LibraryFormState {
     description: library.description,
     enabled: library.enabled,
   };
+}
+
+function accessLabelKey(library: MaterialLibrary) {
+  if (library.access_role === "no_access") {
+    return "material.accessNoAccess";
+  }
+  if (library.access_role === "read_only") {
+    return "material.accessReadOnly";
+  }
+  return "material.accessAdmin";
 }
 
 function datePreview(format: DateFormat) {
@@ -288,6 +299,7 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
 export function MaterialLibraryList() {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const auth = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<LibraryFormState>(emptyForm);
   const [editingLibrary, setEditingLibrary] = useState<MaterialLibrary | null>(null);
@@ -346,6 +358,7 @@ export function MaterialLibraryList() {
       [item.name, item.code, item.description].some((value) => value.includes(term)),
     );
   }, [query.data, searchTerm]);
+  const emptyLabel = auth.user?.is_super_admin ? t("state.emptyLibraries") : t("material.noAccessibleLibraries");
 
   const updateSegment = (segmentId: string, patch: Partial<CodeRuleSegment>) => {
     setForm((current) => ({
@@ -460,8 +473,8 @@ export function MaterialLibraryList() {
     <div className="flex flex-1 flex-col space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">{t("page.materialLibraries")}</h1>
-          <p className="mt-1 text-sm text-gray-500">{t("page.materialLibrariesHelp")}</p>
+          <h1 className="text-2xl text-foreground">{t("page.materialLibraries")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("page.materialLibrariesHelp")}</p>
         </div>
         <button
           type="button"
@@ -473,9 +486,9 @@ export function MaterialLibraryList() {
         </button>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <label className="flex max-w-md items-center gap-2 text-sm text-gray-600">
-          <Search className="h-5 w-5 text-gray-400" />
+      <div className="rounded-lg border border-border bg-card p-4">
+        <label className="flex max-w-md items-center gap-2 text-sm text-muted-foreground">
+          <Search className="h-5 w-5 text-muted-foreground" />
           <input
             type="search"
             placeholder={t("field.searchLibraries")}
@@ -490,32 +503,36 @@ export function MaterialLibraryList() {
         isLoading={query.isLoading}
         isError={query.isError}
         isEmpty={!query.isLoading && !query.isError && data.length === 0}
-        emptyLabel={t("state.emptyLibraries")}
+        emptyLabel={emptyLabel}
         onRetry={() => void query.refetch()}
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {data.map((item) => (
-            <article key={item.id} className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <article key={item.id} className="rounded-lg border border-border bg-card p-6 shadow-sm">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-100">
                   <Package className="h-6 w-6 text-green-600" />
                 </div>
                 <Badge
                   variant="outline"
-                  className={item.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-gray-50 text-gray-600"}
+                  className={item.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted/40 text-muted-foreground"}
                 >
                   {item.enabled ? t("status.enabled") : t("status.disabled")}
                 </Badge>
               </div>
+              <Badge variant="outline" className="mb-3 inline-flex items-center gap-1 border-blue-200 bg-blue-50 text-blue-700">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {t(accessLabelKey(item))}
+              </Badge>
               <button
                 type="button"
                 onClick={() => setSelectedLibrary(item)}
-                className="mb-1 block text-left text-lg font-medium text-gray-900 hover:text-blue-700"
+                className="mb-1 block text-left text-lg font-medium text-foreground hover:text-blue-700"
               >
                 {item.name}
               </button>
-              <p className="mb-3 font-mono text-sm text-gray-500">{item.code}</p>
-              <p className="min-h-10 text-sm text-gray-600">{item.description || t("codeRule.noDescription")}</p>
+              <p className="mb-3 font-mono text-sm text-muted-foreground">{item.code}</p>
+              <p className="min-h-10 text-sm text-muted-foreground">{item.description || t("codeRule.noDescription")}</p>
               {item.auto_code_enabled && (
                 <div className="mt-4 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                   <span className="font-medium">{t("codeRule.autoCoding")}</span>
@@ -529,7 +546,7 @@ export function MaterialLibraryList() {
                 <button
                   type="button"
                   onClick={() => setSelectedLibrary(item)}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted/40"
                 >
                   {t("action.view")}
                 </button>
@@ -566,7 +583,7 @@ export function MaterialLibraryList() {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               {t("action.cancel")}
             </button>
@@ -574,7 +591,7 @@ export function MaterialLibraryList() {
               type="button"
               onClick={handleSubmit}
               disabled={!form.name.trim() || saveMutation.isPending}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
@@ -583,51 +600,51 @@ export function MaterialLibraryList() {
       >
         <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.name")}</span>
               <input
                 type="text"
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               />
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.code")}</span>
               <input
                 type="text"
                 value={editingLibrary?.code ?? t("codeRule.generatedAfterSave")}
                 readOnly
-                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                className="w-full rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
               />
             </label>
-            <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+            <label className="space-y-1 text-sm text-foreground md:col-span-2">
               <span>{t("field.description")}</span>
               <textarea
                 value={form.description}
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                 rows={3}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               />
             </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+            <label className="flex items-center gap-2 text-sm text-foreground">
               <input
                 type="checkbox"
                 checked={form.enabled}
                 onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-                className="h-4 w-4 rounded border-gray-300"
+                className="h-4 w-4 rounded border-border"
               />
               {t("status.enabled")}
             </label>
             {isCreateMode && (
-              <label className="flex items-center gap-2 text-sm text-gray-700">
+              <label className="flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
                   checked={form.autoCodeEnabled}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, autoCodeEnabled: event.target.checked }))
                   }
-                  className="h-4 w-4 rounded border-gray-300"
+                  className="h-4 w-4 rounded border-border"
                 />
                 {t("codeRule.autoCoding")}
               </label>
@@ -638,10 +655,10 @@ export function MaterialLibraryList() {
             <section className="space-y-4 rounded-lg border border-blue-100 bg-slate-50 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-medium text-gray-900">{t("codeRule.title")}</h3>
-                  <p className="mt-1 text-sm text-gray-500">{t("codeRule.help")}</p>
+                  <h3 className="text-base font-medium text-foreground">{t("codeRule.title")}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{t("codeRule.help")}</p>
                 </div>
-                <label className="w-36 space-y-1 text-sm text-gray-700">
+                <label className="w-36 space-y-1 text-sm text-foreground">
                   <span>{t("codeRule.separator")}</span>
                   <input
                     type="text"
@@ -651,13 +668,13 @@ export function MaterialLibraryList() {
                     onChange={(event) =>
                       setForm((current) => ({ ...current, separator: event.target.value.toUpperCase() }))
                     }
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                   />
                 </label>
               </div>
 
-              <div className="rounded-md border border-gray-200 bg-white p-3">
-                <div className="text-sm font-medium text-gray-800">{t("codeRule.livePreview")}</div>
+              <div className="rounded-md border border-border bg-card p-3">
+                <div className="text-sm font-medium text-foreground">{t("codeRule.livePreview")}</div>
                 {preview.error ? (
                   <p className="mt-2 text-sm text-red-600">{preview.error}</p>
                 ) : (
@@ -681,7 +698,7 @@ export function MaterialLibraryList() {
                     key={type}
                     type="button"
                     onClick={() => addSegment(type)}
-                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-card px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-50"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     {t(`codeRule.segmentTypes.${type}`)}
@@ -690,15 +707,15 @@ export function MaterialLibraryList() {
               </div>
 
               {form.segments.length === 0 ? (
-                <div className="rounded-md border border-dashed border-gray-300 bg-white px-4 py-6 text-center text-sm text-gray-500">
+                <div className="rounded-md border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                   {t("codeRule.emptySegments")}
                 </div>
               ) : (
                 <div className="space-y-3">
                   {form.segments.map((segment, index) => (
-                    <article key={segment.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <article key={segment.id} className="rounded-lg border border-border bg-card p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <label className="w-56 space-y-1 text-sm text-gray-700">
+                        <label className="w-56 space-y-1 text-sm text-foreground">
                           <span>{t("codeRule.segmentType")}</span>
                           <select
                             value={segment.type}
@@ -706,7 +723,7 @@ export function MaterialLibraryList() {
                               const next = createSegment(event.target.value as SegmentType);
                               updateSegment(segment.id, { ...next, id: segment.id });
                             }}
-                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                           >
                             {segmentTypes.map((type) => (
                               <option key={type} value={type}>
@@ -721,7 +738,7 @@ export function MaterialLibraryList() {
                             aria-label={t("codeRule.moveUp")}
                             onClick={() => reorderSegment(index, -1)}
                             disabled={index === 0}
-                            className="rounded-md border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-md border border-border p-2 text-muted-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <ArrowUp className="h-4 w-4" />
                           </button>
@@ -730,7 +747,7 @@ export function MaterialLibraryList() {
                             aria-label={t("codeRule.moveDown")}
                             onClick={() => reorderSegment(index, 1)}
                             disabled={index === form.segments.length - 1}
-                            className="rounded-md border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-md border border-border p-2 text-muted-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <ArrowDown className="h-4 w-4" />
                           </button>
@@ -747,26 +764,26 @@ export function MaterialLibraryList() {
 
                       <div className="mt-4 grid gap-3 md:grid-cols-3">
                         {segment.type === "fixed" && (
-                          <label className="space-y-1 text-sm text-gray-700">
+                          <label className="space-y-1 text-sm text-foreground">
                             <span>{t("codeRule.fixedValue")}</span>
                             <input
                               type="text"
                               value={segment.fixedValue}
                               placeholder="MAT"
                               onChange={(event) => updateSegment(segment.id, { fixedValue: event.target.value })}
-                              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                             />
                           </label>
                         )}
 
                         {segment.type === "category_path" && (
                           <>
-                            <label className="space-y-1 text-sm text-gray-700">
+                            <label className="space-y-1 text-sm text-foreground">
                               <span>{t("codeRule.categoryLevel")}</span>
                               <select
                                 value={segment.categoryLevel}
                                 onChange={(event) => updateSegment(segment.id, { categoryLevel: Number(event.target.value) })}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                               >
                                 {[1, 2, 3].map((level) => (
                                   <option key={level} value={level}>{level}</option>
@@ -774,7 +791,7 @@ export function MaterialLibraryList() {
                               </select>
                             </label>
                             {segment.categoryLengths.slice(0, segment.categoryLevel).map((value, lengthIndex) => (
-                              <label key={lengthIndex} className="space-y-1 text-sm text-gray-700">
+                              <label key={lengthIndex} className="space-y-1 text-sm text-foreground">
                                 <span>{t("codeRule.levelLength", { level: lengthIndex + 1 })}</span>
                                 <input
                                   type="number"
@@ -786,7 +803,7 @@ export function MaterialLibraryList() {
                                     nextLengths[lengthIndex] = event.target.value;
                                     updateSegment(segment.id, { categoryLengths: nextLengths });
                                   }}
-                                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                  className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                                 />
                               </label>
                             ))}
@@ -795,18 +812,18 @@ export function MaterialLibraryList() {
 
                         {segment.type === "attribute_code" && (
                           <div className="space-y-3 md:col-span-3">
-                            <label className="block space-y-1 text-sm text-gray-700">
+                            <label className="block space-y-1 text-sm text-foreground">
                               <span>{t("codeRule.attributeName")}</span>
                               <input
                                 type="text"
                                 value={segment.attributeName}
                                 placeholder="color"
                                 onChange={(event) => updateSegment(segment.id, { attributeName: event.target.value })}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                               />
                             </label>
                             <div className="space-y-2">
-                              <div className="text-sm font-medium text-gray-700">{t("codeRule.mappingTable")}</div>
+                              <div className="text-sm font-medium text-foreground">{t("codeRule.mappingTable")}</div>
                               {segment.mappings.map((row) => (
                                 <div key={row.id} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
                                   <input
@@ -815,7 +832,7 @@ export function MaterialLibraryList() {
                                     value={row.value}
                                     placeholder="red"
                                     onChange={(event) => updateMapping(segment.id, row.id, { value: event.target.value })}
-                                    className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                    className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                                   />
                                   <input
                                     type="text"
@@ -823,7 +840,7 @@ export function MaterialLibraryList() {
                                     value={row.code}
                                     placeholder="R"
                                     onChange={(event) => updateMapping(segment.id, row.id, { code: event.target.value })}
-                                    className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                    className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                                   />
                                   <button
                                     type="button"
@@ -848,12 +865,12 @@ export function MaterialLibraryList() {
                         )}
 
                         {segment.type === "date" && (
-                          <label className="space-y-1 text-sm text-gray-700">
+                          <label className="space-y-1 text-sm text-foreground">
                             <span>{t("codeRule.dateFormat")}</span>
                             <select
                               value={segment.dateFormat}
                               onChange={(event) => updateSegment(segment.id, { dateFormat: event.target.value as DateFormat })}
-                              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                             >
                               {dateFormats.map((format) => (
                                 <option key={format} value={format}>{format}</option>
@@ -864,7 +881,7 @@ export function MaterialLibraryList() {
 
                         {segment.type === "serial" && (
                           <>
-                            <label className="space-y-1 text-sm text-gray-700">
+                            <label className="space-y-1 text-sm text-foreground">
                               <span>{t("codeRule.serialLength")}</span>
                               <input
                                 type="number"
@@ -872,25 +889,25 @@ export function MaterialLibraryList() {
                                 max={10}
                                 value={segment.serialLength}
                                 onChange={(event) => updateSegment(segment.id, { serialLength: event.target.value })}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                               />
                             </label>
-                            <label className="space-y-1 text-sm text-gray-700">
+                            <label className="space-y-1 text-sm text-foreground">
                               <span>{t("codeRule.serialStart")}</span>
                               <input
                                 type="number"
                                 min={1}
                                 value={segment.serialStart}
                                 onChange={(event) => updateSegment(segment.id, { serialStart: event.target.value })}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                               />
                             </label>
-                            <label className="space-y-1 text-sm text-gray-700">
+                            <label className="space-y-1 text-sm text-foreground">
                               <span>{t("codeRule.serialScope")}</span>
                               <select
                                 value={segment.serialScope}
                                 onChange={(event) => updateSegment(segment.id, { serialScope: event.target.value as SerialScope })}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                               >
                                 {serialScopes.map((scope) => (
                                   <option key={scope} value={scope}>

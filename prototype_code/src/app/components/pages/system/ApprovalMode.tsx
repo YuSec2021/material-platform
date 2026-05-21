@@ -58,8 +58,8 @@ export function ApprovalMode() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl text-gray-900">审批模式切换</h1>
-        <p className="mt-1 text-sm text-gray-500">选择简易审批或工作流审批，并写入系统配置。</p>
+        <h1 className="text-2xl text-foreground">审批模式切换</h1>
+        <p className="mt-1 text-sm text-muted-foreground">选择简易审批或工作流审批，并写入系统配置。</p>
       </div>
 
       <ApiState
@@ -81,8 +81,8 @@ export function ApprovalMode() {
                   setSuccessMessage("");
                 }}
                 aria-pressed={selected}
-                className={`relative rounded-lg border-2 bg-white p-6 text-left transition-all ${
-                  selected ? "border-blue-600 bg-blue-50" : "border-gray-200 hover:border-gray-300"
+                className={`relative rounded-lg border-2 bg-card p-6 text-left transition-all ${
+                  selected ? "border-blue-600 bg-blue-50" : "border-border hover:border-border"
                 }`}
               >
                 {selected && (
@@ -90,10 +90,10 @@ export function ApprovalMode() {
                     <Check className="h-4 w-4 text-white" />
                   </span>
                 )}
-                <span className="block pr-8 text-lg text-gray-900">{mode.title}</span>
-                <span className="mt-3 block text-sm leading-relaxed text-gray-600">{mode.description}</span>
-                <span className="mt-4 block border-t border-gray-200 pt-4 text-xs text-gray-500">审批流程</span>
-                <span className="mt-1 block text-xs text-gray-700">{mode.flow}</span>
+                <span className="block pr-8 text-lg text-foreground">{mode.title}</span>
+                <span className="mt-3 block text-sm leading-relaxed text-muted-foreground">{mode.description}</span>
+                <span className="mt-4 block border-t border-border pt-4 text-xs text-muted-foreground">审批流程</span>
+                <span className="mt-1 block text-xs text-foreground">{mode.flow}</span>
               </button>
             );
           })}
@@ -116,7 +116,7 @@ export function ApprovalMode() {
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
-            className="rounded-md bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="rounded-md bg-blue-600 px-6 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
             {saveMutation.isPending ? "保存中..." : "保存设置"}
           </button>

@@ -166,9 +166,9 @@ async function allPreviewRows(batchId: number, total: number) {
 
 function SummaryCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-md border border-gray-200 bg-white px-3 py-2">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="mt-1 text-lg font-medium text-gray-900">{value}</div>
+    <div className="rounded-md border border-border bg-card px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-medium text-foreground">{value}</div>
     </div>
   );
 }
@@ -245,11 +245,11 @@ export function RecodePreviewModal({
         <div className="flex flex-col gap-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-medium text-gray-900">{t("codeRuleRecode.previewTitle")}</h2>
-              <div className="mt-1 text-sm text-gray-600">
+              <h2 className="text-base font-medium text-foreground">{t("codeRuleRecode.previewTitle")}</h2>
+              <div className="mt-1 text-sm text-muted-foreground">
                 {t("codeRuleRecode.libraryName")}: {library.name}
               </div>
-              <div className="mt-1 font-mono text-sm text-gray-600">
+              <div className="mt-1 font-mono text-sm text-muted-foreground">
                 {t("codeRuleRecode.batchId")}: {batch?.batch_id ?? t("codeRuleRecode.generating")}
               </div>
             </div>
@@ -287,9 +287,9 @@ export function RecodePreviewModal({
             <SummaryCard label={t("codeRuleRecode.categoryMissing")} value={breakdown.categoryMissing} />
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[920px] text-left text-sm">
-              <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+              <thead className="border-b border-border bg-muted/40 text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">{t("codeRuleRecode.materialName")}</th>
                   <th className="px-3 py-2 font-medium">{t("codeRuleRecode.specification")}</th>
@@ -300,25 +300,25 @@ export function RecodePreviewModal({
                   <th className="px-3 py-2 font-medium">{t("codeRuleRecode.failureReason")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-border">
                 {rows.map((row) => (
                   <tr key={row.id} className={rowTone(row.status, row.error_message)}>
-                    <td className="px-3 py-2 text-gray-900">{row.material_name}</td>
-                    <td className="px-3 py-2 text-gray-600">-</td>
-                    <td className="px-3 py-2 text-gray-600">-</td>
-                    <td className="px-3 py-2 font-mono text-gray-700">{row.old_code}</td>
-                    <td className="px-3 py-2 font-mono text-gray-700">{row.new_code || "-"}</td>
+                    <td className="px-3 py-2 text-foreground">{row.material_name}</td>
+                    <td className="px-3 py-2 text-muted-foreground">-</td>
+                    <td className="px-3 py-2 text-muted-foreground">-</td>
+                    <td className="px-3 py-2 font-mono text-foreground">{row.old_code}</td>
+                    <td className="px-3 py-2 font-mono text-foreground">{row.new_code || "-"}</td>
                     <td className="px-3 py-2">
                       <Badge variant="outline" className={statusTone(row.status)}>
                         {localizedRowStatus(row.status, t)}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2 text-gray-700">{row.error_message || "-"}</td>
+                    <td className="px-3 py-2 text-foreground">{row.error_message || "-"}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-gray-500" colSpan={7}>
+                    <td className="px-3 py-6 text-center text-muted-foreground" colSpan={7}>
                       {t("codeRuleRecode.emptyRows")}
                     </td>
                   </tr>
@@ -327,7 +327,7 @@ export function RecodePreviewModal({
             </table>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
             <span>{t("rules.pageSummary", { page, pages: pageCount })}</span>
             <div className="flex gap-2">
               <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
@@ -395,7 +395,7 @@ export function RecodePreviewModal({
           </>
         }
       >
-        <div className="flex flex-col gap-3 text-sm text-gray-700">
+        <div className="flex flex-col gap-3 text-sm text-foreground">
           <p>{t("codeRuleRecode.executeConfirmBody", { library: library.name, count: batch?.total_count ?? 0 })}</p>
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
             {t("codeRuleRecode.externalWarning")}
@@ -417,7 +417,7 @@ export function RecodePreviewModal({
           </>
         }
       >
-        <div className="flex flex-col gap-3 text-sm text-gray-700">
+        <div className="flex flex-col gap-3 text-sm text-foreground">
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
             {t("codeRuleRecode.forceConfirmBody")}
           </p>
@@ -493,10 +493,10 @@ export function SelectedMaterialModal({
             {t("codeRuleRecode.generating")}
           </div>
         )}
-        <label className="flex flex-col gap-1 text-sm text-gray-700">
+        <label className="flex flex-col gap-1 text-sm text-foreground">
           <span>{t("codeRuleRecode.searchMaterials")}</span>
-          <div className="flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2">
-            <Search className="h-4 w-4 text-gray-400" />
+          <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+            <Search className="h-4 w-4 text-muted-foreground" />
             <input
               type="search"
               value={search}
@@ -505,9 +505,9 @@ export function SelectedMaterialModal({
             />
           </div>
         </label>
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+            <thead className="border-b border-border bg-muted/40 text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">{t("codeRuleRecode.select")}</th>
                 <th className="px-3 py-2 font-medium">{t("codeRuleRecode.materialName")}</th>
@@ -516,9 +516,9 @@ export function SelectedMaterialModal({
                 <th className="px-3 py-2 font-medium">{t("field.description")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border">
               {materials.map((material) => (
-                <tr key={material.id} className="hover:bg-gray-50">
+                <tr key={material.id} className="hover:bg-muted/40">
                   <td className="px-3 py-2">
                     <input
                       type="checkbox"
@@ -527,15 +527,15 @@ export function SelectedMaterialModal({
                       aria-label={material.name}
                     />
                   </td>
-                  <td className="px-3 py-2 text-gray-900">{material.name}</td>
-                  <td className="px-3 py-2 font-mono text-gray-700">{material.code}</td>
-                  <td className="px-3 py-2 text-gray-600">{material.category}</td>
-                  <td className="px-3 py-2 text-gray-600">{material.description || "-"}</td>
+                  <td className="px-3 py-2 text-foreground">{material.name}</td>
+                  <td className="px-3 py-2 font-mono text-foreground">{material.code}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{material.category}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{material.description || "-"}</td>
                 </tr>
               ))}
               {materials.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-center text-gray-500" colSpan={5}>
+                  <td className="px-3 py-6 text-center text-muted-foreground" colSpan={5}>
                     {materialsQuery.isLoading ? t("app.loading") : t("codeRuleRecode.emptyMaterials")}
                   </td>
                 </tr>
@@ -585,10 +585,10 @@ function RecodeBatchDetail({
     <div className="rounded-lg border border-blue-100 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium text-gray-900">
+          <h3 className="text-sm font-medium text-foreground">
             {t("codeRuleRecode.batchId")}: {batch.batch_id}
           </h3>
-          <div className="mt-2 grid gap-2 text-sm text-gray-600 md:grid-cols-3">
+          <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-3">
             <span>{t("codeRuleRecode.oldVersion")}: {batch.old_rule_version_id ?? "-"}</span>
             <span>{t("codeRuleRecode.newVersion")}: {batch.new_rule_version_id ?? "-"}</span>
             <span>{t("codeRuleRecode.changeMode")}: {localizedStatus(batch.change_mode, t)}</span>
@@ -605,9 +605,9 @@ function RecodeBatchDetail({
         )}
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full min-w-[760px] text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+          <thead className="border-b border-border bg-muted/40 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.materialName")}</th>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.oldCode")}</th>
@@ -616,18 +616,18 @@ function RecodeBatchDetail({
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.failureReason")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-border">
             {(rowsQuery.data?.items ?? batch.rows).map((row) => (
-              <tr key={row.id} className="hover:bg-gray-50">
-                <td className="px-3 py-2 text-gray-900">{row.material_name}</td>
-                <td className="px-3 py-2 font-mono text-gray-700">{row.old_code}</td>
-                <td className="px-3 py-2 font-mono text-gray-700">{row.new_code || "-"}</td>
+              <tr key={row.id} className="hover:bg-muted/40">
+                <td className="px-3 py-2 text-foreground">{row.material_name}</td>
+                <td className="px-3 py-2 font-mono text-foreground">{row.old_code}</td>
+                <td className="px-3 py-2 font-mono text-foreground">{row.new_code || "-"}</td>
                 <td className="px-3 py-2">
                   <Badge variant="outline" className={statusTone(row.status)}>
                     {localizedStatus(row.status, t)}
                   </Badge>
                 </td>
-                <td className="px-3 py-2 text-gray-700">{row.error_message || "-"}</td>
+                <td className="px-3 py-2 text-foreground">{row.error_message || "-"}</td>
               </tr>
             ))}
           </tbody>
@@ -649,7 +649,7 @@ function RecodeBatchDetail({
           </>
         }
       >
-        <div className="flex flex-col gap-3 text-sm text-gray-700">
+        <div className="flex flex-col gap-3 text-sm text-foreground">
           {rollbackMutation.isPending && (
             <div role="status" className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800">
               {t("codeRuleRecode.rollingBack")}
@@ -694,18 +694,18 @@ export function RecodeRecordsPanel({ library }: { library: MaterialLibrary }) {
   };
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5">
+    <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-medium text-gray-900">{t("codeRuleDetail.tabs.recodes")}</h2>
+        <h2 className="text-base font-medium text-foreground">{t("codeRuleDetail.tabs.recodes")}</h2>
         <Button type="button" variant="outline" size="sm" onClick={() => void batchesQuery.refetch()}>
           <RefreshCw data-icon="inline-start" />
           {t("app.reload")}
         </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[960px] text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+          <thead className="border-b border-border bg-muted/40 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.batchId")}</th>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.oldVersion")}</th>
@@ -719,9 +719,9 @@ export function RecodeRecordsPanel({ library }: { library: MaterialLibrary }) {
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.createdAt")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-border">
             {visibleBatches.map((batch) => (
-              <tr key={batch.batch_id} className="hover:bg-gray-50">
+              <tr key={batch.batch_id} className="hover:bg-muted/40">
                 <td className="px-3 py-2">
                   <button
                     type="button"
@@ -731,24 +731,24 @@ export function RecodeRecordsPanel({ library }: { library: MaterialLibrary }) {
                     {batch.batch_id}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-gray-700">{batch.old_rule_version_id ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-700">{batch.new_rule_version_id ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-700">{localizedStatus(batch.change_mode, t)}</td>
-                <td className="px-3 py-2 text-gray-700">{batch.total_count}</td>
-                <td className="px-3 py-2 text-gray-700">{batch.success_count}</td>
-                <td className="px-3 py-2 text-gray-700">{batch.failed_count}</td>
+                <td className="px-3 py-2 text-foreground">{batch.old_rule_version_id ?? "-"}</td>
+                <td className="px-3 py-2 text-foreground">{batch.new_rule_version_id ?? "-"}</td>
+                <td className="px-3 py-2 text-foreground">{localizedStatus(batch.change_mode, t)}</td>
+                <td className="px-3 py-2 text-foreground">{batch.total_count}</td>
+                <td className="px-3 py-2 text-foreground">{batch.success_count}</td>
+                <td className="px-3 py-2 text-foreground">{batch.failed_count}</td>
                 <td className="px-3 py-2">
                   <Badge variant="outline" className={statusTone(batch.status)}>
                     {localizedStatus(batch.status, t)}
                   </Badge>
                 </td>
-                <td className="px-3 py-2 text-gray-700">super_admin</td>
-                <td className="px-3 py-2 text-gray-700">{formatTime(batch.created_at)}</td>
+                <td className="px-3 py-2 text-foreground">super_admin</td>
+                <td className="px-3 py-2 text-foreground">{formatTime(batch.created_at)}</td>
               </tr>
             ))}
             {visibleBatches.length === 0 && (
               <tr>
-                <td className="px-3 py-6 text-center text-gray-500" colSpan={10}>
+                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={10}>
                   {batchesQuery.isLoading ? t("app.loading") : t("codeRuleRecode.emptyBatches")}
                 </td>
               </tr>
@@ -757,7 +757,7 @@ export function RecodeRecordsPanel({ library }: { library: MaterialLibrary }) {
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
         <span>{t("rules.pageSummary", { page, pages: pageCount })}</span>
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
@@ -831,16 +831,16 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
   };
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5">
+    <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-medium text-gray-900">{t("codeRuleDetail.tabs.mappings")}</h2>
+        <h2 className="text-base font-medium text-foreground">{t("codeRuleDetail.tabs.mappings")}</h2>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <span>{t("codeRuleRecode.exportFormat")}</span>
             <select
               value={exportFormat}
               onChange={(event) => setExportFormat(event.target.value as "csv" | "xlsx")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="csv">{t("codeRuleRecode.exportCsv")}</option>
               <option value="xlsx">{t("codeRuleRecode.exportExcel")}</option>
@@ -854,16 +854,16 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <label className="flex flex-col gap-1 text-sm text-gray-700 md:col-span-2">
+        <label className="flex flex-col gap-1 text-sm text-foreground md:col-span-2">
           <span>{t("codeRuleRecode.searchMappings")}</span>
           <input
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-700">
+        <label className="flex flex-col gap-1 text-sm text-foreground">
           <span>{t("codeRuleRecode.batchId")}</span>
           <input
             type="number"
@@ -872,34 +872,34 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
               setBatchFilter(event.target.value);
               setPage(1);
             }}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
           />
         </label>
         <div className="grid gap-2 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>{t("codeRuleRecode.dateFrom")}</span>
             <input
               type="date"
               value={dateFrom}
               onChange={(event) => setDateFrom(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>{t("codeRuleRecode.dateTo")}</span>
             <input
               type="date"
               value={dateTo}
               onChange={(event) => setDateTo(event.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[860px] text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+          <thead className="border-b border-border bg-muted/40 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.oldCode")}</th>
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.newCode")}</th>
@@ -909,14 +909,14 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
               <th className="px-3 py-2 font-medium">{t("codeRuleRecode.status")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-border">
             {visibleRows.map((row) => (
-              <tr key={row.id} className="hover:bg-gray-50">
-                <td className="px-3 py-2 font-mono text-gray-700">{row.old_code}</td>
-                <td className="px-3 py-2 font-mono text-gray-700">{row.new_code}</td>
-                <td className="px-3 py-2 text-gray-900">{row.material_name}</td>
+              <tr key={row.id} className="hover:bg-muted/40">
+                <td className="px-3 py-2 font-mono text-foreground">{row.old_code}</td>
+                <td className="px-3 py-2 font-mono text-foreground">{row.new_code}</td>
+                <td className="px-3 py-2 text-foreground">{row.material_name}</td>
                 <td className="px-3 py-2 font-mono text-blue-700">{row.batch_id ?? "-"}</td>
-                <td className="px-3 py-2 text-gray-700">{formatTime(row.created_at)}</td>
+                <td className="px-3 py-2 text-foreground">{formatTime(row.created_at)}</td>
                 <td className="px-3 py-2">
                   <Badge variant="outline" className={statusTone(row.status)}>
                     {localizedStatus(row.status, t)}
@@ -926,7 +926,7 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
             ))}
             {visibleRows.length === 0 && (
               <tr>
-                <td className="px-3 py-6 text-center text-gray-500" colSpan={6}>
+                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={6}>
                   {mappingsQuery.isLoading ? t("app.loading") : t("codeRuleRecode.emptyMappings")}
                 </td>
               </tr>
@@ -935,7 +935,7 @@ export function CodeMappingsPanel({ library }: { library: MaterialLibrary }) {
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
         <span>{t("rules.pageSummary", { page, pages: pageCount })}</span>
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>

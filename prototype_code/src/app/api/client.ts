@@ -21,9 +21,17 @@ export type AuthUser = {
 
 export type ProductName = {
   id: number;
+  product_name_code: string;
+  status: "active" | "inactive";
   name: string;
   unit: string;
   category: string;
+};
+
+export type ProductNamePayload = {
+  name: string;
+  unit?: string;
+  category?: string;
 };
 
 export type Category = {
@@ -130,6 +138,14 @@ export type MaterialLibrary = {
     effective_time?: string | null;
   } | null;
   material_count?: number;
+  material_library_admin_id?: number | null;
+  material_library_admin_name?: string | null;
+  material_library_admin_code?: string | null;
+  category_library_id?: number | null;
+  category_library_name?: string | null;
+  category_library_code?: string | null;
+  access_role?: "admin" | "read_only" | "no_access" | string;
+  access_role_label?: string;
 };
 
 export type Material = {
@@ -161,6 +177,8 @@ export type MaterialLibraryPayload = {
   auto_code_enabled?: boolean;
   recode_enabled?: boolean;
   code_rule?: Record<string, unknown> | null;
+  material_library_admin_id?: number | null;
+  category_library_id?: number | null;
 };
 
 export type CategoryLibraryPayload = {
@@ -931,7 +949,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (isFormData) {
     headers.delete("Content-Type");
   }
-  const body = options.body === undefined || isFormData ? options.body : JSON.stringify(options.body);
+  const body: BodyInit | null | undefined =
+    options.body === undefined || isFormData ? (options.body as BodyInit | undefined) : JSON.stringify(options.body);
 
   lastRequestUrl = url;
   const response = await fetch(url, {
@@ -1004,6 +1023,21 @@ export const apiClient = {
   },
   productNames() {
     return request<ProductName[]>("/product-names");
+  },
+  productNamesByStatus(status: "all" | "active" | "inactive") {
+    return request<ProductName[]>(withQuery("/product-names", { status }));
+  },
+  createProductName(payload: ProductNamePayload) {
+    return request<ProductName>("/product-names", { method: "POST", body: payload });
+  },
+  updateProductName(id: number, payload: Partial<ProductNamePayload>) {
+    return request<ProductName>(`/product-names/${id}`, { method: "PUT", body: payload });
+  },
+  updateProductNameStatus(id: number, status: "active" | "inactive") {
+    return request<ProductName>(`/product-names/${id}/status`, { method: "PATCH", body: { status } });
+  },
+  deleteProductName(id: number) {
+    return request<{ deleted: boolean; id: number; soft_deleted?: boolean }>(`/product-names/${id}`, { method: "DELETE" });
   },
   categories() {
     return request<Category[]>("/categories");

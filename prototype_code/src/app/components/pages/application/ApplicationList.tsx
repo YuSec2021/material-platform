@@ -107,7 +107,7 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">
+          <h1 className="text-2xl text-foreground">
             {type === "category"
               ? t("nav.categoryApplication")
               : type === "material-code"
@@ -118,7 +118,7 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
                     ? t("nav.stopUseApplication")
                     : title}
           </h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             {t("page.applicationsHelp", { type: apiType })}
           </p>
         </div>
@@ -134,10 +134,10 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
 
       <WorkflowTypeNav />
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="rounded-lg border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex min-w-64 flex-1 items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
-            <Search className="h-5 w-5 text-gray-400" />
+          <div className="flex min-w-64 flex-1 items-center gap-2 rounded-lg border border-border px-3 py-2">
+            <Search className="h-5 w-5 text-muted-foreground" />
             <input
               type="text"
               placeholder="搜索申请单号、申请人或部门"
@@ -149,7 +149,7 @@ export function ApplicationList({ type, title }: ApplicationListProps) {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {workflowStatusOptions.map((option) => (
               <option key={option.value || "all"} value={option.value}>

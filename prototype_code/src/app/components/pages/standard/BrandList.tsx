@@ -50,13 +50,13 @@ function LogoCell({ brand }: { brand: Brand }) {
       <img
         src={brand.logo.data_url}
         alt={`${brand.name} logo`}
-        className="h-10 w-10 rounded-md border border-gray-200 object-cover"
+        className="h-10 w-10 rounded-md border border-border object-cover"
       />
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-gray-500">
+    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
       <ImageIcon className="h-4 w-4" />
       未上传
     </span>
@@ -191,8 +191,8 @@ export function BrandList() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl text-gray-900">{t("page.brands")}</h1>
-          <p className="mt-1 text-sm text-gray-500">{t("page.brandsHelp")}</p>
+          <h1 className="text-2xl text-foreground">{t("page.brands")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("page.brandsHelp")}</p>
         </div>
         <button
           type="button"
@@ -226,7 +226,7 @@ export function BrandList() {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               {t("action.cancel")}
             </button>
@@ -234,7 +234,7 @@ export function BrandList() {
               type="button"
               onClick={handleSubmit}
               disabled={!form.name.trim() || saveMutation.isPending}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
@@ -242,43 +242,43 @@ export function BrandList() {
         }
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>{t("field.name")}</span>
             <input
               type="text"
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>{t("field.code")}</span>
             <input
               type="text"
               value={editingBrand?.code ?? "保存后自动生成"}
               readOnly
-              className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              className="w-full rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700 md:col-span-2">
+          <label className="space-y-1 text-sm text-foreground md:col-span-2">
             <span>{t("field.description")}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>Logo 文件</span>
             <input
               type="file"
               accept="image/*"
               onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm"
             />
           </label>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>Logo data URL</span>
             <input
               type="text"
@@ -293,14 +293,14 @@ export function BrandList() {
                   },
                 }))
               }
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               placeholder="data:image/png;base64,..."
             />
           </label>
           {form.logo.data_url && (
             <div className="md:col-span-2">
-              <p className="mb-2 text-sm text-gray-700">Logo 预览</p>
-              <img src={form.logo.data_url} alt="Logo 预览" className="h-14 w-14 rounded-md border border-gray-200 object-cover" />
+              <p className="mb-2 text-sm text-foreground">Logo 预览</p>
+              <img src={form.logo.data_url} alt="Logo 预览" className="h-14 w-14 rounded-md border border-border object-cover" />
             </div>
           )}
           {saveMutation.isError && (

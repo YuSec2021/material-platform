@@ -27,8 +27,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-6">
-        <section className="w-full max-w-lg rounded-lg border border-red-200 bg-white p-8 shadow-sm">
+      <main className="flex min-h-screen items-center justify-center bg-muted/40 px-6">
+        <section className="w-full max-w-lg rounded-lg border border-red-200 bg-card p-8 shadow-sm">
           <div className="mb-4 flex items-center gap-3 text-red-700">
             <AlertTriangle className="h-6 w-6" />
             <h1 className="text-xl font-semibold">{i18n.t("app.error")}</h1>

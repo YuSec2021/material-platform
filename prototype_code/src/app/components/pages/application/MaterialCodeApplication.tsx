@@ -142,34 +142,34 @@ export function MaterialCodeApplication() {
         <button
           type="button"
           onClick={() => navigate("/application/material-code")}
-          className="rounded-lg p-2 transition-colors hover:bg-gray-100"
+          className="rounded-lg p-2 transition-colors hover:bg-accent"
           aria-label="返回"
         >
-          <ArrowLeft className="h-5 w-5 text-gray-600" />
+          <ArrowLeft className="h-5 w-5 text-muted-foreground" />
         </button>
         <div className="flex flex-1 items-center justify-between">
-          <h1 className="text-2xl text-gray-900">新增物料编码申请详情</h1>
+          <h1 className="text-2xl text-foreground">新增物料编码申请详情</h1>
           <StatusBadge status={workflowStatusTone(applicationStatus)}>
             {workflowStatusLabel(applicationStatus)}
           </StatusBadge>
         </div>
       </div>
 
-      <div className="rounded-lg bg-gray-50 p-6">
+      <div className="rounded-lg bg-muted/40 p-6">
         <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <span className="mb-1 block text-sm text-gray-700">单据编码</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">
+            <span className="mb-1 block text-sm text-foreground">单据编码</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-muted-foreground">
               {activeApplication?.application_no ?? "提交后由后端生成"}
             </div>
           </div>
           <div>
-            <span className="mb-1 block text-sm text-gray-700">申请人员</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-900">{user?.username ?? "super_admin"}</div>
+            <span className="mb-1 block text-sm text-foreground">申请人员</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-foreground">{user?.username ?? "super_admin"}</div>
           </div>
           <div>
-            <span className="mb-1 block text-sm text-gray-700">申请日期</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">{formatDate(new Date().toISOString())}</div>
+            <span className="mb-1 block text-sm text-foreground">申请日期</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-muted-foreground">{formatDate(new Date().toISOString())}</div>
           </div>
         </div>
       </div>
@@ -189,15 +189,15 @@ export function MaterialCodeApplication() {
           void librariesQuery.refetch();
         }}
       >
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <h2 className="mb-4 text-lg text-gray-900">物料信息</h2>
+        <div className="rounded-lg border border-border bg-card p-6">
+          <h2 className="mb-4 text-lg text-foreground">物料信息</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-sm text-gray-700">类目</span>
+              <span className="mb-1 block text-sm text-foreground">类目</span>
               <select
                 value={form.categoryId}
                 onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">请选择类目</option>
                 {(categoriesQuery.data ?? []).map((category) => (
@@ -208,11 +208,11 @@ export function MaterialCodeApplication() {
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-sm text-gray-700">品名</span>
+              <span className="mb-1 block text-sm text-foreground">品名</span>
               <select
                 value={form.productNameId}
                 onChange={(event) => setForm((current) => ({ ...current, productNameId: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">请选择品名</option>
                 {(productNamesQuery.data ?? []).map((product) => (
@@ -223,11 +223,11 @@ export function MaterialCodeApplication() {
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-sm text-gray-700">品牌</span>
+              <span className="mb-1 block text-sm text-foreground">品牌</span>
               <select
                 value={form.brandId}
                 onChange={(event) => setForm((current) => ({ ...current, brandId: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">不指定品牌</option>
                 {(brandsQuery.data ?? []).map((brand) => (
@@ -238,49 +238,49 @@ export function MaterialCodeApplication() {
               </select>
             </label>
             <div>
-              <span className="mb-1 block text-sm text-gray-700">自动生成物料名称</span>
+              <span className="mb-1 block text-sm text-foreground">自动生成物料名称</span>
               <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">{generatedMaterialName}</div>
             </div>
           </div>
 
-          <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
+          <div className="mt-4 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
             类目路径: {selectedCategory?.name ?? "未选择"} / 单位: {selectedProduct?.unit ?? "未选择品名"} / 属性模板:
             {(attributesQuery.data ?? []).length ? ` ${(attributesQuery.data ?? []).map((attribute) => attribute.name).join(", ")}` : " 暂无"}
           </div>
 
           <label className="mt-4 block">
-            <span className="mb-1 block text-sm text-gray-700">参考商城链接</span>
+            <span className="mb-1 block text-sm text-foreground">参考商城链接</span>
             <input
               type="url"
               value={form.referenceLink}
               onChange={(event) => setForm((current) => ({ ...current, referenceLink: event.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="https://example.com/item"
             />
           </label>
 
           <label className="mt-4 block">
-            <span className="mb-1 block text-sm text-gray-700">申请说明</span>
+            <span className="mb-1 block text-sm text-foreground">申请说明</span>
             <textarea
               rows={3}
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="请输入新增编码原因"
             />
           </label>
 
           <div className="mt-4">
-            <span className="mb-2 block text-sm text-gray-700">参考图片</span>
+            <span className="mb-2 block text-sm text-foreground">参考图片</span>
             <div className="grid gap-4 md:grid-cols-3">
               {[0, 1, 2].map((slot) => (
                 <label
                   key={slot}
-                  className="block cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-4 text-center transition-colors hover:border-blue-500"
+                  className="block cursor-pointer rounded-lg border-2 border-dashed border-border p-4 text-center transition-colors hover:border-blue-500"
                 >
                   <input type="file" accept="image/*" className="hidden" onChange={(event) => void handleImageChange(slot, event.target.files?.[0])} />
-                  <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
-                  <span className="text-xs text-gray-600">
+                  <Upload className="mx-auto mb-1 h-6 w-6 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
                     图片 {slot + 1} <span className="text-red-500">*</span>
                     {images[slot] ? ` ${images[slot].filename}` : ""}
                   </span>
@@ -299,7 +299,7 @@ export function MaterialCodeApplication() {
         <button
           type="button"
           onClick={() => navigate("/application/material-code")}
-          className="rounded-lg border border-gray-300 px-6 py-2 text-gray-700 hover:bg-gray-50"
+          className="rounded-lg border border-border px-6 py-2 text-foreground hover:bg-muted/40"
         >
           返回列表
         </button>

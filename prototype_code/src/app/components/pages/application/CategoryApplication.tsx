@@ -127,62 +127,62 @@ export function CategoryApplication() {
         <button
           type="button"
           onClick={() => navigate("/application/category")}
-          className="rounded-lg p-2 transition-colors hover:bg-gray-100"
+          className="rounded-lg p-2 transition-colors hover:bg-accent"
           aria-label="返回"
         >
-          <ArrowLeft className="h-5 w-5 text-gray-600" />
+          <ArrowLeft className="h-5 w-5 text-muted-foreground" />
         </button>
         <div className="flex flex-1 items-center justify-between">
-          <h1 className="text-2xl text-gray-900">新增物料类目申请详情</h1>
+          <h1 className="text-2xl text-foreground">新增物料类目申请详情</h1>
           <StatusBadge status={workflowStatusTone(applicationStatus)}>
             {workflowStatusLabel(applicationStatus)}
           </StatusBadge>
         </div>
       </div>
 
-      <div className="rounded-lg bg-gray-50 p-6">
+      <div className="rounded-lg bg-muted/40 p-6">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-sm text-gray-700">单据编码</span>
+            <span className="mb-1 block text-sm text-foreground">单据编码</span>
             <input
               type="text"
               value={applicationCode}
               readOnly
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-500"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-muted-foreground"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-sm text-gray-700">申请人员</span>
+            <span className="mb-1 block text-sm text-foreground">申请人员</span>
             <input
               type="text"
               value={user?.username ?? "super_admin"}
               readOnly
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-500"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-muted-foreground"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-sm text-gray-700">所属部门</span>
+            <span className="mb-1 block text-sm text-foreground">所属部门</span>
             <input
               type="text"
               value={form.department}
               onChange={(event) => setForm((current) => ({ ...current, department: event.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-sm text-gray-700">申请日期</span>
+            <span className="mb-1 block text-sm text-foreground">申请日期</span>
             <input
               type="text"
               value={formatDate(new Date().toISOString())}
               readOnly
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-500"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-muted-foreground"
             />
           </label>
         </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="mb-4 text-lg text-gray-900">申请内容</h2>
+      <div className="rounded-lg border border-border bg-card p-6">
+        <h2 className="mb-4 text-lg text-foreground">申请内容</h2>
         <ApiState
           isLoading={categoriesQuery.isLoading || librariesQuery.isLoading}
           isError={categoriesQuery.isError || librariesQuery.isError}
@@ -198,13 +198,13 @@ export function CategoryApplication() {
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <label className="block">
-                <span className="mb-1 block text-sm text-gray-700">一级类目</span>
+                <span className="mb-1 block text-sm text-foreground">一级类目</span>
                 <select
                   value={form.level1Id}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, level1Id: event.target.value, level2Id: "", level3Id: "" }))
                   }
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">请选择</option>
                   {level1Options.map((category) => (
@@ -215,11 +215,11 @@ export function CategoryApplication() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-sm text-gray-700">二级类目</span>
+                <span className="mb-1 block text-sm text-foreground">二级类目</span>
                 <select
                   value={form.level2Id}
                   onChange={(event) => setForm((current) => ({ ...current, level2Id: event.target.value, level3Id: "" }))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={!form.level1Id}
                 >
                   <option value="">请选择</option>
@@ -231,11 +231,11 @@ export function CategoryApplication() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-sm text-gray-700">三级类目</span>
+                <span className="mb-1 block text-sm text-foreground">三级类目</span>
                 <select
                   value={form.level3Id}
                   onChange={(event) => setForm((current) => ({ ...current, level3Id: event.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={!form.level2Id}
                 >
                   <option value="">请选择</option>
@@ -249,61 +249,61 @@ export function CategoryApplication() {
             </div>
 
             <label className="block">
-              <span className="mb-1 block text-sm text-gray-700">
+              <span className="mb-1 block text-sm text-foreground">
                 拟新增类目名称 <span className="text-red-500">*</span>
               </span>
               <input
                 type="text"
                 value={form.proposedCategoryName}
                 onChange={(event) => setForm((current) => ({ ...current, proposedCategoryName: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="请输入新类目名称"
               />
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-sm text-gray-700">
+              <span className="mb-1 block text-sm text-foreground">
                 物料定义 <span className="text-red-500">*</span>
               </span>
               <textarea
                 rows={4}
                 value={form.materialDefinition}
                 onChange={(event) => setForm((current) => ({ ...current, materialDefinition: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="请输入物料定义"
               />
             </label>
 
             <div>
-              <span className="mb-2 block text-sm text-gray-700">参考文件</span>
-              <label className="block cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-6 text-center transition-colors hover:border-blue-500">
+              <span className="mb-2 block text-sm text-foreground">参考文件</span>
+              <label className="block cursor-pointer rounded-lg border-2 border-dashed border-border p-6 text-center transition-colors hover:border-blue-500">
                 <input
                   type="file"
                   className="hidden"
                   onChange={(event) => setReferenceFile(event.target.files?.[0] ?? null)}
                 />
-                <FileText className="mx-auto mb-2 h-7 w-7 text-gray-400" />
-                <span className="text-sm text-gray-600">
+                <FileText className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
                   {referenceFile ? referenceFile.name : "点击上传 PDF、Word 或 Excel 文件"}
                 </span>
               </label>
             </div>
 
             <div>
-              <span className="mb-2 block text-sm text-gray-700">物料图片</span>
+              <span className="mb-2 block text-sm text-foreground">物料图片</span>
               <div className="grid gap-4 md:grid-cols-3">
                 {[0, 1, 2].map((index) => (
                   <label
                     key={index}
-                    className="block cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-4 text-center transition-colors hover:border-blue-500"
+                    className="block cursor-pointer rounded-lg border-2 border-dashed border-border p-4 text-center transition-colors hover:border-blue-500"
                   >
                     <input type="file" accept="image/*" className="hidden" onChange={(event) => handleImageFiles(event.target.files)} />
-                    <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400" />
-                    <span className="text-xs text-gray-600">{imageFiles[index]?.name ?? `上传图片 ${index + 1}`}</span>
+                    <Upload className="mx-auto mb-1 h-6 w-6 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">{imageFiles[index]?.name ?? `上传图片 ${index + 1}`}</span>
                   </label>
                 ))}
               </div>
-              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40">
                 <input type="file" accept="image/*" className="hidden" onChange={(event) => handleImageFiles(event.target.files)} />
                 继续添加图片
               </label>
@@ -316,7 +316,7 @@ export function CategoryApplication() {
 
       {feedback && <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">{feedback}</div>}
       {draftSaved && (
-        <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+        <div className="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
           草稿字段: {form.department} / {form.proposedCategoryName || "未填写类目"} / {form.materialDefinition || "未填写定义"}
           {referenceFile ? ` / ${referenceFile.name}` : ""}
           {imageFiles.length ? ` / 图片 ${imageFiles.map((file) => file.name).join(", ")}` : ""}
@@ -327,7 +327,7 @@ export function CategoryApplication() {
         <button
           type="button"
           onClick={handleDraft}
-          className="rounded-lg border border-gray-300 px-6 py-2 text-gray-700 hover:bg-gray-50"
+          className="rounded-lg border border-border px-6 py-2 text-foreground hover:bg-muted/40"
         >
           保存草稿
         </button>

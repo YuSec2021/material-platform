@@ -14,8 +14,8 @@ interface ApprovalTimelineProps {
 
 export function ApprovalTimeline({ steps }: ApprovalTimelineProps) {
   return (
-    <div className="bg-gray-50 rounded-lg p-6">
-      <h3 className="text-sm text-gray-700 mb-4">审批流程</h3>
+    <div className="bg-muted/40 rounded-lg p-6">
+      <h3 className="text-sm text-foreground mb-4">审批流程</h3>
       <div className="flex items-center justify-between">
         {steps.map((step, index) => (
           <div key={index} className="flex items-center flex-1">
@@ -24,7 +24,7 @@ export function ApprovalTimeline({ steps }: ApprovalTimelineProps) {
                 step.status === 'completed' ? 'bg-green-500' :
                 step.status === 'current' ? 'bg-blue-500 animate-pulse' :
                 step.status === 'rejected' ? 'bg-red-500' :
-                'bg-gray-300'
+                'bg-muted'
               }`}>
                 {step.status === 'completed' ? (
                   <CheckCircle className="w-6 h-6 text-white" />
@@ -38,15 +38,15 @@ export function ApprovalTimeline({ steps }: ApprovalTimelineProps) {
               </div>
               <div className="mt-2 text-center">
                 <p className={`text-xs ${
-                  step.status === 'pending' ? 'text-gray-500' : 'text-gray-900'
+                  step.status === 'pending' ? 'text-muted-foreground' : 'text-foreground'
                 }`}>
                   {step.title}
                 </p>
                 {step.approver && (
-                  <p className="text-xs text-gray-500 mt-1">{step.approver}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{step.approver}</p>
                 )}
                 {step.time && (
-                  <p className="text-xs text-gray-400 mt-1">{step.time}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{step.time}</p>
                 )}
                 {step.rejectReason && (
                   <div className="mt-2 px-2 py-1 bg-red-50 rounded text-xs text-red-600">
@@ -57,7 +57,7 @@ export function ApprovalTimeline({ steps }: ApprovalTimelineProps) {
             </div>
             {index < steps.length - 1 && (
               <div className={`flex-1 h-0.5 mx-2 ${
-                step.status === 'completed' ? 'bg-green-500' : 'bg-gray-300'
+                step.status === 'completed' ? 'bg-green-500' : 'bg-muted'
               }`} />
             )}
           </div>

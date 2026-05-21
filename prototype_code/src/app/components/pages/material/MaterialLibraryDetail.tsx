@@ -380,12 +380,12 @@ function SegmentHelp({ type }: { type: SegmentType }) {
     <span className="group relative inline-flex">
       <button
         type="button"
-        className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus:bg-gray-100 focus:text-gray-700"
+        className="rounded-full p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground"
         aria-label={t("codeRule.segmentHelpLabel", { type: t(`codeRule.segmentTypes.${type}`) })}
       >
         <HelpCircle className="h-4 w-4" />
       </button>
-      <span className="pointer-events-none absolute left-0 top-7 z-10 hidden w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-lg group-focus-within:block group-hover:block">
+      <span className="pointer-events-none absolute left-0 top-7 z-10 hidden w-64 rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground shadow-lg group-focus-within:block group-hover:block">
         {t(`codeRule.segmentHelp.${type}`)}
       </span>
     </span>
@@ -397,7 +397,7 @@ function statusTone(status: string) {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
   if (status === "draft") {
-    return "border-gray-200 bg-gray-50 text-gray-700";
+    return "border-border bg-muted/40 text-foreground";
   }
   if (status === "failed") {
     return "border-orange-200 bg-orange-50 text-orange-700";
@@ -455,17 +455,17 @@ function SegmentSummary({
   }
 
   return (
-    <article className="rounded-lg border border-gray-200 bg-white p-4">
+    <article className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-xs font-medium text-blue-700">
           {index + 1}
         </span>
         <div>
-          <div className="text-sm font-medium text-gray-900">{title}</div>
-          <div className="text-xs text-gray-500">{String(segment.type ?? type)}</div>
+          <div className="text-sm font-medium text-foreground">{title}</div>
+          <div className="text-xs text-muted-foreground">{String(segment.type ?? type)}</div>
         </div>
       </div>
-      <div className="mt-3 flex flex-col gap-1 text-sm text-gray-600">
+      <div className="mt-3 flex flex-col gap-1 text-sm text-muted-foreground">
         {details.map((detail) => (
           <span key={detail}>{detail}</span>
         ))}
@@ -500,7 +500,7 @@ function RuleEditor({
   const queryClient = useQueryClient();
   const [form, setForm] = useState<RuleFormState>(() => ruleToForm(currentRule));
   const [showValidation, setShowValidation] = useState(false);
-  const [previewRequested, setPreviewRequested] = useState(false);
+  const [_previewRequested, setPreviewRequested] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState("");
   const [draggedSegmentId, setDraggedSegmentId] = useState<string | null>(null);
   const attributesQuery = useQuery({
@@ -637,44 +637,44 @@ function RuleEditor({
     >
       <div className="flex flex-col gap-5">
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>{t("codeRuleDetail.ruleName")}</span>
             <input
               type="text"
               value={form.ruleName}
               onChange={(event) => setForm((current) => ({ ...current, ruleName: event.target.value }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-foreground">
             <span>{t("codeRule.separator")}</span>
             <input
               type="text"
               maxLength={1}
               value={form.separator}
               onChange={(event) => setForm((current) => ({ ...current, separator: event.target.value.toUpperCase() }))}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700 md:col-span-2">
+          <label className="flex flex-col gap-1 text-sm text-foreground md:col-span-2">
             <span>{t("codeRuleDetail.changeReason")}</span>
             <textarea
               value={form.changeReason}
               onChange={(event) => setForm((current) => ({ ...current, changeReason: event.target.value }))}
               rows={2}
               aria-invalid={reasonMissing}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 aria-invalid:border-red-400"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40 aria-invalid:border-red-400"
             />
             {reasonMissing && <span className="text-sm text-red-600">{t("codeRuleDetail.changeReasonRequired")}</span>}
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700 md:col-span-2">
+          <label className="flex flex-col gap-1 text-sm text-foreground md:col-span-2">
             <span>{t("codeRuleDetail.effectiveMode")}</span>
             <select
               value={form.effectiveMode}
               onChange={(event) =>
                 setForm((current) => ({ ...current, effectiveMode: event.target.value as EffectiveMode }))
               }
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="new_materials">{t("codeRuleDetail.effectiveModes.new_materials")}</option>
               <option value="all_recode">{t("codeRuleDetail.effectiveModes.all_recode")}</option>
@@ -683,10 +683,10 @@ function RuleEditor({
           </label>
         </div>
 
-        <div className="rounded-md border border-gray-200 bg-white p-3">
+        <div className="rounded-md border border-border bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-medium text-gray-800">{t("codeRule.livePreview")}</div>
+              <div className="text-sm font-medium text-foreground">{t("codeRule.livePreview")}</div>
               {preview.error && <p className="mt-2 text-sm text-red-600">{preview.error}</p>}
               {!preview.error && (
                 <p className="mt-2 break-all font-mono text-lg text-blue-700">{preview.code || t("codeRule.emptyPreview")}</p>
@@ -732,22 +732,22 @@ function RuleEditor({
                 setDraggedSegmentId(null);
                 setPreviewRequested(true);
               }}
-              className={`rounded-lg border bg-white p-4 ${
+              className={`rounded-lg border bg-card p-4 ${
                 showValidation && segmentValidationError(segment, t)
                   ? "border-red-300 ring-2 ring-red-100"
-                  : "border-gray-200"
+                  : "border-border"
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <GripVertical className="h-5 w-5 shrink-0 cursor-grab text-gray-400" aria-hidden="true" />
+                  <GripVertical className="h-5 w-5 shrink-0 cursor-grab text-muted-foreground" aria-hidden="true" />
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
                     {(() => {
                       const Icon = segmentIconMap[segment.type];
                       return <Icon className="h-4 w-4" />;
                     })()}
                   </span>
-                  <label className="flex w-56 flex-col gap-1 text-sm text-gray-700">
+                  <label className="flex w-56 flex-col gap-1 text-sm text-foreground">
                     <span className="flex items-center gap-1">
                       {t("codeRule.segmentType")}
                       <SegmentHelp type={segment.type} />
@@ -758,7 +758,7 @@ function RuleEditor({
                         const next = createSegment(event.target.value as SegmentType);
                         updateSegment(segment.id, { ...next, id: segment.id });
                       }}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                     >
                       {segmentTypes.map((type) => (
                         <option key={type} value={type}>
@@ -806,25 +806,25 @@ function RuleEditor({
 
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 {segment.type === "fixed" && (
-                  <label className="flex flex-col gap-1 text-sm text-gray-700">
+                  <label className="flex flex-col gap-1 text-sm text-foreground">
                     <span>{t("codeRule.fixedValue")}</span>
                     <input
                       type="text"
                       value={segment.fixedValue}
                       onChange={(event) => updateSegment(segment.id, { fixedValue: event.target.value })}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                     />
                   </label>
                 )}
 
                 {segment.type === "category_path" && (
                   <>
-                    <label className="flex flex-col gap-1 text-sm text-gray-700">
+                    <label className="flex flex-col gap-1 text-sm text-foreground">
                       <span>{t("codeRule.categoryLevel")}</span>
                       <select
                         value={segment.categoryLevel}
                         onChange={(event) => updateSegment(segment.id, { categoryLevel: Number(event.target.value) })}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                       >
                         {[1, 2, 3].map((level) => (
                           <option key={level} value={level}>{level}</option>
@@ -832,7 +832,7 @@ function RuleEditor({
                       </select>
                     </label>
                     {segment.categoryLengths.slice(0, segment.categoryLevel).map((value, lengthIndex) => (
-                      <label key={lengthIndex} className="flex flex-col gap-1 text-sm text-gray-700">
+                      <label key={lengthIndex} className="flex flex-col gap-1 text-sm text-foreground">
                         <span>{t("codeRule.levelLength", { level: lengthIndex + 1 })}</span>
                         <input
                           type="number"
@@ -844,7 +844,7 @@ function RuleEditor({
                             nextLengths[lengthIndex] = event.target.value;
                             updateSegment(segment.id, { categoryLengths: nextLengths });
                           }}
-                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                         />
                       </label>
                     ))}
@@ -853,14 +853,14 @@ function RuleEditor({
 
                 {segment.type === "attribute_code" && (
                   <div className="flex flex-col gap-3 md:col-span-3">
-                    <label className="flex flex-col gap-1 text-sm text-gray-700">
+                    <label className="flex flex-col gap-1 text-sm text-foreground">
                       <span>{t("codeRule.attributeName")}</span>
                       <input
                         type="text"
                         list="code-rule-attribute-options"
                         value={segment.attributeName}
                         onChange={(event) => updateSegment(segment.id, { attributeName: event.target.value })}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                       />
                       <datalist id="code-rule-attribute-options">
                         {attributeOptions.map((attribute) => (
@@ -868,7 +868,7 @@ function RuleEditor({
                         ))}
                       </datalist>
                       {segment.attributeName.trim() && (
-                        <div className="max-h-32 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-sm">
+                        <div className="max-h-32 overflow-y-auto rounded-md border border-border bg-card shadow-sm">
                           {attributeOptions
                             .filter((attribute) =>
                               attribute.name.toLowerCase().includes(segment.attributeName.trim().toLowerCase()),
@@ -878,7 +878,7 @@ function RuleEditor({
                               <button
                                 key={attribute.id}
                                 type="button"
-                                className="block w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-blue-50"
+                                className="block w-full px-3 py-2 text-left text-xs text-foreground hover:bg-blue-50"
                                 onClick={() => updateSegment(segment.id, { attributeName: attribute.name })}
                               >
                                 {attribute.name}
@@ -888,7 +888,7 @@ function RuleEditor({
                       )}
                     </label>
                     <div className="flex flex-col gap-2">
-                      <div className="text-sm font-medium text-gray-700">{t("codeRule.mappingTable")}</div>
+                      <div className="text-sm font-medium text-foreground">{t("codeRule.mappingTable")}</div>
                       {segment.mappings.map((row) => (
                         <div key={row.id} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
                           <input
@@ -896,14 +896,14 @@ function RuleEditor({
                             aria-label={t("codeRule.attributeValue")}
                             value={row.value}
                             onChange={(event) => updateMapping(segment.id, row.id, { value: event.target.value })}
-                            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                           />
                           <input
                             type="text"
                             aria-label={t("codeRule.attributeCode")}
                             value={row.code}
                             onChange={(event) => updateMapping(segment.id, row.id, { code: event.target.value })}
-                            className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                           />
                           <Button
                             type="button"
@@ -949,12 +949,12 @@ function RuleEditor({
                 )}
 
                 {segment.type === "date" && (
-                  <label className="flex flex-col gap-1 text-sm text-gray-700">
+                  <label className="flex flex-col gap-1 text-sm text-foreground">
                     <span>{t("codeRule.dateFormat")}</span>
                     <select
                       value={segment.dateFormat}
                       onChange={(event) => updateSegment(segment.id, { dateFormat: event.target.value as DateFormat })}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                     >
                       {dateFormats.map((format) => (
                         <option key={format} value={format}>{format}</option>
@@ -965,7 +965,7 @@ function RuleEditor({
 
                 {segment.type === "serial" && (
                   <>
-                    <label className="flex flex-col gap-1 text-sm text-gray-700">
+                    <label className="flex flex-col gap-1 text-sm text-foreground">
                       <span>{t("codeRule.serialLength")}</span>
                       <input
                         type="number"
@@ -973,25 +973,25 @@ function RuleEditor({
                         max={10}
                         value={segment.serialLength}
                         onChange={(event) => updateSegment(segment.id, { serialLength: event.target.value })}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm text-gray-700">
+                    <label className="flex flex-col gap-1 text-sm text-foreground">
                       <span>{t("codeRule.serialStart")}</span>
                       <input
                         type="number"
                         min={1}
                         value={segment.serialStart}
                         onChange={(event) => updateSegment(segment.id, { serialStart: event.target.value })}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-sm text-gray-700">
+                    <label className="flex flex-col gap-1 text-sm text-foreground">
                       <span>{t("codeRule.serialScope")}</span>
                       <select
                         value={segment.serialScope}
                         onChange={(event) => updateSegment(segment.id, { serialScope: event.target.value as SerialScope })}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                       >
                         {serialScopes.map((scope) => (
                           <option key={scope} value={scope}>
@@ -1001,9 +1001,9 @@ function RuleEditor({
                       </select>
                     </label>
                     {(segment.serialScope === "category" || segment.serialScope === "category_attribute") && (
-                      <label className="flex flex-col gap-1 text-sm text-gray-700">
+                      <label className="flex flex-col gap-1 text-sm text-foreground">
                         <span>{t("codeRule.serialScopeKey")}</span>
-                        <select className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                        <select className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40">
                           {(categoryOptions.length > 0 ? categoryOptions : [{ id: 0, name: "NETWORK", code: "NETWORK" }]).map((category) => (
                             <option key={category.id} value={category.code}>
                               {category.name} ({category.code})
@@ -1016,7 +1016,7 @@ function RuleEditor({
                       <div className="font-medium">{t("codeRule.serialPreviewTitle")}</div>
                       <div className="mt-2 grid gap-2 md:grid-cols-3">
                         {serialScopePreviewRows(segment, t).map((row) => (
-                          <div key={row.key} className="rounded border border-blue-100 bg-white px-3 py-2">
+                          <div key={row.key} className="rounded border border-blue-100 bg-card px-3 py-2">
                             <div className="text-xs text-blue-600">{row.key}</div>
                             <div className="mt-1 font-mono">
                               {t("codeRule.serialCurrent")}: {row.current} / {t("codeRule.serialNext")}: {row.next}
@@ -1137,8 +1137,8 @@ export function MaterialLibraryDetail({
             <ArrowLeft />
           </Button>
           <div>
-            <h1 className="text-2xl text-gray-900">{library.name}</h1>
-            <p className="mt-1 font-mono text-sm text-gray-500">{library.code}</p>
+            <h1 className="text-2xl text-foreground">{library.name}</h1>
+            <p className="mt-1 font-mono text-sm text-muted-foreground">{library.code}</p>
           </div>
         </div>
       </div>
@@ -1153,26 +1153,26 @@ export function MaterialLibraryDetail({
         </TabsList>
 
         <TabsContent value="basic">
-          <section className="rounded-lg border border-gray-200 bg-white p-5">
-            <h2 className="text-base font-medium text-gray-900">{t("codeRuleDetail.basicInfo")}</h2>
+          <section className="rounded-lg border border-border bg-card p-5">
+            <h2 className="text-base font-medium text-foreground">{t("codeRuleDetail.basicInfo")}</h2>
             <dl className="mt-4 grid gap-4 md:grid-cols-3">
               <div>
-                <dt className="text-sm text-gray-500">{t("field.name")}</dt>
-                <dd className="mt-1 text-sm text-gray-900">{library.name}</dd>
+                <dt className="text-sm text-muted-foreground">{t("field.name")}</dt>
+                <dd className="mt-1 text-sm text-foreground">{library.name}</dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">{t("field.code")}</dt>
-                <dd className="mt-1 font-mono text-sm text-gray-900">{library.code}</dd>
+                <dt className="text-sm text-muted-foreground">{t("field.code")}</dt>
+                <dd className="mt-1 font-mono text-sm text-foreground">{library.code}</dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">{t("codeRule.autoCoding")}</dt>
-                <dd className="mt-1 text-sm text-gray-900">
+                <dt className="text-sm text-muted-foreground">{t("codeRule.autoCoding")}</dt>
+                <dd className="mt-1 text-sm text-foreground">
                   {library.auto_code_enabled ? t("status.enabled") : t("status.disabled")}
                 </dd>
               </div>
               <div className="md:col-span-3">
-                <dt className="text-sm text-gray-500">{t("field.description")}</dt>
-                <dd className="mt-1 text-sm text-gray-900">{library.description || t("codeRule.noDescription")}</dd>
+                <dt className="text-sm text-muted-foreground">{t("field.description")}</dt>
+                <dd className="mt-1 text-sm text-foreground">{library.description || t("codeRule.noDescription")}</dd>
               </div>
             </dl>
           </section>
@@ -1187,16 +1187,16 @@ export function MaterialLibraryDetail({
             onRetry={() => void currentRuleQuery.refetch()}
           >
             {currentRule && (
-              <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5">
+              <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-medium text-gray-900">
+                      <h2 className="text-base font-medium text-foreground">
                         {currentRule.version_label} {currentRule.rule_name}
                       </h2>
                       <StatusBadge status={currentRule.status} />
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-500">
+                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
                       <span>{t("codeRuleDetail.effectiveTime")}: {formatTime(currentRule.effective_time)}</span>
                       <span>{t("codeRuleDetail.createdBy")}: {currentRule.created_by}</span>
                     </div>
@@ -1251,9 +1251,9 @@ export function MaterialLibraryDetail({
             emptyLabel={t("codeRuleDetail.noVersions")}
             onRetry={() => void versionsQuery.refetch()}
           >
-            <section className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5">
+            <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-base font-medium text-gray-900">{t("codeRuleDetail.versionHistory")}</h2>
+                <h2 className="text-base font-medium text-foreground">{t("codeRuleDetail.versionHistory")}</h2>
                 <Button type="button" variant="outline" size="sm" onClick={() => void versionsQuery.refetch()}>
                   <RefreshCw data-icon="inline-start" />
                   {t("app.reload")}
@@ -1261,7 +1261,7 @@ export function MaterialLibraryDetail({
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="border-b border-gray-200 text-gray-500">
+                  <thead className="border-b border-border text-muted-foreground">
                     <tr>
                       <th className="py-2 pr-4 font-medium">{t("codeRuleDetail.versionNo")}</th>
                       <th className="py-2 pr-4 font-medium">{t("codeRuleDetail.ruleName")}</th>
@@ -1271,9 +1271,9 @@ export function MaterialLibraryDetail({
                       <th className="py-2 pr-4 font-medium">{t("codeRuleDetail.changeReason")}</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-border">
                     {(versions?.items ?? []).map((version) => (
-                      <tr key={version.id} className="hover:bg-gray-50">
+                      <tr key={version.id} className="hover:bg-muted/40">
                         <td className="py-3 pr-4">
                           <button
                             type="button"
@@ -1283,17 +1283,17 @@ export function MaterialLibraryDetail({
                             {version.version_label}
                           </button>
                         </td>
-                        <td className="py-3 pr-4 text-gray-900">{version.rule_name}</td>
+                        <td className="py-3 pr-4 text-foreground">{version.rule_name}</td>
                         <td className="py-3 pr-4"><StatusBadge status={version.status} /></td>
-                        <td className="py-3 pr-4 text-gray-600">{formatTime(version.effective_time)}</td>
-                        <td className="py-3 pr-4 text-gray-600">{version.created_by}</td>
-                        <td className="py-3 pr-4 text-gray-600">{version.change_reason || "-"}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{formatTime(version.effective_time)}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{version.created_by}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{version.change_reason || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
                 <span>{t("rules.pageSummary", { page: versionPage, pages: pageCount })}</span>
                 <div className="flex gap-2">
                   <Button
@@ -1319,7 +1319,7 @@ export function MaterialLibraryDetail({
               {selectedVersion && (
                 <div className="rounded-lg border border-blue-100 bg-slate-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="text-sm font-medium text-gray-900">
+                    <h3 className="text-sm font-medium text-foreground">
                       {selectedVersion.version_label} {t("codeRuleDetail.segmentDetail")}
                     </h3>
                     <StatusBadge status={selectedVersion.status} />
@@ -1385,11 +1385,11 @@ export function MaterialLibraryDetail({
   );
 }
 
-function PlaceholderPanel({ title, body }: { title: string; body: string }) {
+function _PlaceholderPanel({ title, body }: { title: string; body: string }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5">
-      <h2 className="text-base font-medium text-gray-900">{title}</h2>
-      <p className="mt-2 text-sm text-gray-600">{body}</p>
+    <section className="rounded-lg border border-border bg-card p-5">
+      <h2 className="text-base font-medium text-foreground">{title}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">{body}</p>
     </section>
   );
 }

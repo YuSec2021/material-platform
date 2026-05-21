@@ -25,6 +25,7 @@ import {
   type MaterialPayload,
   type ProductName,
 } from "@/app/api/client";
+import { useAuth } from "@/app/auth/AuthContext";
 import { Badge } from "@/app/components/ui/badge";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
@@ -91,7 +92,7 @@ function statusMeta(status: Material["status"]) {
   if (normalized === "stop_use") {
     return {
       label: "停用",
-      className: "border-gray-200 bg-gray-100 text-gray-700",
+      className: "border-border bg-accent text-foreground",
     };
   }
   return {
@@ -266,7 +267,7 @@ function TreeCategory({
           onSelect(category.id);
         }}
         className={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm ${
-          selected ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+          selected ? "bg-blue-50 text-blue-700" : "text-foreground hover:bg-accent"
         }`}
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -279,6 +280,7 @@ function TreeCategory({
 export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {}) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const auth = useAuth();
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
   const [expandedLibraryIds, setExpandedLibraryIds] = useState<number[]>([]);
@@ -346,7 +348,12 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       setExpandedLibraryIds([fixedLibraryId]);
       return;
     }
-    if (selectedLibraryId === "" && libraries.length > 0) {
+    if (libraries.length === 0) {
+      setSelectedLibraryId("");
+      setExpandedLibraryIds([]);
+      return;
+    }
+    if (selectedLibraryId === "" || !libraries.some((library) => library.id === selectedLibraryId)) {
       setSelectedLibraryId(libraries[0]!.id);
       setExpandedLibraryIds([libraries[0]!.id]);
     }
@@ -521,16 +528,18 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     form.material_library_id !== "" &&
     form.category_id !== "" &&
     form.product_name_id !== "";
+  const emptyLibraryLabel = auth.user?.is_super_admin ? t("state.emptyLibraries") : t("material.noAccessibleLibraries");
+  const emptyMaterialLabel = auth.user?.is_super_admin ? t("state.emptyMaterials") : t("material.noAccessibleMaterials");
 
   return (
     <div className="flex h-full flex-col gap-4 lg:flex-row lg:gap-6">
-      {!fixedLibraryId && <aside className="max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 lg:max-h-none lg:w-64 lg:shrink-0">
-        <h2 className="mb-4 text-sm font-medium text-gray-900">物料库 / 类目</h2>
+      {!fixedLibraryId && <aside className="max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-4 lg:max-h-none lg:w-64 lg:shrink-0">
+        <h2 className="mb-4 text-sm font-medium text-foreground">物料库 / 类目</h2>
         <ApiState
           isLoading={librariesQuery.isLoading || categoriesQuery.isLoading}
           isError={librariesQuery.isError || categoriesQuery.isError}
           isEmpty={!librariesQuery.isLoading && !categoriesQuery.isLoading && libraries.length === 0}
-          emptyLabel="暂无物料库"
+          emptyLabel={emptyLibraryLabel}
           onRetry={() => {
             void librariesQuery.refetch();
             void categoriesQuery.refetch();
@@ -545,7 +554,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                     type="button"
                     onClick={() => toggleLibrary(library.id)}
                     className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${
-                      selectedLibraryId === library.id ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-100"
+                      selectedLibraryId === library.id ? "bg-blue-50 text-blue-700" : "text-foreground hover:bg-accent"
                     }`}
                   >
                     <span className="truncate">{library.name}</span>
@@ -575,8 +584,8 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       <main className="min-w-0 flex-1 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl text-gray-900">{t("page.materials")}</h1>
-            <p className="mt-1 text-sm text-gray-500">{t("page.materialsHelp")}</p>
+            <h1 className="text-2xl text-foreground">{t("page.materials")}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t("page.materialsHelp")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {(["治理", "添加", "匹配"] as AiModalType[]).map((label) => (
@@ -597,7 +606,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <button
               type="button"
               onClick={exportCsv}
-              className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               <Download className="h-4 w-4" />
               {t("action.export")}
@@ -605,7 +614,8 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <button
               type="button"
               onClick={openCreateForm}
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+              disabled={libraries.length === 0}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               <Plus className="h-4 w-4" />
               {t("action.addMaterial")}
@@ -613,10 +623,10 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex min-w-64 flex-1 items-center gap-2 text-sm text-gray-600">
-              <Search className="h-5 w-5 text-gray-400" />
+            <label className="flex min-w-64 flex-1 items-center gap-2 text-sm text-muted-foreground">
+              <Search className="h-5 w-5 text-muted-foreground" />
               <input
                 type="search"
                 placeholder={t("field.searchMaterials")}
@@ -628,7 +638,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as "" | "normal" | "stop_purchase" | "stop_use")}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               aria-label="状态筛选"
             >
               <option value="">{t("status.all")}</option>
@@ -643,13 +653,13 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
           isLoading={materialsQuery.isLoading}
           isError={materialsQuery.isError}
           isEmpty={!materialsQuery.isLoading && !materialsQuery.isError && materialRows.length === 0}
-          emptyLabel={t("state.emptyMaterials")}
+          emptyLabel={emptyMaterialLabel}
           onRetry={() => void materialsQuery.refetch()}
         >
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1120px]">
-                <thead className="border-b border-gray-200 bg-gray-50">
+                <thead className="border-b border-border bg-muted/40">
                   <tr>
                     {[
                       t("field.materialCode"),
@@ -663,26 +673,26 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                       t("field.status"),
                       t("action.operations"),
                     ].map((header) => (
-                      <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                      <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
                         {header}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-border">
                   {materialRows.map((material) => {
                     const status = normalizeStatus(material.status);
                     const meta = statusMeta(material.status);
                     return (
-                      <tr key={material.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono text-sm text-gray-700">{material.code}</td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{material.name}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{material.category}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{material.product_name}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{material.material_library}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{material.unit || "-"}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{material.brand || "-"}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">
+                      <tr key={material.id} className="hover:bg-muted/40">
+                        <td className="px-4 py-3 font-mono text-sm text-foreground">{material.code}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-foreground">{material.name}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">{material.category}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">{material.product_name}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">{material.material_library}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">{material.unit || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">{material.brand || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-foreground">
                           {Object.entries(material.attributes ?? {})
                             .filter(([key]) => !key.startsWith("_"))
                             .slice(0, 2)
@@ -717,7 +727,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                               <button
                                 type="button"
                                 onClick={() => openLifecycle(material, "stop_use")}
-                                className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                                className="rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
                               >
                                 {t("action.stopUse")}
                               </button>
@@ -752,7 +762,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               {t("action.cancel")}
             </button>
@@ -760,7 +770,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               type="button"
               onClick={handleSubmit}
               disabled={!formReady || saveMutation.isPending}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {saveMutation.isPending ? t("action.saving") : t("action.save")}
             </button>
@@ -769,22 +779,22 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       >
         <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.materialName")}</span>
               <input
                 type="text"
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               />
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.materialCode")}</span>
               <input
                 type="text"
                 value={editingMaterial?.code ?? (materialCodePreview.code || t("material.autoCodePending"))}
                 readOnly
-                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                className="w-full rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
               />
               {!editingMaterial && selectedLibrary?.auto_code_enabled && (
                 <span className={materialCodePreview.error ? "text-xs text-red-600" : "text-xs text-blue-700"}>
@@ -794,14 +804,14 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 </span>
               )}
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.library")}</span>
               <select
                 value={form.material_library_id}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, material_library_id: event.target.value ? Number(event.target.value) : "" }))
                 }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">请选择物料库</option>
                 {libraries.map((library) => (
@@ -811,14 +821,14 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 ))}
               </select>
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.category")}</span>
               <select
                 value={form.category_id}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, category_id: event.target.value ? Number(event.target.value) : "" }))
                 }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">请选择类目</option>
                 {categories.map((category) => (
@@ -828,14 +838,14 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 ))}
               </select>
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.productName")}</span>
               <select
                 value={form.product_name_id}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, product_name_id: event.target.value ? Number(event.target.value) : "", attributes: {} }))
                 }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">请选择品名</option>
                 {productNames.map((productName) => (
@@ -845,14 +855,14 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 ))}
               </select>
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.brand")}</span>
               <select
                 value={form.brand_id}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, brand_id: event.target.value ? Number(event.target.value) : "" }))
                 }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               >
                 <option value="">无品牌</option>
                 {brands.map((brand: Brand) => (
@@ -862,16 +872,16 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 ))}
               </select>
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.unit")}</span>
               <input
                 type="text"
                 value={form.unit}
                 onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
               />
             </label>
-            <label className="space-y-1 text-sm text-gray-700">
+            <label className="space-y-1 text-sm text-foreground">
               <span>选择摘要</span>
               <input
                 type="text"
@@ -881,27 +891,27 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                   selectedName<Category>(categories, form.category_id),
                   selectedName<ProductName>(productNames, form.product_name_id),
                 ].filter(Boolean).join(" / ") || "待选择"}
-                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                className="w-full rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
               />
             </label>
           </div>
 
-          <section className="rounded-lg border border-gray-200 p-4">
+          <section className="rounded-lg border border-border p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-gray-900">动态属性</h3>
-              {attributesQuery.isLoading && <span className="text-xs text-gray-500">属性加载中...</span>}
+              <h3 className="text-sm font-medium text-foreground">动态属性</h3>
+              {attributesQuery.isLoading && <span className="text-xs text-muted-foreground">属性加载中...</span>}
             </div>
             {form.product_name_id === "" ? (
-              <p className="text-sm text-gray-500">选择品名后显示对应必填属性。</p>
+              <p className="text-sm text-muted-foreground">选择品名后显示对应必填属性。</p>
             ) : dynamicAttributes.length === 0 ? (
-              <p className="text-sm text-gray-500">该品名暂无后端属性定义。</p>
+              <p className="text-sm text-muted-foreground">该品名暂无后端属性定义。</p>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {dynamicAttributes.map((attribute) => (
                   <label
                     key={attribute.id}
                     className={`space-y-1 rounded-md border p-3 text-sm ${
-                      attribute.required ? "border-amber-300 bg-amber-50 text-amber-900" : "border-gray-200 text-gray-700"
+                      attribute.required ? "border-amber-300 bg-amber-50 text-amber-900" : "border-border text-foreground"
                     }`}
                   >
                     <span>
@@ -918,7 +928,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                           attributes: { ...current.attributes, [attribute.name]: event.target.value },
                         }))
                       }
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
                     />
                   </label>
                 ))}
@@ -927,28 +937,28 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
           </section>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2 rounded-lg border-2 border-dashed border-gray-300 p-5 text-center text-sm text-gray-600 hover:border-blue-400">
-              <Image className="mx-auto h-8 w-8 text-gray-400" />
+            <label className="space-y-2 rounded-lg border-2 border-dashed border-border p-5 text-center text-sm text-muted-foreground hover:border-blue-400">
+              <Image className="mx-auto h-8 w-8 text-muted-foreground" />
               <span>图片上传，最多 3 张</span>
               <input type="file" accept="image/*" multiple onChange={handleImages} className="sr-only" />
-              <span className="block text-xs text-gray-500">{form.images.map((file) => file.name).join("、") || "点击选择图片"}</span>
+              <span className="block text-xs text-muted-foreground">{form.images.map((file) => file.name).join("、") || "点击选择图片"}</span>
               {imageFeedback && <span className="block text-xs text-orange-700">{imageFeedback}</span>}
             </label>
-            <label className="space-y-2 rounded-lg border-2 border-dashed border-gray-300 p-5 text-center text-sm text-gray-600 hover:border-blue-400">
-              <FileInput className="mx-auto h-8 w-8 text-gray-400" />
+            <label className="space-y-2 rounded-lg border-2 border-dashed border-border p-5 text-center text-sm text-muted-foreground hover:border-blue-400">
+              <FileInput className="mx-auto h-8 w-8 text-muted-foreground" />
               <span>附件上传</span>
               <input type="file" multiple onChange={handleAttachments} className="sr-only" />
-              <span className="block text-xs text-gray-500">{form.attachments.map((file) => file.name).join("、") || "点击选择附件"}</span>
+              <span className="block text-xs text-muted-foreground">{form.attachments.map((file) => file.name).join("、") || "点击选择附件"}</span>
             </label>
           </div>
 
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>{t("field.description")}</span>
             <textarea
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           {saveMutation.isError && <p className="text-sm text-red-600">{saveMutation.error.message}</p>}
@@ -964,7 +974,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <button
               type="button"
               onClick={() => setLifecycleMaterial(null)}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40"
             >
               关闭
             </button>
@@ -972,7 +982,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               type="button"
               onClick={submitLifecycle}
               disabled={!lifecycleReason.trim() || lifecycleMutation.isPending}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               确认
             </button>
@@ -980,16 +990,16 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             {lifecycleMaterial?.code} {lifecycleMaterial?.name}
           </p>
-          <label className="space-y-1 text-sm text-gray-700">
+          <label className="space-y-1 text-sm text-foreground">
             <span>{lifecycleAction === "stop_purchase" ? "停采原因" : "停用原因"}</span>
             <textarea
               value={lifecycleReason}
               onChange={(event) => setLifecycleReason(event.target.value)}
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             />
           </label>
           {lifecycleFeedback && (

@@ -131,34 +131,34 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
         <button
           type="button"
           onClick={() => navigate(config.listPath)}
-          className="rounded-lg p-2 transition-colors hover:bg-gray-100"
+          className="rounded-lg p-2 transition-colors hover:bg-accent"
           aria-label="返回"
         >
-          <ArrowLeft className="h-5 w-5 text-gray-600" />
+          <ArrowLeft className="h-5 w-5 text-muted-foreground" />
         </button>
         <div className="flex flex-1 items-center justify-between">
-          <h1 className="text-2xl text-gray-900">{config.title}</h1>
+          <h1 className="text-2xl text-foreground">{config.title}</h1>
           <StatusBadge status={workflowStatusTone(applicationStatus)}>
             {workflowStatusLabel(applicationStatus)}
           </StatusBadge>
         </div>
       </div>
 
-      <div className="rounded-lg bg-gray-50 p-6">
+      <div className="rounded-lg bg-muted/40 p-6">
         <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <span className="mb-1 block text-sm text-gray-700">单据编码</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">
+            <span className="mb-1 block text-sm text-foreground">单据编码</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-muted-foreground">
               {activeApplication?.application_no ?? "提交后由后端生成"}
             </div>
           </div>
           <div>
-            <span className="mb-1 block text-sm text-gray-700">申请人员</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-900">{user?.username ?? "super_admin"}</div>
+            <span className="mb-1 block text-sm text-foreground">申请人员</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-foreground">{user?.username ?? "super_admin"}</div>
           </div>
           <div>
-            <span className="mb-1 block text-sm text-gray-700">申请日期</span>
-            <div className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">{formatDate(new Date().toISOString())}</div>
+            <span className="mb-1 block text-sm text-foreground">申请日期</span>
+            <div className="rounded-lg bg-card px-3 py-2 text-sm text-muted-foreground">{formatDate(new Date().toISOString())}</div>
           </div>
         </div>
       </div>
@@ -169,24 +169,24 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
         </div>
       )}
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="mb-4 text-lg text-gray-900">{mode === "stop-use" ? "停用信息" : "停采信息"}</h2>
+      <div className="rounded-lg border border-border bg-card p-6">
+        <h2 className="mb-4 text-lg text-foreground">{mode === "stop-use" ? "停用信息" : "停采信息"}</h2>
         <label className="block">
-          <span className="mb-1 block text-sm text-gray-700">
+          <span className="mb-1 block text-sm text-foreground">
             {config.mainReasonLabel} <span className="text-red-500">*</span>
           </span>
           <textarea
             rows={4}
             value={mainReason}
             onChange={(event) => setMainReason(event.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={config.mainReasonLabel}
           />
         </label>
 
         <div className="mt-5">
           <div className="mb-3 flex items-center justify-between">
-            <span className="text-sm text-gray-700">
+            <span className="text-sm text-foreground">
               物料明细 <span className="text-red-500">*</span>
             </span>
             <button
@@ -199,25 +199,25 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
             </button>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-gray-200">
+          <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-muted/40">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">物料编码</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">物料名称</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">规格型号</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">总库存</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">行原因</th>
-                  <th className="px-4 py-3 text-left text-xs text-gray-500">操作</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">物料编码</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">物料名称</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">规格型号</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">总库存</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">行原因</th>
+                  <th className="px-4 py-3 text-left text-xs text-muted-foreground">操作</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-border">
                 {selected ? (
                   <tr>
-                    <td className="px-4 py-3 text-sm text-gray-900">{selected.material.code}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{selected.material.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{materialSpec(selected.material)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{materialStock(selected.material)}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{selected.material.code}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{selected.material.name}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{materialSpec(selected.material)}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{materialStock(selected.material)}</td>
                     <td className="px-4 py-3">
                       <input
                         type="text"
@@ -225,7 +225,7 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
                         onChange={(event) =>
                           setSelected((current) => current && { ...current, rowReason: event.target.value })
                         }
-                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full rounded border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder={config.rowReasonPlaceholder}
                       />
                     </td>
@@ -242,7 +242,7 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
                   </tr>
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       尚未选择物料
                     </td>
                   </tr>
@@ -257,7 +257,7 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
 
       {feedback && <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">{feedback}</div>}
       {draftSaved && selected && (
-        <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+        <div className="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
           草稿物料: {selected.material.code} / {selected.material.name}；主原因: {mainReason || "未填写"}；行原因:
           {selected.rowReason || "未填写"}
         </div>
@@ -267,7 +267,7 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
         <button
           type="button"
           onClick={handleDraft}
-          className="rounded-lg border border-gray-300 px-6 py-2 text-gray-700 hover:bg-gray-50"
+          className="rounded-lg border border-border px-6 py-2 text-foreground hover:bg-muted/40"
         >
           保存草稿
         </button>
@@ -283,8 +283,8 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={config.modalTitle} size="xl">
         <div className="space-y-4">
-          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
-            <Search className="h-5 w-5 text-gray-400" />
+          <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+            <Search className="h-5 w-5 text-muted-foreground" />
             <input
               type="text"
               value={materialSearch}
@@ -303,24 +303,24 @@ export function StopWorkflowApplication({ mode }: { mode: StopWorkflowMode }) {
             emptyLabel={mode === "stop-use" ? config.preconditionLabel : config.emptyModalLabel}
             onRetry={() => void materialsQuery.refetch()}
           >
-            <div className="overflow-hidden rounded-lg border border-gray-200">
+            <div className="overflow-hidden rounded-lg border border-border">
               <table className="w-full">
-                <thead className="bg-gray-50">
+                <thead className="bg-muted/40">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs text-gray-500">物料编码</th>
-                    <th className="px-4 py-3 text-left text-xs text-gray-500">物料名称</th>
-                    <th className="px-4 py-3 text-left text-xs text-gray-500">规格型号</th>
-                    <th className="px-4 py-3 text-left text-xs text-gray-500">库存</th>
-                    <th className="px-4 py-3 text-left text-xs text-gray-500">操作</th>
+                    <th className="px-4 py-3 text-left text-xs text-muted-foreground">物料编码</th>
+                    <th className="px-4 py-3 text-left text-xs text-muted-foreground">物料名称</th>
+                    <th className="px-4 py-3 text-left text-xs text-muted-foreground">规格型号</th>
+                    <th className="px-4 py-3 text-left text-xs text-muted-foreground">库存</th>
+                    <th className="px-4 py-3 text-left text-xs text-muted-foreground">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-border">
                   {(materialsQuery.data ?? []).map((material) => (
                     <tr key={material.id}>
-                      <td className="px-4 py-3 text-sm text-gray-900">{material.code}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{material.name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{materialSpec(material)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{materialStock(material)}</td>
+                      <td className="px-4 py-3 text-sm text-foreground">{material.code}</td>
+                      <td className="px-4 py-3 text-sm text-foreground">{material.name}</td>
+                      <td className="px-4 py-3 text-sm text-foreground">{materialSpec(material)}</td>
+                      <td className="px-4 py-3 text-sm text-foreground">{materialStock(material)}</td>
                       <td className="px-4 py-3">
                         <button
                           type="button"

@@ -148,6 +148,8 @@ class MaterialLibraryOut(BaseModel):
     category_library_id: int | None = None
     category_library_name: str | None = None
     category_library_code: str | None = None
+    access_role: str = "admin"
+    access_role_label: str = "Admin"
 
 
 class MaterialLibraryIn(BaseModel):

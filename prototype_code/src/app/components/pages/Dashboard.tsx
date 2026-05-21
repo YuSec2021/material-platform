@@ -80,17 +80,17 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="mb-2 text-2xl text-gray-900">仪表盘</h1>
-        <p className="text-gray-600">欢迎使用 AI 物料中台管理系统</p>
+        <h1 className="mb-2 text-2xl text-foreground">仪表盘</h1>
+        <p className="text-muted-foreground">欢迎使用 AI 物料中台管理系统</p>
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.title} className="rounded-lg border border-gray-200 bg-white p-6">
+          <div key={stat.title} className="rounded-lg border border-border bg-card p-6">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="mb-1 text-sm text-gray-600">{stat.title}</p>
-                <p className="text-2xl text-gray-900">{applicationsQuery.isLoading ? "..." : stat.value}</p>
+                <p className="mb-1 text-sm text-muted-foreground">{stat.title}</p>
+                <p className="text-2xl text-foreground">{applicationsQuery.isLoading ? "..." : stat.value}</p>
               </div>
               <div className={`rounded-lg p-3 ${stat.className}`}>
                 <stat.icon className="h-6 w-6 text-white" />
@@ -100,9 +100,9 @@ export function Dashboard() {
         ))}
       </div>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
+      <section className="rounded-lg border border-border bg-card p-6">
         <div className="mb-4 flex items-center justify-between gap-4">
-          <h2 className="text-lg text-gray-900">最近申请</h2>
+          <h2 className="text-lg text-foreground">最近申请</h2>
           {applicationsQuery.isError && (
             <Button type="button" variant="outline" size="sm" onClick={() => void applicationsQuery.refetch()}>
               <RefreshCcw className="h-4 w-4" />
@@ -114,7 +114,7 @@ export function Dashboard() {
         {applicationsQuery.isLoading ? (
           <div className="space-y-3" aria-label="最近申请加载中">
             {[0, 1, 2].map((item) => (
-              <div key={item} className="flex items-center justify-between gap-4 border-b border-gray-100 py-3 last:border-0">
+              <div key={item} className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-0">
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-48" />
                   <Skeleton className="h-3 w-32" />
@@ -128,23 +128,23 @@ export function Dashboard() {
             最近申请加载失败，请重试。
           </div>
         ) : recentApplications.length === 0 ? (
-          <div className="rounded-md border border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-600">
+          <div className="rounded-md border border-border bg-muted/40 p-8 text-center text-sm text-muted-foreground">
             暂无最近申请
           </div>
         ) : (
           <div className="space-y-1">
             {recentApplications.map((application: WorkflowApplication) => (
-              <div key={application.id} className="flex items-center justify-between gap-4 border-b border-gray-100 py-3 last:border-0">
+              <div key={application.id} className="flex items-center justify-between gap-4 border-b border-border py-3 last:border-0">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-gray-900">
+                  <p className="truncate text-sm text-foreground">
                     {application.application_no || `APP-${application.id}`} / {workflowTypeLabel(application.type)}
                   </p>
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     申请人：{application.applicant || "-"}；节点：{application.current_node || "-"}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-4">
-                  <span className="text-xs text-gray-500">{formatTime(application.updated_at || application.created_at)}</span>
+                  <span className="text-xs text-muted-foreground">{formatTime(application.updated_at || application.created_at)}</span>
                   <Badge variant="outline" className={statusClassName(application.status)}>
                     {statusLabel(application.status)}
                   </Badge>
