@@ -207,6 +207,54 @@ export type CategoryPayload = {
   enabled?: boolean;
 };
 
+export type CategoryAttributeType = "string" | "number" | "enum" | "date";
+
+export type CategoryAttribute = {
+  id: number;
+  category_id: number;
+  name: string;
+  attr_type: CategoryAttributeType;
+  data_type: CategoryAttributeType;
+  display_name_zh: string;
+  display_name_en: string;
+  options: string[];
+  required: boolean;
+  allow_empty: boolean;
+  default_value: string | null;
+  sort_order: number;
+  inherited_from: number | null;
+  inherited_from_category_id: number | null;
+  inherited_from_category_name: string | null;
+  source_attribute_id: number;
+  source_category_id: number;
+  source_category_name: string;
+  is_own: boolean;
+  is_inherited: boolean;
+  readonly: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CategoryAttributePayload = {
+  name: string;
+  attr_type?: CategoryAttributeType;
+  display_name_zh?: string;
+  display_name_en?: string;
+  options?: string[];
+  required?: boolean;
+  allow_empty?: boolean;
+  default_value?: string | null;
+  sort_order?: number | null;
+};
+
+export type CategoryPropertyList = {
+  category_id: number;
+  own: CategoryAttribute[];
+  inherited: CategoryAttribute[];
+  attributes: CategoryAttribute[];
+  properties: CategoryAttribute[];
+};
+
 export type CategoryImportRow = {
   "一级类目": string;
   "二级类目"?: string;
@@ -1091,6 +1139,24 @@ export const apiClient = {
   },
   deleteCategory(id: number) {
     return request<{ deleted: boolean; id: number }>(`/categories/${id}`, { method: "DELETE" });
+  },
+  categoryProperties(categoryId: number) {
+    return request<CategoryPropertyList>(`/categories/${categoryId}/properties`);
+  },
+  categoryAttributes(categoryId: number) {
+    return request<CategoryAttribute[]>(`/categories/${categoryId}/attributes`);
+  },
+  createCategoryAttribute(categoryId: number, payload: CategoryAttributePayload) {
+    return request<CategoryAttribute>(`/categories/${categoryId}/attributes`, { method: "POST", body: payload });
+  },
+  updateCategoryAttribute(categoryId: number, attributeId: number, payload: Partial<CategoryAttributePayload>) {
+    return request<CategoryAttribute>(`/categories/${categoryId}/attributes/${attributeId}`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+  deleteCategoryAttribute(categoryId: number, attributeId: number) {
+    return request<{ deleted: boolean; id: number }>(`/categories/${categoryId}/attributes/${attributeId}`, { method: "DELETE" });
   },
   downloadCategoryTemplate() {
     return download("/categories/template");
