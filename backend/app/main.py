@@ -5653,11 +5653,38 @@ def reembed_category_library_endpoint(
 
 @app.get("/api/v1/categories", response_model=list[CategoryOut])
 def list_categories(
+    category_library_id: int | None = None,
+    parent_id: int | None = None,
+    level: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories")),
 ) -> list[CategoryOut]:
     ensure_seed_material_context(db)
-    categories = db.query(Category).order_by(Category.id).all()
+    query = db.query(Category)
+    if category_library_id is not None:
+        query = query.filter(Category.category_library_id == category_library_id)
+    if parent_id is not None:
+        query = query.filter(Category.parent_category_id == parent_id)
+    if level is not None:
+        if level == 1:
+            query = query.filter(Category.parent_category_id.is_(None))
+        else:
+            categories = query.order_by(Category.id).all()
+            by_id = {category.id: category for category in categories}
+
+            def depth(category: Category) -> int:
+                current_depth = 1
+                parent_id = category.parent_category_id
+                while parent_id:
+                    parent = by_id.get(parent_id)
+                    if not parent:
+                        break
+                    current_depth += 1
+                    parent_id = parent.parent_category_id
+                return current_depth
+
+            return [category_to_out(category) for category in categories if depth(category) == level]
+    categories = query.order_by(Category.id).all()
     return [category_to_out(category) for category in categories]
 
 

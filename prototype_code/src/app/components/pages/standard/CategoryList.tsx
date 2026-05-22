@@ -167,21 +167,6 @@ function categoryPath(category: Category, categories: Category[]) {
   return path.join(" / ");
 }
 
-function categoryDepth(category: Category, categories: Category[]) {
-  const byId = new Map(categories.map((item) => [item.id, item]));
-  let depth = 1;
-  let parentId = category.parent_category_id;
-  while (parentId) {
-    const parent = byId.get(parentId);
-    if (!parent) {
-      break;
-    }
-    depth += 1;
-    parentId = parent.parent_category_id;
-  }
-  return depth;
-}
-
 function categoryMatchesLibrary(category: Category, library: CategoryLibrary) {
   return category.category_library_id === library.id || (!category.category_library_id && category.category_library === library.name);
 }
@@ -191,26 +176,6 @@ function categoryLibraryId(category: Category, libraries: CategoryLibrary[]) {
     return category.category_library_id;
   }
   return libraries.find((library) => library.name === category.category_library)?.id ?? null;
-}
-
-function categoryDescendantIds(categoryId: number, categories: Category[]) {
-  const childrenByParent = new Map<number, Category[]>();
-  for (const category of categories) {
-    if (!category.parent_category_id) {
-      continue;
-    }
-    childrenByParent.set(category.parent_category_id, [...(childrenByParent.get(category.parent_category_id) ?? []), category]);
-  }
-
-  const ids = new Set<number>([categoryId]);
-  const visit = (id: number) => {
-    for (const child of childrenByParent.get(id) ?? []) {
-      ids.add(child.id);
-      visit(child.id);
-    }
-  };
-  visit(categoryId);
-  return ids;
 }
 
 function treeIndentClass(depth: number) {
@@ -314,8 +279,6 @@ export function CategoryList() {
   const isSuperAdmin = Boolean(user?.is_super_admin);
   const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [libraryFilter, setLibraryFilter] = useState("");
-  const [levelFilter, setLevelFilter] = useState("");
   const [selectedTree, setSelectedTree] = useState<CategoryTreeSelection>(null);
   const [expandedLibraryIds, setExpandedLibraryIds] = useState<number[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<number[]>([]);
@@ -355,10 +318,21 @@ export function CategoryList() {
       : selectedCategory
         ? libraries.find((library) => library.id === categoryLibraryId(selectedCategory, libraries)) ?? null
         : null;
-  const selectedBranchIds = useMemo(
-    () => (selectedCategory ? categoryDescendantIds(selectedCategory.id, categories) : null),
-    [categories, selectedCategory],
-  );
+  const tableCategoryParams = useMemo(() => {
+    if (selectedTree?.type === "library") {
+      return { category_library_id: selectedTree.id, level: 1 };
+    }
+    if (selectedTree?.type === "category") {
+      return { parent_id: selectedTree.id };
+    }
+    return null;
+  }, [selectedTree]);
+  const tableQuery = useQuery({
+    queryKey: ["categories", "table", tableCategoryParams],
+    queryFn: () => apiClient.categoriesByParams(tableCategoryParams ?? {}),
+    enabled: tableCategoryParams !== null,
+    retry: false,
+  });
   const categoryTreeByLibrary = useMemo(
     () =>
       libraries.map((library) => ({
@@ -372,19 +346,12 @@ export function CategoryList() {
   const invalidImportRows = importRows.filter((row) => row.errors.length > 0);
   const invalidRecognizedRows = recognizedRows.filter((row) => row.errors.length > 0);
   const filteredCategories = useMemo(() => {
+    if (!tableCategoryParams) {
+      return [];
+    }
     const term = searchTerm.trim().toLowerCase();
-    return categories
+    return (tableQuery.data ?? [])
       .filter((category) => {
-        const effectiveLibraryId = categoryLibraryId(category, libraries);
-        if (libraryFilter && String(effectiveLibraryId ?? "") !== libraryFilter) {
-          return false;
-        }
-        if (selectedBranchIds && !selectedBranchIds.has(category.id)) {
-          return false;
-        }
-        if (levelFilter && String(categoryDepth(category, categories)) !== levelFilter) {
-          return false;
-        }
         if (!term) {
           return true;
         }
@@ -397,7 +364,7 @@ export function CategoryList() {
         ].some((value) => value.toLowerCase().includes(term));
       })
       .sort((left, right) => categoryPath(left, categories).localeCompare(categoryPath(right, categories)));
-  }, [categories, levelFilter, libraries, libraryFilter, searchTerm, selectedBranchIds]);
+  }, [categories, searchTerm, tableCategoryParams, tableQuery.data]);
   const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CATEGORY_PAGE_SIZE));
   const paginatedCategories = filteredCategories.slice(
     (currentPage - 1) * CATEGORY_PAGE_SIZE,
@@ -419,7 +386,7 @@ export function CategoryList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [levelFilter, libraryFilter, searchTerm, selectedTree]);
+  }, [searchTerm, selectedTree]);
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages));
@@ -428,11 +395,9 @@ export function CategoryList() {
   useEffect(() => {
     if (selectedTree?.type === "library" && !libraries.some((library) => library.id === selectedTree.id)) {
       setSelectedTree(null);
-      setLibraryFilter("");
     }
     if (selectedTree?.type === "category" && !categories.some((category) => category.id === selectedTree.id)) {
       setSelectedTree(null);
-      setLibraryFilter("");
     }
   }, [categories, libraries, selectedTree]);
 
@@ -454,14 +419,12 @@ export function CategoryList() {
 
   const selectLibrary = (library: CategoryLibrary) => {
     setSelectedTree({ type: "library", id: library.id });
-    setLibraryFilter(String(library.id));
   };
 
   const selectCategory = (category: Category) => {
     const effectiveLibraryId = categoryLibraryId(category, libraries);
     setSelectedTree({ type: "category", id: category.id });
     if (effectiveLibraryId) {
-      setLibraryFilter(String(effectiveLibraryId));
       setExpandedLibraryIds((current) => Array.from(new Set([...current, effectiveLibraryId])));
     }
     expandCategoryAncestors(category);
@@ -507,7 +470,6 @@ export function CategoryList() {
     onSuccess: async (_result, deletedId) => {
       if (selectedTree?.type === "category" && selectedTree.id === deletedId) {
         setSelectedTree(null);
-        setLibraryFilter("");
       }
       setExpandedCategoryIds((current) => current.filter((id) => id !== deletedId));
       toast.success(t("toast.deleteSuccess"));
@@ -522,7 +484,6 @@ export function CategoryList() {
       setImportResult(result);
       setExpandedLibraryIds((current) => Array.from(new Set([...current, Number(importLibraryId)])));
       setSelectedTree({ type: "library", id: Number(importLibraryId) });
-      setLibraryFilter(importLibraryId);
       toast.success(t("categoryImport.importComplete"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
@@ -558,7 +519,6 @@ export function CategoryList() {
       setAiText("");
       setExpandedLibraryIds((current) => Array.from(new Set([...current, Number(importLibraryId)])));
       setSelectedTree({ type: "library", id: Number(importLibraryId) });
-      setLibraryFilter(importLibraryId);
       toast.success(t("categoryImport.importComplete"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
@@ -622,6 +582,10 @@ export function CategoryList() {
   const canSave = Boolean(form.name.trim() && form.categoryLibraryId) && !saveMutation.isPending;
   const isLoading = query.isLoading || librariesQuery.isLoading;
   const isError = query.isError || librariesQuery.isError;
+  const isTableLoading = isLoading || (tableCategoryParams !== null && tableQuery.isLoading);
+  const isTableError = isError || (tableCategoryParams !== null && tableQuery.isError);
+  const emptyCategoryTitle = tableCategoryParams ? t("state.emptyCategories") : t("categoryImport.emptySelectionTitle");
+  const emptyCategoryHint = tableCategoryParams ? t("categoryImport.emptyHint") : t("categoryImport.emptySelectionHint");
   const selectedContext = selectedCategory
     ? t("categoryImport.selectedCategory", { path: categoryPath(selectedCategory, categories) })
     : selectedLibrary
@@ -640,11 +604,10 @@ export function CategoryList() {
             type="button"
             onClick={() => {
               setSelectedTree(null);
-              setLibraryFilter("");
             }}
             className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
           >
-            {t("categoryImport.showAll")}
+            {t("categoryImport.clearSelection")}
           </button>
         </div>
         <div className="mb-3 flex flex-wrap gap-2">
@@ -772,66 +735,29 @@ export function CategoryList() {
               className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </label>
-          <select
-            value={libraryFilter}
-            onChange={(event) => {
-              const value = event.target.value;
-              setLibraryFilter(value);
-              if (!value) {
-                setSelectedTree(null);
-                return;
-              }
-              const library = libraries.find((item) => String(item.id) === value);
-              if (library) {
-                setSelectedTree({ type: "library", id: library.id });
-                setExpandedLibraryIds((current) => Array.from(new Set([...current, library.id])));
-              }
-            }}
-            className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-            aria-label={t("field.categoryLibrary")}
-          >
-            <option value="">{t("categoryImport.allLibraries")}</option>
-            {libraries.map((library) => (
-              <option key={library.id} value={library.id}>
-                {library.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={levelFilter}
-            onChange={(event) => setLevelFilter(event.target.value)}
-            className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-            aria-label={t("categoryImport.levelFilter")}
-          >
-            <option value="">{t("categoryImport.allLevels")}</option>
-            <option value="1">{t("categoryImport.levelNumber", { level: 1 })}</option>
-            <option value="2">{t("categoryImport.levelNumber", { level: 2 })}</option>
-            <option value="3">{t("categoryImport.levelNumber", { level: 3 })}</option>
-          </select>
         </div>
       </div>
 
       <ApiState
-        isLoading={isLoading}
-        isError={isError}
+        isLoading={isTableLoading}
+        isError={isTableError}
         isEmpty={false}
-        emptyLabel={t("state.emptyCategories")}
+        emptyLabel={emptyCategoryTitle}
         onRetry={() => {
           void query.refetch();
           void librariesQuery.refetch();
+          void tableQuery.refetch();
         }}
       >
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px]">
+            <table className="w-full min-w-[760px]">
               <thead className="border-b border-border bg-muted/40">
                 <tr>
                   {[
                     t("categoryImport.categoryName"),
                     t("field.code"),
-                    t("categoryImport.level"),
                     t("categoryImport.parentCategory"),
-                    t("field.categoryLibrary"),
                     t("field.description"),
                     t("action.operations"),
                   ].map((header) => (
@@ -844,23 +770,22 @@ export function CategoryList() {
               <tbody className="divide-y divide-border">
                 {paginatedCategories.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-14 text-center">
+                    <td colSpan={5} className="px-4 py-14 text-center">
                       <div className="mx-auto flex max-w-sm flex-col items-center">
                         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
                           <Inbox className="h-6 w-6" />
                         </div>
-                        <p className="text-sm font-medium text-foreground">{t("state.emptyCategories")}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{t("categoryImport.emptyHint")}</p>
+                        <p className="text-sm font-medium text-foreground">{emptyCategoryTitle}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{emptyCategoryHint}</p>
                         <button
                           type="button"
                           onClick={() => {
                             setSearchTerm("");
-                            setLibraryFilter("");
-                            setLevelFilter("");
+                            setSelectedTree(null);
                           }}
                           className="mt-4 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
                         >
-                          {t("categoryImport.resetFilters")}
+                          {tableCategoryParams ? t("categoryImport.resetFilters") : t("categoryImport.clearSelection")}
                         </button>
                       </div>
                     </td>
@@ -875,12 +800,8 @@ export function CategoryList() {
                         <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
                         <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
                         <td className="px-4 py-3 text-sm text-foreground">
-                          {t("categoryImport.levelNumber", { level: categoryDepth(category, categories) })}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-foreground">
                           {parent ? categoryPath(parent, categories) : t("categoryImport.noParent")}
                         </td>
-                        <td className="px-4 py-3 text-sm text-foreground">{category.category_library || "-"}</td>
                         <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
                           <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
                         </td>

@@ -45,6 +45,12 @@ export type Category = {
   enabled: boolean;
 };
 
+export type CategoryListParams = {
+  category_library_id?: number | string | null;
+  parent_id?: number | string | null;
+  level?: number | string | null;
+};
+
 export type CategoryLibrary = {
   id: number;
   code: string;
@@ -1130,6 +1136,9 @@ export const apiClient = {
   },
   categories() {
     return request<Category[]>("/categories");
+  },
+  categoriesByParams(params: CategoryListParams) {
+    return request<Category[]>(withQuery("/categories", params));
   },
   createCategory(payload: CategoryPayload) {
     return request<Category>("/categories", { method: "POST", body: payload });
