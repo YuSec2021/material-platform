@@ -645,7 +645,7 @@ export function MaterialLibraryList() {
   }
 
   return (
-    <div className="flex flex-1 flex-col space-y-6">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-6 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl text-foreground">{t("page.materialLibraries")}</h1>
@@ -674,16 +674,17 @@ export function MaterialLibraryList() {
         </label>
       </div>
 
-      <ApiState
-        isLoading={query.isLoading}
-        isError={query.isError}
-        isEmpty={!query.isLoading && !query.isError && data.length === 0}
-        emptyLabel={emptyLabel}
-        onRetry={() => void query.refetch()}
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {data.map((item) => (
-            <article key={item.id} className="rounded-lg border border-border bg-card p-6 shadow-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <ApiState
+          isLoading={query.isLoading}
+          isError={query.isError}
+          isEmpty={!query.isLoading && !query.isError && data.length === 0}
+          emptyLabel={emptyLabel}
+          onRetry={() => void query.refetch()}
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {data.map((item) => (
+              <article key={item.id} className="rounded-lg border border-border bg-card p-6 shadow-sm">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-100">
                   <Package className="h-6 w-6 text-green-600" />
@@ -759,10 +760,11 @@ export function MaterialLibraryList() {
                   {t("action.delete")}
                 </button>
               </div>
-            </article>
-          ))}
-        </div>
-      </ApiState>
+              </article>
+            ))}
+          </div>
+        </ApiState>
+      </div>
 
       <Modal
         isOpen={isFormOpen}

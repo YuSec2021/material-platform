@@ -153,7 +153,7 @@ export function CategoryLibraryList() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl text-foreground">{t("page.categoryLibraries")}</h1>
@@ -171,15 +171,17 @@ export function CategoryLibraryList() {
 
       <SearchPanel value={searchTerm} onChange={setSearchTerm} placeholder={t("field.searchCategoryLibraries")} />
 
-      <ApiState
-        isLoading={query.isLoading}
-        isError={query.isError}
-        isEmpty={!query.isLoading && !query.isError && data.length === 0}
-        emptyLabel={t("state.emptyCategoryLibraries")}
-        onRetry={() => void query.refetch()}
-      >
-        <DataTable data={data} columns={columns} />
-      </ApiState>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <ApiState
+          isLoading={query.isLoading}
+          isError={query.isError}
+          isEmpty={!query.isLoading && !query.isError && data.length === 0}
+          emptyLabel={t("state.emptyCategoryLibraries")}
+          onRetry={() => void query.refetch()}
+        >
+          <DataTable data={data} columns={columns} />
+        </ApiState>
+      </div>
 
       <Modal
         isOpen={isFormOpen}
