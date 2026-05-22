@@ -29,6 +29,7 @@ import {
 import { useAuth } from "@/app/auth/AuthContext";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import { CategoryPropertiesPanel } from "./CategoryPropertiesPanel";
 
 type CategoryFormState = {
   name: string;
@@ -716,6 +717,7 @@ export function CategoryList() {
             })}
           </div>
         </ApiState>
+        <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
       </aside>
 
       <main className="min-w-0 flex-1 space-y-6">

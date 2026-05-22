@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -7,6 +7,7 @@ import {
   Edit,
   FileInput,
   Image,
+  Lock,
   Plus,
   Search,
   Sparkles,
@@ -19,6 +20,7 @@ import {
   type Attribute,
   type Brand,
   type Category,
+  type CategoryAttribute,
   type Material,
   type MaterialCategoryMatch,
   type MaterialCodeRuleVersion,
@@ -127,6 +129,17 @@ function selectedName<T extends { id: number; name: string }>(items: T[] | undef
   return items?.find((item) => item.id === id)?.name ?? "";
 }
 
+function categoryAttributeLabel(attribute: CategoryAttribute, language: string) {
+  if (language === "en-US") {
+    return attribute.display_name_en || attribute.name;
+  }
+  return attribute.display_name_zh || attribute.name;
+}
+
+function sortedCategoryAttributes(attributes: CategoryAttribute[]) {
+  return [...attributes].sort((left, right) => left.sort_order - right.sort_order || left.id - right.id);
+}
+
 function segmentTypeFromRaw(raw: unknown): SegmentType {
   if (raw === "fixed_text") {
     return "fixed";
@@ -219,11 +232,14 @@ function csvCell(value: unknown) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
 
-function toPayload(form: MaterialFormState, attributes: Attribute[]): MaterialPayload {
+function toPayload(form: MaterialFormState, attributes: Attribute[], categoryProperties: CategoryAttribute[]): MaterialPayload {
   const attributePayload = attributes.reduce<Record<string, unknown>>((current, attribute) => {
     current[attribute.name] = form.attributes[attribute.name] ?? "";
     return current;
   }, {});
+  for (const property of categoryProperties) {
+    attributePayload[property.name] = form.attributes[property.name] ?? "";
+  }
 
   return {
     name: form.name.trim(),
@@ -278,9 +294,68 @@ function TreeCategory({
   );
 }
 
+function CategoryPropertyField({
+  property,
+  value,
+  language,
+  onChange,
+}: {
+  property: CategoryAttribute;
+  value: string;
+  language: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  const required = property.required || !property.allow_empty;
+  const label = categoryAttributeLabel(property, language);
+  const inputClass =
+    "w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40";
+
+  return (
+    <label
+      className={`space-y-1 rounded-md border p-3 text-sm ${
+        required ? "border-amber-300 bg-amber-50 text-amber-900" : "border-border text-foreground"
+      }`}
+    >
+      <span className="flex flex-wrap items-center gap-2">
+        {property.is_inherited && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+        <span>{label}</span>
+        {required && <span className="text-red-600">*</span>}
+        <span className="rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground">
+          {t(`categoryProperties.types.${property.attr_type}`)}
+        </span>
+      </span>
+      <span className="block font-mono text-xs text-muted-foreground">{property.name}</span>
+      {property.is_inherited && (
+        <span className="block text-xs text-muted-foreground">
+          {t("categoryProperties.sourceLabel", { name: property.inherited_from_category_name ?? property.source_category_name })}
+        </span>
+      )}
+      {property.attr_type === "enum" ? (
+        <select value={value} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+          <option value="">{property.allow_empty ? t("categoryProperties.noDefault") : t("categoryProperties.defaultPlaceholder")}</option>
+          {property.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={property.attr_type === "number" ? "number" : property.attr_type === "date" ? "date" : "text"}
+          value={value}
+          placeholder={property.default_value ?? t("categoryProperties.defaultPlaceholder")}
+          onChange={(event) => onChange(event.target.value)}
+          className={inputClass}
+        />
+      )}
+    </label>
+  );
+}
+
 export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {}) {
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const auth = useAuth();
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
@@ -301,6 +376,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const [categoryMatches, setCategoryMatches] = useState<MaterialCategoryMatch[]>([]);
   const [selectedAiCategoryId, setSelectedAiCategoryId] = useState<number | null>(null);
   const [categoryMatchMessage, setCategoryMatchMessage] = useState("");
+  const categoryPropertiesSectionRef = useRef<HTMLElement | null>(null);
 
   const materialsQuery = useQuery({
     queryKey: ["materials", searchTerm, statusFilter, selectedLibraryId],
@@ -338,10 +414,18 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   });
 
   const selectedProductNameId = form.product_name_id === "" ? null : Number(form.product_name_id);
+  const selectedCategoryIdForProperties = form.category_id === "" ? null : Number(form.category_id);
   const attributesQuery = useQuery({
     queryKey: ["attributes", selectedProductNameId],
     queryFn: () => apiClient.attributes(selectedProductNameId),
     enabled: isFormOpen && selectedProductNameId !== null,
+    retry: false,
+  });
+
+  const categoryPropertiesQuery = useQuery({
+    queryKey: ["category-properties", selectedCategoryIdForProperties],
+    queryFn: () => apiClient.categoryProperties(Number(selectedCategoryIdForProperties)),
+    enabled: isFormOpen && selectedCategoryIdForProperties !== null,
     retry: false,
   });
 
@@ -371,12 +455,54 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     }
   }, [form.unit, productNamesQuery.data, selectedProductNameId]);
 
+  useEffect(() => {
+    if (!isFormOpen || !categoryPropertiesQuery.data) {
+      return;
+    }
+    setForm((current) => {
+      const nextAttributes = { ...current.attributes };
+      for (const property of categoryPropertiesQuery.data.properties) {
+        if (!(property.name in nextAttributes) && property.default_value) {
+          nextAttributes[property.name] = property.default_value;
+        }
+      }
+      return { ...current, attributes: nextAttributes };
+    });
+  }, [categoryPropertiesQuery.data, isFormOpen]);
+
+  useEffect(() => {
+    if (!isFormOpen || !selectedCategoryIdForProperties || !categoryPropertiesQuery.data) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      categoryPropertiesSectionRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [categoryPropertiesQuery.data, isFormOpen, selectedCategoryIdForProperties]);
+
   const materialRows = useMemo(() => materialsQuery.data ?? [], [materialsQuery.data]);
   const libraries = librariesQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
   const productNames = productNamesQuery.data ?? [];
   const brands = brandsQuery.data ?? [];
   const dynamicAttributes = attributesQuery.data ?? [];
+  const inheritedCategoryProperties = useMemo(
+    () => sortedCategoryAttributes(categoryPropertiesQuery.data?.inherited ?? []),
+    [categoryPropertiesQuery.data?.inherited],
+  );
+  const ownCategoryProperties = useMemo(
+    () => sortedCategoryAttributes(categoryPropertiesQuery.data?.own ?? []),
+    [categoryPropertiesQuery.data?.own],
+  );
+  const effectiveCategoryProperties = useMemo(
+    () => [...inheritedCategoryProperties, ...ownCategoryProperties],
+    [inheritedCategoryProperties, ownCategoryProperties],
+  );
+  const missingRequiredCategoryProperties = effectiveCategoryProperties.filter((property) => {
+    if (!(property.required || !property.allow_empty)) {
+      return false;
+    }
+    return !String(form.attributes[property.name] ?? "").trim();
+  });
   const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
   const selectedCategory = categories.find((category) => category.id === form.category_id);
   const linkedCategoryLibraryIds = useMemo(() => {
@@ -518,7 +644,15 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   };
 
   const handleSubmit = () => {
-    saveMutation.mutate(toPayload(form, dynamicAttributes));
+    if (missingRequiredCategoryProperties.length > 0) {
+      toast.error(
+        t("categoryProperties.missingRequired", {
+          names: missingRequiredCategoryProperties.map((property) => categoryAttributeLabel(property, i18n.language)).join(", "),
+        }),
+      );
+      return;
+    }
+    saveMutation.mutate(toPayload(form, dynamicAttributes, effectiveCategoryProperties));
   };
 
   const handleDelete = (material: Material) => {
@@ -1008,6 +1142,79 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               )}
             </section>
           )}
+
+          <section ref={categoryPropertiesSectionRef} className="scroll-mt-6 rounded-lg border border-border p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground">{t("categoryProperties.materialSectionTitle")}</h3>
+              {categoryPropertiesQuery.isLoading && (
+                <span className="text-xs text-muted-foreground">{t("categoryProperties.materialLoading")}</span>
+              )}
+            </div>
+            {form.category_id === "" ? (
+              <p className="text-sm text-muted-foreground">{t("categoryProperties.materialEmpty")}</p>
+            ) : effectiveCategoryProperties.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("categoryProperties.emptyOwn")}</p>
+            ) : (
+              <div className="space-y-5">
+                {inheritedCategoryProperties.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t("categoryProperties.inheritedSection")}
+                    </h4>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {inheritedCategoryProperties.map((property) => (
+                        <CategoryPropertyField
+                          key={`${property.id}-${property.source_category_id}`}
+                          property={property}
+                          value={form.attributes[property.name] ?? ""}
+                          language={i18n.language}
+                          onChange={(value) =>
+                            setForm((current) => ({
+                              ...current,
+                              attributes: { ...current.attributes, [property.name]: value },
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {ownCategoryProperties.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t("categoryProperties.ownSection")}
+                    </h4>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {ownCategoryProperties.map((property) => (
+                        <CategoryPropertyField
+                          key={property.id}
+                          property={property}
+                          value={form.attributes[property.name] ?? ""}
+                          language={i18n.language}
+                          onChange={(value) =>
+                            setForm((current) => ({
+                              ...current,
+                              attributes: { ...current.attributes, [property.name]: value },
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {missingRequiredCategoryProperties.length > 0 && (
+                  <p className="text-sm text-red-600">
+                    {t("categoryProperties.missingRequired", {
+                      names: missingRequiredCategoryProperties
+                        .map((property) => categoryAttributeLabel(property, i18n.language))
+                        .join(", "),
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
+            {categoryPropertiesQuery.isError && <p className="mt-3 text-sm text-red-600">{t("categoryProperties.loadFailed")}</p>}
+          </section>
 
           <section className="rounded-lg border border-border p-4">
             <div className="mb-3 flex items-center justify-between">
