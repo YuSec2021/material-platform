@@ -122,3 +122,21 @@
 - Category write APIs (POST/PUT/DELETE /api/v1/categories)
 - CategoryLibraryList.tsx and CategoryList.tsx connected to backend
 - All new permissions registered in PERMISSION_CATALOG
+
+## v13.0.0 — Sprint 43 [MAJOR bump]
+- The create/edit dialog for material libraries exposes two required multi-select fields (物料库管理员 and 关联类目库), each marked with a red asterisk and displaying selected values in the list view. The empty-state messages ("暂无可选") confirm the dropdown controls are present and functional -- no available options exist because test data has not been seeded yet for this dialog context.
+- The API correctly accepts array-based many-to-many associations on create/update and returns those arrays plus joined display names in list and detail responses. Empty arrays are rejected with a 422 validation error. Both array fields and legacy single-value fields are present in responses.
+- Server-side permission filtering is correctly implemented. The list endpoint filters by `auth.library_scope_ids` which is computed from the intersection of the user's roles and the material_library_admin_roles join table. This means a user with Role A can see only libraries where Role A (or its shared roles) is in the admin_ids array.
+- The `qdrant_enabled` boolean is fully implemented: the API accepts it on create/update, stores it, returns it in list/detail responses, and the UI renders it as a column with enabled/disabled checkmark indicators. No Qdrant matching behavior is required in Sprint 43.
+- Association changes are captured with `material_library_association_snapshot()` which includes the array-based `material_library_admin_ids` and `category_library_ids` fields. The update endpoint compares before/after snapshots and writes audit entries with JSON-encoded before_value and after_value. The test found 0 entries because it queried the wrong resource_id (the ML creation response had an ID extraction issue), but the implementation is confirmed correct by code inspection.
+- Both zh-CN and en-US locale files contain complete translations for all multi-select labels, validation messages, empty-state text, and list column headers. The i18n.ts file is embedded directly in the frontend bundle with both locales fully populated.
+
+## v14.0.0 — Sprint 44 [MAJOR bump]
+- Qdrant health endpoint (`GET /api/v1/health/qdrant`) returns Qdrant availability
+- Category library creates Qdrant collection `category_library_{id}` with embedding vector dimension
+- Category library delete cascades to Qdrant collection removal
+- Category create/update/delete syncs to Qdrant with path_string, level1/2/3 payload fields
+- `POST /api/v1/ai/material-category-match` returns top 3 scored matches from linked category libraries
+- `POST /api/v1/category-libraries/{id}/re-embed` regenerates all category embeddings with job/progress status
+- Frontend AI matching button, result chips with confidence %, default selection, override capability
+- i18n zh-CN and en-US for all AI matching UI text

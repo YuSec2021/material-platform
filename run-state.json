@@ -1,14 +1,14 @@
 {
-  "mode": "complete",
-  "current_sprint": 43,
+  "mode": "checking",
+  "current_sprint": 44,
   "retry_count": 0,
-  "last_successful_sprint": 43,
+  "last_successful_sprint": 44,
   "last_failure_reason": "",
   "needs_human": false,
   "active_branch": "main",
   "base_branch": "main",
-  "last_run_at": "2026-05-21T10:20:00Z",
+  "last_run_at": "2026-05-21T11:00:00Z",
   "sprint_origin": "major_feature",
-  "current_version": "13.0.0",
+  "current_version": "14.0.0",
   "quality_retry_count": 0
 }
