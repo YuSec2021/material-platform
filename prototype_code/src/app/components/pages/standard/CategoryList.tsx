@@ -629,8 +629,8 @@ export function CategoryList() {
       : t("categoryImport.noSelection");
 
   return (
-    <div className="flex h-full flex-col gap-4 lg:flex-row lg:gap-6">
-      <aside className="max-h-96 overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm lg:max-h-none lg:w-72 lg:shrink-0">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
+      <aside className="max-h-[36vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm lg:max-h-none lg:w-72 lg:shrink-0">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-medium text-foreground">{t("categoryImport.treeTitle")}</h2>
@@ -720,7 +720,7 @@ export function CategoryList() {
         <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
       </aside>
 
-      <main className="min-w-0 flex-1 space-y-6">
+      <main className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-1">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl text-foreground">{t("page.categories")}</h1>

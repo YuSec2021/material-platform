@@ -365,7 +365,7 @@ export function MainLayout() {
         </header>
 
         <main className="flex-1 overflow-auto p-4 md:p-6">
-          <div className="flex min-h-full flex-col">
+          <div className="flex h-full min-h-0 flex-col">
             <Outlet />
           </div>
         </main>

@@ -720,8 +720,8 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const emptyMaterialLabel = auth.user?.is_super_admin ? t("state.emptyMaterials") : t("material.noAccessibleMaterials");
 
   return (
-    <div className="flex h-full flex-col gap-4 lg:flex-row lg:gap-6">
-      {!fixedLibraryId && <aside className="max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-4 lg:max-h-none lg:w-64 lg:shrink-0">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
+      {!fixedLibraryId && <aside className="max-h-[36vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-card p-4 lg:max-h-none lg:w-64 lg:shrink-0">
         <h2 className="mb-4 text-sm font-medium text-foreground">物料库 / 类目</h2>
         <ApiState
           isLoading={librariesQuery.isLoading || categoriesQuery.isLoading}
@@ -769,7 +769,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         </ApiState>
       </aside>}
 
-      <main className="min-w-0 flex-1 space-y-4">
+      <main className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl text-foreground">{t("page.materials")}</h1>
