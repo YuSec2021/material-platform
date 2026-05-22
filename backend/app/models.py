@@ -189,6 +189,32 @@ class Category(Base):
     parent: Mapped["Category | None"] = relationship(remote_side=[id], back_populates="children")
     children: Mapped[list["Category"]] = relationship(back_populates="parent")
     materials: Mapped[list["Material"]] = relationship(back_populates="category")
+    attributes: Mapped[list["CategoryAttribute"]] = relationship(
+        back_populates="category",
+        cascade="all, delete-orphan",
+        order_by="CategoryAttribute.sort_order",
+    )
+
+
+class CategoryAttribute(Base):
+    __tablename__ = "category_attributes"
+    __table_args__ = (UniqueConstraint("category_id", "name", name="uq_category_attribute_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    display_name_zh: Mapped[str] = mapped_column(String(160), default="")
+    display_name_en: Mapped[str] = mapped_column(String(160), default="")
+    attr_type: Mapped[str] = mapped_column(String(24), default="string", index=True)
+    options: Mapped[str] = mapped_column(Text, default="[]")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    allow_empty: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    category: Mapped[Category] = relationship(back_populates="attributes")
 
 
 class Material(Base):
