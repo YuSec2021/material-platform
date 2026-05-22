@@ -36,6 +36,7 @@ from .models import (
     CapabilityAgentMapping,
     CapabilityModelMapping,
     Category,
+    CategoryAttribute,
     CategoryLibrary,
     FeaturePermission,
     LLMProviderConfig,
@@ -82,10 +83,14 @@ from .schemas import (
     CapabilityMappingIn,
     CapabilityMappingOut,
     CategoryIn,
+    CategoryAttributeCreate,
+    CategoryAttributeRead,
+    CategoryAttributeUpdate,
     CategoryLibraryIn,
     CategoryLibraryOut,
     CategoryLibraryUpdate,
     CategoryOut,
+    CategoryPropertyList,
     CategoryRecognitionBatchRequest,
     CategoryRecognitionJob,
     CategoryRecognitionJobResult,
@@ -552,6 +557,13 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories", "label": "POST /api/v1/categories"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/template", "label": "GET /api/v1/categories/template"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/bulk-import", "label": "POST /api/v1/categories/bulk-import"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/{category_id}/attributes", "label": "GET /api/v1/categories/{category_id}/attributes"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/{category_id}/attributes/own", "label": "GET /api/v1/categories/{category_id}/attributes/own"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/{category_id}/properties", "label": "GET /api/v1/categories/{category_id}/properties"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/{category_id}/attributes", "label": "POST /api/v1/categories/{category_id}/attributes"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/{category_id}/attributes/batch", "label": "POST /api/v1/categories/{category_id}/attributes/batch"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}/attributes/{attribute_id}", "label": "PUT /api/v1/categories/{category_id}/attributes/{attribute_id}"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}/attributes/{attribute_id}", "label": "DELETE /api/v1/categories/{category_id}/attributes/{attribute_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize", "label": "POST /api/v1/ai/category-recognition/recognize"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize-async", "label": "POST /api/v1/ai/category-recognition/recognize-async"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/ai/category-recognition/jobs/{job_id}", "label": "GET /api/v1/ai/category-recognition/jobs/{job_id}"},
@@ -592,6 +604,7 @@ def startup() -> None:
     ensure_audit_log_schema()
     ensure_material_code_rule_schema()
     ensure_category_schema()
+    ensure_category_attribute_schema()
     ensure_material_library_association_schema()
     ensure_product_name_schema()
     db = next(get_db())
@@ -696,6 +709,22 @@ def ensure_category_schema() -> None:
         ).fetchone()
         if not has_parent_column:
             connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
+
+
+def ensure_category_attribute_schema() -> None:
+    with engine.begin() as connection:
+        Base.metadata.create_all(bind=connection)
+        CategoryAttribute.__table__.create(bind=connection, checkfirst=True)
+        if engine.dialect.name == "sqlite":
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
+                "ON category_attributes (category_id, name)"
+            )
+        else:
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
+                "ON category_attributes (category_id, name)"
+            )
 
 
 def ensure_material_library_association_schema() -> None:
@@ -1769,6 +1798,9 @@ NON_SUPER_READ_PERMISSIONS = {
     "api.GET./api/v1/category-libraries",
     "api.GET./api/v1/category-libraries/{library_id}",
     "api.GET./api/v1/categories",
+    "api.GET./api/v1/categories/{category_id}/attributes",
+    "api.GET./api/v1/categories/{category_id}/attributes/own",
+    "api.GET./api/v1/categories/{category_id}/properties",
     "api.GET./api/v1/product-names",
     "api.GET./api/v1/product-names/{product_name_id}",
     "api.GET./api/v1/brands",
@@ -2628,6 +2660,202 @@ def category_to_out(category: Category) -> CategoryOut:
         description=category.description,
         enabled=category.enabled,
     )
+
+
+CATEGORY_ATTRIBUTE_TYPES = {"string", "number", "enum", "date"}
+
+
+def category_attribute_options(value: str | list[str] | None) -> list[str]:
+    if isinstance(value, list):
+        return [compact_space(str(item)) for item in value if compact_space(str(item))]
+    if not value:
+        return []
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(loaded, list):
+        return [compact_space(str(item)) for item in loaded if compact_space(str(item))]
+    return []
+
+
+def normalize_category_attribute_type(payload: CategoryAttributeCreate | CategoryAttributeUpdate) -> str | None:
+    raw_type = getattr(payload, "attr_type", None) if getattr(payload, "attr_type", None) is not None else getattr(payload, "data_type", None)
+    if raw_type is None:
+        return None
+    attr_type = compact_space(str(raw_type)).lower()
+    aliases = {"text": "string", "str": "string", "integer": "number", "float": "number", "decimal": "number"}
+    attr_type = aliases.get(attr_type, attr_type)
+    if attr_type not in CATEGORY_ATTRIBUTE_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid attr_type: {raw_type}")
+    return attr_type
+
+
+def validate_category_attribute_payload(
+    db: Session,
+    category: Category,
+    payload: CategoryAttributeCreate | CategoryAttributeUpdate,
+    existing: CategoryAttribute | None = None,
+) -> dict[str, Any]:
+    ensure_category_attribute_schema()
+    values: dict[str, Any] = {}
+    fields_set = payload.model_fields_set
+    if isinstance(payload, CategoryAttributeCreate) or "name" in fields_set:
+        name = compact_space(str(payload.name or ""))
+        if not name:
+            raise HTTPException(status_code=422, detail="Attribute name is required")
+        duplicate = (
+            db.query(CategoryAttribute)
+            .filter(CategoryAttribute.category_id == category.id, CategoryAttribute.name == name)
+        )
+        if existing is not None:
+            duplicate = duplicate.filter(CategoryAttribute.id != existing.id)
+        if duplicate.first():
+            raise HTTPException(status_code=409, detail="Attribute name already exists for this category")
+        values["name"] = name
+    attr_type = normalize_category_attribute_type(payload)
+    if attr_type is not None:
+        values["attr_type"] = attr_type
+    elif isinstance(payload, CategoryAttributeCreate):
+        values["attr_type"] = "string"
+
+    for field in ["display_name_zh", "display_name_en", "default_value"]:
+        if isinstance(payload, CategoryAttributeCreate) or field in fields_set:
+            value = getattr(payload, field)
+            values[field] = None if value is None else str(value).strip()
+    for field in ["required", "allow_empty", "sort_order"]:
+        if isinstance(payload, CategoryAttributeCreate) or field in fields_set:
+            value = getattr(payload, field)
+            if value is not None:
+                values[field] = value
+    if isinstance(payload, CategoryAttributeCreate) or "options" in fields_set:
+        options = getattr(payload, "options", None) or []
+        values["options"] = json.dumps(category_attribute_options(options), ensure_ascii=False)
+    if values.get("attr_type") == "enum" and not category_attribute_options(values.get("options")):
+        raise HTTPException(status_code=422, detail="Enum attributes require at least one option")
+    if "sort_order" not in values and isinstance(payload, CategoryAttributeCreate):
+        max_sort = (
+            db.query(func.max(CategoryAttribute.sort_order))
+            .filter(CategoryAttribute.category_id == category.id)
+            .scalar()
+        )
+        values["sort_order"] = int(max_sort or 0) + 10
+    return values
+
+
+def category_attribute_to_read(
+    attribute: CategoryAttribute,
+    target_category_id: int,
+    source_category: Category,
+) -> CategoryAttributeRead:
+    is_own = source_category.id == target_category_id
+    inherited_from = None if is_own else source_category.id
+    return CategoryAttributeRead(
+        id=attribute.id,
+        category_id=target_category_id,
+        name=attribute.name,
+        attr_type=attribute.attr_type,
+        data_type=attribute.attr_type,
+        display_name_zh=attribute.display_name_zh,
+        display_name_en=attribute.display_name_en,
+        options=category_attribute_options(attribute.options),
+        required=attribute.required,
+        allow_empty=attribute.allow_empty,
+        default_value=attribute.default_value,
+        sort_order=attribute.sort_order,
+        inherited_from=inherited_from,
+        inherited_from_category_id=inherited_from,
+        inherited_from_category_name=None if is_own else source_category.name,
+        source_attribute_id=attribute.id,
+        source_category_id=source_category.id,
+        source_category_name=source_category.name,
+        is_own=is_own,
+        is_inherited=not is_own,
+        readonly=not is_own,
+        created_at=attribute.created_at.isoformat(),
+        updated_at=attribute.updated_at.isoformat(),
+    )
+
+
+def category_ancestor_chain(db: Session, category: Category) -> list[Category]:
+    chain = [category]
+    seen = {category.id}
+    parent_id = category.parent_category_id
+    while parent_id and parent_id not in seen:
+        parent = db.get(Category, parent_id)
+        if not parent:
+            break
+        chain.append(parent)
+        seen.add(parent.id)
+        parent_id = parent.parent_category_id
+    return list(reversed(chain))
+
+
+def compute_category_properties(db: Session, category_id: int) -> list[CategoryAttributeRead]:
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    properties: list[CategoryAttributeRead] = []
+    seen_source_ids: set[int] = set()
+    for source_category in category_ancestor_chain(db, category):
+        attributes = (
+            db.query(CategoryAttribute)
+            .filter(CategoryAttribute.category_id == source_category.id)
+            .order_by(CategoryAttribute.sort_order, CategoryAttribute.id)
+            .all()
+        )
+        for attribute in attributes:
+            if attribute.id in seen_source_ids:
+                continue
+            seen_source_ids.add(attribute.id)
+            properties.append(category_attribute_to_read(attribute, category.id, source_category))
+    return properties
+
+
+def category_property_list(db: Session, category_id: int) -> CategoryPropertyList:
+    properties = compute_category_properties(db, category_id)
+    own = [item for item in properties if item.is_own]
+    inherited = [item for item in properties if item.is_inherited]
+    return CategoryPropertyList(
+        category_id=category_id,
+        own=own,
+        inherited=inherited,
+        attributes=properties,
+        properties=properties,
+    )
+
+
+def linked_category_library_ids(library: MaterialLibrary) -> set[int]:
+    ids = {item.id for item in library.category_libraries}
+    if library.category_library_id:
+        ids.add(library.category_library_id)
+    return ids
+
+
+def validate_required_category_properties(
+    db: Session,
+    library: MaterialLibrary,
+    category: Category,
+    attributes: dict[str, Any],
+) -> None:
+    if not category.category_library_id or category.category_library_id not in linked_category_library_ids(library):
+        return
+    missing: list[str] = []
+    for prop in compute_category_properties(db, category.id):
+        if not (prop.required or not prop.allow_empty):
+            continue
+        value = attributes.get(prop.name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(prop.name)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Missing required category properties",
+                "missing_properties": missing,
+            },
+        )
 
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333").rstrip("/")
@@ -6065,6 +6293,165 @@ def create_category(
     return category_to_out(category)
 
 
+@app.get("/api/v1/categories/{category_id}/attributes", response_model=list[CategoryAttributeRead])
+def list_category_attributes(
+    category_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories/{category_id}/attributes")),
+) -> list[CategoryAttributeRead]:
+    del auth
+    return compute_category_properties(db, category_id)
+
+
+@app.get("/api/v1/categories/{category_id}/attributes/own", response_model=list[CategoryAttributeRead])
+def list_own_category_attributes(
+    category_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories/{category_id}/attributes/own")),
+) -> list[CategoryAttributeRead]:
+    del auth
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    attributes = (
+        db.query(CategoryAttribute)
+        .filter(CategoryAttribute.category_id == category.id)
+        .order_by(CategoryAttribute.sort_order, CategoryAttribute.id)
+        .all()
+    )
+    return [category_attribute_to_read(attribute, category.id, category) for attribute in attributes]
+
+
+@app.get("/api/v1/categories/{category_id}/properties", response_model=CategoryPropertyList)
+def get_category_properties(
+    category_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories/{category_id}/properties")),
+) -> CategoryPropertyList:
+    del auth
+    return category_property_list(db, category_id)
+
+
+@app.post("/api/v1/categories/{category_id}/attributes", response_model=CategoryAttributeRead)
+def create_category_attribute(
+    category_id: int,
+    payload: CategoryAttributeCreate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/categories/{category_id}/attributes")),
+) -> CategoryAttributeRead:
+    require_button_permission(auth, "button.category_management.edit")
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    values = validate_category_attribute_payload(db, category, payload)
+    attribute = CategoryAttribute(category_id=category.id, **values)
+    db.add(attribute)
+    db.flush()
+    add_audit_log(
+        db,
+        auth,
+        "category_attribute",
+        "create",
+        {},
+        {"id": attribute.id, "category_id": category.id, **values},
+        "human",
+    )
+    db.commit()
+    db.refresh(attribute)
+    return category_attribute_to_read(attribute, category.id, category)
+
+
+@app.post("/api/v1/categories/{category_id}/attributes/batch", response_model=list[CategoryAttributeRead])
+def create_category_attributes_batch(
+    category_id: int,
+    payload: list[CategoryAttributeCreate],
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/categories/{category_id}/attributes/batch")),
+) -> list[CategoryAttributeRead]:
+    require_button_permission(auth, "button.category_management.edit")
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if not payload:
+        raise HTTPException(status_code=422, detail="At least one attribute is required")
+    created: list[CategoryAttribute] = []
+    for item in payload:
+        values = validate_category_attribute_payload(db, category, item)
+        attribute = CategoryAttribute(category_id=category.id, **values)
+        db.add(attribute)
+        db.flush()
+        created.append(attribute)
+    add_audit_log(
+        db,
+        auth,
+        "category_attribute",
+        "batch_create",
+        {},
+        {"category_id": category.id, "attribute_ids": [attribute.id for attribute in created]},
+        "human",
+    )
+    db.commit()
+    for attribute in created:
+        db.refresh(attribute)
+    return [category_attribute_to_read(attribute, category.id, category) for attribute in created]
+
+
+@app.put("/api/v1/categories/{category_id}/attributes/{attribute_id}", response_model=CategoryAttributeRead)
+def update_category_attribute(
+    category_id: int,
+    attribute_id: int,
+    payload: CategoryAttributeUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/categories/{category_id}/attributes/{attribute_id}")),
+) -> CategoryAttributeRead:
+    require_button_permission(auth, "button.category_management.edit")
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    attribute = db.get(CategoryAttribute, attribute_id)
+    if not attribute or attribute.category_id != category.id:
+        raise HTTPException(status_code=404, detail="Own category attribute not found")
+    before = category_attribute_to_read(attribute, category.id, category).model_dump()
+    values = validate_category_attribute_payload(db, category, payload, existing=attribute)
+    if "attr_type" not in values and "options" in values and attribute.attr_type == "enum" and not category_attribute_options(values["options"]):
+        raise HTTPException(status_code=422, detail="Enum attributes require at least one option")
+    for field, value in values.items():
+        setattr(attribute, field, value)
+    attribute.updated_at = now()
+    db.flush()
+    after = category_attribute_to_read(attribute, category.id, category).model_dump()
+    add_audit_log(db, auth, "category_attribute", "update", before, after, "human")
+    db.commit()
+    db.refresh(attribute)
+    return category_attribute_to_read(attribute, category.id, category)
+
+
+@app.delete("/api/v1/categories/{category_id}/attributes/{attribute_id}")
+def delete_category_attribute(
+    category_id: int,
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.DELETE./api/v1/categories/{category_id}/attributes/{attribute_id}")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.category_management.edit")
+    ensure_category_attribute_schema()
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    attribute = db.get(CategoryAttribute, attribute_id)
+    if not attribute or attribute.category_id != category.id:
+        raise HTTPException(status_code=404, detail="Own category attribute not found")
+    before = category_attribute_to_read(attribute, category.id, category).model_dump()
+    db.delete(attribute)
+    add_audit_log(db, auth, "category_attribute", "delete", before, {"deleted": True, "id": attribute_id}, "human")
+    db.commit()
+    return {"deleted": True, "id": attribute_id}
+
+
 @app.put("/api/v1/categories/{category_id}", response_model=CategoryOut)
 def update_category(
     category_id: int,
@@ -7012,6 +7399,7 @@ def create_material(
         payload.material_library_id,
         payload.category_id,
     )
+    validate_required_category_properties(db, library, category, payload.attributes)
     existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Material already exists for this product name")

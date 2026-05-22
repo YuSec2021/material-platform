@@ -334,6 +334,66 @@ class CategoryUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class CategoryAttributeCreate(BaseModel):
+    name: str
+    attr_type: str | None = None
+    data_type: str | None = None
+    display_name_zh: str = ""
+    display_name_en: str = ""
+    options: list[str] = Field(default_factory=list)
+    required: bool = False
+    allow_empty: bool = True
+    default_value: str | None = None
+    sort_order: int | None = None
+
+
+class CategoryAttributeUpdate(BaseModel):
+    name: str | None = None
+    attr_type: str | None = None
+    data_type: str | None = None
+    display_name_zh: str | None = None
+    display_name_en: str | None = None
+    options: list[str] | None = None
+    required: bool | None = None
+    allow_empty: bool | None = None
+    default_value: str | None = None
+    sort_order: int | None = None
+
+
+class CategoryAttributeRead(BaseModel):
+    id: int
+    category_id: int
+    name: str
+    attr_type: str
+    data_type: str
+    display_name_zh: str
+    display_name_en: str
+    options: list[str]
+    required: bool
+    allow_empty: bool
+    default_value: str | None
+    sort_order: int
+    inherited_from: int | None = None
+    inherited_from_category_id: int | None = None
+    inherited_from_category_name: str | None = None
+    source_attribute_id: int
+    source_category_id: int
+    source_category_name: str
+    is_own: bool
+    is_inherited: bool
+    readonly: bool
+    created_at: str
+    updated_at: str
+
+
+class CategoryPropertyList(BaseModel):
+    category_id: int
+    own: list[CategoryAttributeRead]
+    inherited: list[CategoryAttributeRead]
+    attributes: list[CategoryAttributeRead]
+    properties: list[CategoryAttributeRead]
+
+
 class MaterialIn(BaseModel):
     name: str
     product_name_id: int
