@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -440,6 +440,85 @@ class CapabilityModelMapping(Base):
 
     primary_model: Mapped[ModelConfig] = relationship(foreign_keys=[primary_model_id])
     fallback_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[fallback_model_id])
+
+
+class Model(Base):
+    __tablename__ = "models"
+    __table_args__ = (UniqueConstraint("provider", "model_name", name="uq_models_provider_model_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(180), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    model_name: Mapped[str] = mapped_column(String(180), index=True)
+    base_url: Mapped[str] = mapped_column(String(320), default="")
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    timeout: Mapped[int] = mapped_column(Integer, default=30)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    connection_status: Mapped[str] = mapped_column(String(40), default="untested", index=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    migration_data_version: Mapped[str] = mapped_column(String(40), default="migrated", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    primary_capability_mappings: Mapped[list["CapabilityMapping"]] = relationship(
+        back_populates="primary_model",
+        foreign_keys="CapabilityMapping.primary_model_id",
+    )
+    fallback_capability_mappings: Mapped[list["CapabilityMapping"]] = relationship(
+        back_populates="fallback_model",
+        foreign_keys="CapabilityMapping.fallback_model_id",
+    )
+
+    @property
+    def timeout_seconds(self) -> int:
+        return self.timeout
+
+    @property
+    def encrypted_api_key(self) -> str:
+        return self.api_key_encrypted
+
+    @property
+    def model(self) -> str:
+        return self.model_name
+
+    @property
+    def endpoint(self) -> str:
+        return self.base_url
+
+    @property
+    def active(self) -> bool:
+        return self.enabled
+
+
+class CapabilityMapping(Base):
+    __tablename__ = "capability_mappings"
+    __table_args__ = (
+        UniqueConstraint("capability", name="uq_capability_mappings_capability"),
+        CheckConstraint(
+            "primary_model_id IS NULL OR fallback_model_id IS NULL OR primary_model_id != fallback_model_id",
+            name="ck_capability_mappings_distinct_models",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    capability: Mapped[str] = mapped_column(String(50), index=True)
+    primary_model_id: Mapped[int | None] = mapped_column(ForeignKey("models.id"), nullable=True, index=True)
+    fallback_model_id: Mapped[int | None] = mapped_column(ForeignKey("models.id"), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    migration_data_version: Mapped[str] = mapped_column(String(40), default="migrated", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    primary_model: Mapped[Model | None] = relationship(
+        back_populates="primary_capability_mappings",
+        foreign_keys=[primary_model_id],
+    )
+    fallback_model: Mapped[Model | None] = relationship(
+        back_populates="fallback_capability_mappings",
+        foreign_keys=[fallback_model_id],
+    )
 
 
 class TracerSpan(Base):

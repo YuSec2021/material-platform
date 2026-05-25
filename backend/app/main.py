@@ -35,6 +35,7 @@ from .models import (
     Brand,
     CapabilityAgentMapping,
     CapabilityModelMapping,
+    CapabilityMapping,
     Category,
     CategoryAttribute,
     CategoryLibrary,
@@ -49,6 +50,7 @@ from .models import (
     MaterialLibrary,
     MaterialLibraryAdminRole,
     MaterialLibraryCategoryLibrary,
+    Model,
     ModelConfig,
     ProductName,
     ProductNameCodeSequence,
@@ -82,6 +84,9 @@ from .schemas import (
     AgentConfigTestOut,
     CapabilityMappingIn,
     CapabilityMappingOut,
+    CapabilityMappingCreate,
+    CapabilityMappingRead,
+    CapabilityMappingUpdate,
     CategoryIn,
     CategoryAttributeCreate,
     CategoryAttributeRead,
@@ -112,6 +117,10 @@ from .schemas import (
     MaterialCategoryMatchIn,
     MaterialCategoryMatchOut,
     MaterialMatchIn,
+    ModelCreate,
+    ModelRead,
+    ModelTestResult,
+    ModelUpdate,
     MaterialIn,
     MaterialCodeRuleVersionIn,
     MaterialCodeRuleVersionListOut,
@@ -231,6 +240,14 @@ AI_CAPABILITIES = {
     "category_match",
     "category_recognition",
     "material_analysis",
+    "attr_recommend",
+    "material_governance",
+}
+MODEL_PROVIDERS = {"dashscope", "azure", "openai", "vllm", "ollama", "deepseek", "moonshot", "custom"}
+DEFAULT_CAPABILITY_MAPPINGS = {
+    "material_add",
+    "category_recognition",
+    "material_match",
     "attr_recommend",
     "material_governance",
 }
@@ -1416,6 +1433,226 @@ def agent_mapping_to_out(mapping: CapabilityAgentMapping) -> CapabilityMappingOu
     )
 
 
+def gateway_connection_status(status: str | None) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized in {"ok", "connected", "configured"}:
+        return "ok"
+    if normalized in {"error", "failed", "failure"}:
+        return "error"
+    return "untested"
+
+
+def ensure_model_gateway_schema(db: Session) -> None:
+    Base.metadata.create_all(bind=engine)
+    migrate_legacy_model_gateway_data(db)
+    seed_default_capability_mappings(db)
+
+
+def gateway_model_by_provider_name(db: Session, provider: str, model_name: str) -> Model | None:
+    return (
+        db.query(Model)
+        .filter(Model.provider == provider.strip().lower(), Model.model_name == compact_space(model_name))
+        .first()
+    )
+
+
+def create_model_from_legacy_provider(db: Session, provider: ModelConfig) -> Model:
+    model = gateway_model_by_provider_name(db, provider.provider, provider.model_name)
+    if model:
+        return model
+    model = Model(
+        display_name=provider.display_name,
+        provider=provider.provider.strip().lower(),
+        model_name=provider.model_name,
+        base_url=provider.base_url,
+        api_key_encrypted=provider.encrypted_api_key,
+        timeout=provider.timeout_seconds,
+        temperature=None,
+        max_tokens=None,
+        enabled=provider.enabled,
+        connection_status=gateway_connection_status(provider.connection_status),
+        last_tested_at=provider.last_test_at,
+        migration_data_version="migrated",
+        created_at=provider.created_at,
+        updated_at=provider.updated_at,
+    )
+    db.add(model)
+    db.flush()
+    return model
+
+
+def create_model_from_legacy_agent(db: Session, agent: AIAgentConfig) -> Model:
+    model = gateway_model_by_provider_name(db, agent.provider, agent.model_name)
+    if model:
+        model.temperature = agent.temperature
+        model.max_tokens = agent.max_tokens
+        if not model.api_key_encrypted:
+            model.api_key_encrypted = agent.encrypted_api_key
+        model.updated_at = now()
+        db.flush()
+        return model
+    model = Model(
+        display_name=agent.config_key or provider_display_name(agent.provider, agent.model_name),
+        provider=agent.provider.strip().lower(),
+        model_name=agent.model_name,
+        base_url=agent.base_url,
+        api_key_encrypted=agent.encrypted_api_key,
+        timeout=agent.timeout,
+        temperature=agent.temperature,
+        max_tokens=agent.max_tokens,
+        enabled=agent.enabled,
+        connection_status=gateway_connection_status(agent.connection_status),
+        last_tested_at=agent.last_test_at,
+        migration_data_version="migrated",
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+    )
+    db.add(model)
+    db.flush()
+    return model
+
+
+def migrate_legacy_model_gateway_data(db: Session) -> None:
+    migration_state = db.query(SystemConfig).filter(SystemConfig.key == "model_gateway_migration_data_version").first()
+    if migration_state and migration_state.value == "migrated":
+        return
+    for legacy_provider in db.query(ModelConfig).order_by(ModelConfig.id).all():
+        create_model_from_legacy_provider(db, legacy_provider)
+    agent_models: dict[int, Model] = {}
+    for legacy_agent in db.query(AIAgentConfig).order_by(AIAgentConfig.id).all():
+        agent_models[legacy_agent.id] = create_model_from_legacy_agent(db, legacy_agent)
+    provider_models: dict[int, Model] = {}
+    for legacy_provider in db.query(ModelConfig).order_by(ModelConfig.id).all():
+        provider_models[legacy_provider.id] = gateway_model_by_provider_name(db, legacy_provider.provider, legacy_provider.model_name)
+
+    for legacy_mapping in db.query(CapabilityModelMapping).order_by(CapabilityModelMapping.id).all():
+        primary = provider_models.get(legacy_mapping.primary_model_id)
+        fallback = provider_models.get(legacy_mapping.fallback_model_id) if legacy_mapping.fallback_model_id else None
+        mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == legacy_mapping.capability).first()
+        if not mapping:
+            mapping = CapabilityMapping(capability=legacy_mapping.capability)
+            db.add(mapping)
+        mapping.primary_model_id = primary.id if primary else None
+        mapping.fallback_model_id = fallback.id if fallback else None
+        mapping.enabled = legacy_mapping.enabled
+        mapping.migration_data_version = "migrated"
+        mapping.updated_at = now()
+
+    for legacy_mapping in db.query(CapabilityAgentMapping).order_by(CapabilityAgentMapping.id).all():
+        primary = agent_models.get(legacy_mapping.agent_config_id)
+        fallback = agent_models.get(legacy_mapping.fallback_agent_config_id) if legacy_mapping.fallback_agent_config_id else None
+        mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == legacy_mapping.capability).first()
+        if not mapping:
+            mapping = CapabilityMapping(capability=legacy_mapping.capability)
+            db.add(mapping)
+        mapping.primary_model_id = primary.id if primary else None
+        mapping.fallback_model_id = fallback.id if fallback else None
+        mapping.enabled = legacy_mapping.enabled
+        mapping.migration_data_version = "migrated"
+        mapping.updated_at = now()
+    if not migration_state:
+        migration_state = SystemConfig(key="model_gateway_migration_data_version", value="migrated", updated_by="system")
+        db.add(migration_state)
+    else:
+        migration_state.value = "migrated"
+        migration_state.updated_by = "system"
+        migration_state.updated_at = now()
+    db.commit()
+
+
+def seed_default_capability_mappings(db: Session) -> None:
+    changed = False
+    for capability in sorted(DEFAULT_CAPABILITY_MAPPINGS):
+        mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+        if mapping:
+            continue
+        db.add(CapabilityMapping(capability=capability, primary_model_id=None, fallback_model_id=None, enabled=True))
+        changed = True
+    if changed:
+        db.commit()
+
+
+def model_to_read(model: Model) -> ModelRead:
+    return ModelRead(
+        id=model.id,
+        display_name=model.display_name,
+        provider=model.provider,
+        model_name=model.model_name,
+        base_url=model.base_url,
+        timeout=model.timeout,
+        temperature=model.temperature,
+        max_tokens=model.max_tokens,
+        enabled=model.enabled,
+        connection_status=model.connection_status,
+        last_tested_at=model.last_tested_at.isoformat() if model.last_tested_at else None,
+        created_at=model.created_at.isoformat(),
+        updated_at=model.updated_at.isoformat(),
+    )
+
+
+def model_snapshot(model: Model) -> dict[str, Any]:
+    return model_to_read(model).model_dump()
+
+
+def validate_model_payload_values(values: dict[str, Any]) -> dict[str, Any]:
+    if "display_name" in values:
+        values["display_name"] = compact_space(values["display_name"])
+        if not values["display_name"]:
+            raise HTTPException(status_code=422, detail="display_name is required")
+    if "provider" in values:
+        values["provider"] = compact_space(values["provider"]).lower()
+        if values["provider"] not in MODEL_PROVIDERS:
+            raise HTTPException(status_code=422, detail="provider must be a supported provider")
+    if "model_name" in values:
+        values["model_name"] = compact_space(values["model_name"])
+        if not values["model_name"]:
+            raise HTTPException(status_code=422, detail="model_name is required")
+    if "base_url" in values:
+        values["base_url"] = compact_space(values["base_url"])
+        if values["base_url"] and not values["base_url"].startswith(("http://", "https://", "local://")):
+            raise HTTPException(status_code=422, detail="base_url must be a valid URL")
+    return values
+
+
+def apply_gateway_model_values(model: Model, values: dict[str, Any], api_key: str | None = None) -> None:
+    values = validate_model_payload_values(values)
+    for field, value in values.items():
+        setattr(model, field, value)
+    if api_key and not api_key.startswith("**"):
+        model.api_key_encrypted = encrypt_api_key(api_key)
+    model.updated_at = now()
+
+
+def ensure_distinct_mapping_models(primary_model_id: int | None, fallback_model_id: int | None) -> None:
+    if primary_model_id is not None and fallback_model_id is not None and primary_model_id == fallback_model_id:
+        raise HTTPException(status_code=422, detail="primary_model_id and fallback_model_id cannot be the same model")
+
+
+def ensure_gateway_model_reference(db: Session, model_id: int | None, label: str) -> Model | None:
+    if model_id is None:
+        return None
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"{label} model not found")
+    return model
+
+
+def capability_mapping_to_read(mapping: CapabilityMapping) -> CapabilityMappingRead:
+    return CapabilityMappingRead(
+        id=mapping.id,
+        capability=mapping.capability,
+        primary_model_id=mapping.primary_model_id,
+        fallback_model_id=mapping.fallback_model_id,
+        enabled=mapping.enabled,
+        created_at=mapping.created_at.isoformat(),
+        updated_at=mapping.updated_at.isoformat(),
+    )
+
+
+def capability_mapping_snapshot(mapping: CapabilityMapping) -> dict[str, Any]:
+    return capability_mapping_to_read(mapping).model_dump()
+
+
 def agent_mapping_for_capability(db: Session, capability: str) -> CapabilityAgentMapping | None:
     Base.metadata.create_all(bind=engine)
     return (
@@ -1929,6 +2166,8 @@ def current_auth(request: Request, db: Session) -> AuthContext:
     role_header = request.headers.get("X-User-Role", "").strip()
     if role_header == "super_admin":
         return super_admin_auth(db)
+    if role_header:
+        return regular_user_auth()
     user_id = request.headers.get("X-User-Id", "").strip()
     username = request.headers.get("X-Username", "").strip()
     if not user_id and not username:
@@ -7750,6 +7989,281 @@ def match_material_category(
     matches = sorted(deduped.values(), key=lambda item: item["score"], reverse=True)[:3]
     message = "" if matches else "No matching categories found"
     return MaterialCategoryMatchOut(matches=matches, results=matches, message=message)
+
+
+@app.get("/api/v1/models", response_model=list[ModelRead])
+def list_models(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    provider: str = "",
+    enabled: bool | None = None,
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> list[ModelRead]:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    query = db.query(Model)
+    if provider:
+        query = query.filter(Model.provider == compact_space(provider).lower())
+    if enabled is not None:
+        query = query.filter(Model.enabled.is_(enabled))
+    models = query.order_by(Model.enabled.desc(), Model.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return [model_to_read(model) for model in models]
+
+
+@app.post("/api/v1/models", response_model=ModelRead)
+def create_model(
+    payload: ModelCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ModelRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    values = payload.model_dump(exclude={"api_key"})
+    model = Model(connection_status="untested", migration_data_version="migrated")
+    apply_gateway_model_values(model, values, payload.api_key)
+    db.add(model)
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="provider and model_name pair must be unique") from exc
+    add_audit_log(db, auth, "model", "create", {}, model_snapshot(model), "human")
+    db.commit()
+    db.refresh(model)
+    return model_to_read(model)
+
+
+@app.get("/api/v1/models/{model_id}/test", response_model=ModelTestResult)
+def test_saved_model(
+    model_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ModelTestResult:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    started = time.perf_counter()
+    result = test_model_connection(model)
+    latency_ms = max(0, int((time.perf_counter() - started) * 1000))
+    before = model_snapshot(model)
+    model.connection_status = "ok" if result["ok"] else "error"
+    model.last_tested_at = now()
+    model.updated_at = now()
+    add_audit_log(db, auth, "model", "test", before, model_snapshot(model), "human")
+    db.commit()
+    return ModelTestResult(
+        ok=bool(result["ok"]),
+        status=model.connection_status,
+        message=str(result["message"]),
+        latency_ms=latency_ms,
+        provider=model.provider,
+        model_name=model.model_name,
+        tested_at=model.last_tested_at.isoformat(),
+        last_tested_at=model.last_tested_at.isoformat(),
+    )
+
+
+@app.get("/api/v1/models/{model_id}", response_model=ModelRead)
+def get_model(
+    model_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ModelRead:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model_to_read(model)
+
+
+@app.put("/api/v1/models/{model_id}", response_model=ModelRead)
+def update_model(
+    model_id: int,
+    payload: ModelUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ModelRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    before = model_snapshot(model)
+    values = payload.model_dump(exclude_unset=True, exclude={"api_key"})
+    apply_gateway_model_values(model, values, payload.api_key)
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="provider and model_name pair must be unique") from exc
+    add_audit_log(db, auth, "model", "update", before, model_snapshot(model), "human")
+    db.commit()
+    db.refresh(model)
+    return model_to_read(model)
+
+
+@app.patch("/api/v1/models/{model_id}/toggle", response_model=ModelRead)
+def toggle_model(
+    model_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ModelRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    before = model_snapshot(model)
+    model.enabled = not model.enabled
+    model.updated_at = now()
+    add_audit_log(db, auth, "model", "toggle", before, model_snapshot(model), "human")
+    db.commit()
+    db.refresh(model)
+    return model_to_read(model)
+
+
+@app.delete("/api/v1/models/{model_id}")
+def delete_model(
+    model_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    model = db.get(Model, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if db.query(CapabilityMapping).filter(
+        or_(
+            CapabilityMapping.primary_model_id == model.id,
+            CapabilityMapping.fallback_model_id == model.id,
+        )
+    ).first():
+        raise HTTPException(status_code=409, detail="Model is referenced by a capability mapping; remove the mapping before deleting")
+    before = model_snapshot(model)
+    db.delete(model)
+    add_audit_log(db, auth, "model", "delete", before, {}, "human")
+    db.commit()
+    return {"deleted": True, "id": model_id}
+
+
+@app.get("/api/v1/capability-mappings", response_model=list[CapabilityMappingRead])
+def list_gateway_capability_mappings(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[CapabilityMappingRead]:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    mappings = db.query(CapabilityMapping).order_by(CapabilityMapping.capability).all()
+    return [capability_mapping_to_read(mapping) for mapping in mappings]
+
+
+@app.post("/api/v1/capability-mappings", response_model=CapabilityMappingRead)
+def create_gateway_capability_mapping(
+    payload: CapabilityMappingCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CapabilityMappingRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    capability = compact_space(payload.capability)
+    if not capability:
+        raise HTTPException(status_code=422, detail="capability is required")
+    ensure_distinct_mapping_models(payload.primary_model_id, payload.fallback_model_id)
+    ensure_gateway_model_reference(db, payload.primary_model_id, "Primary")
+    ensure_gateway_model_reference(db, payload.fallback_model_id, "Fallback")
+    mapping = CapabilityMapping(
+        capability=capability,
+        primary_model_id=payload.primary_model_id,
+        fallback_model_id=payload.fallback_model_id,
+        enabled=payload.enabled,
+        migration_data_version="migrated",
+    )
+    db.add(mapping)
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="capability must be unique") from exc
+    add_audit_log(db, auth, "capability_mapping", "create", {}, capability_mapping_snapshot(mapping), "human")
+    db.commit()
+    db.refresh(mapping)
+    return capability_mapping_to_read(mapping)
+
+
+@app.get("/api/v1/capability-mappings/{mapping_id}", response_model=CapabilityMappingRead)
+def get_gateway_capability_mapping(
+    mapping_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CapabilityMappingRead:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    mapping = db.get(CapabilityMapping, mapping_id)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Capability mapping not found")
+    return capability_mapping_to_read(mapping)
+
+
+@app.put("/api/v1/capability-mappings/{mapping_id}", response_model=CapabilityMappingRead)
+def update_gateway_capability_mapping(
+    mapping_id: int,
+    payload: CapabilityMappingUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CapabilityMappingRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    mapping = db.get(CapabilityMapping, mapping_id)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Capability mapping not found")
+    primary_model_id = payload.primary_model_id if "primary_model_id" in payload.model_fields_set else mapping.primary_model_id
+    fallback_model_id = payload.fallback_model_id if "fallback_model_id" in payload.model_fields_set else mapping.fallback_model_id
+    ensure_distinct_mapping_models(primary_model_id, fallback_model_id)
+    ensure_gateway_model_reference(db, primary_model_id, "Primary")
+    ensure_gateway_model_reference(db, fallback_model_id, "Fallback")
+    before = capability_mapping_snapshot(mapping)
+    if "primary_model_id" in payload.model_fields_set:
+        mapping.primary_model_id = payload.primary_model_id
+    if "fallback_model_id" in payload.model_fields_set:
+        mapping.fallback_model_id = payload.fallback_model_id
+    if payload.enabled is not None:
+        mapping.enabled = payload.enabled
+    mapping.updated_at = now()
+    add_audit_log(db, auth, "capability_mapping", "update", before, capability_mapping_snapshot(mapping), "human")
+    db.commit()
+    db.refresh(mapping)
+    return capability_mapping_to_read(mapping)
+
+
+@app.delete("/api/v1/capability-mappings/{mapping_id}")
+def delete_gateway_capability_mapping(
+    mapping_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    mapping = db.get(CapabilityMapping, mapping_id)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Capability mapping not found")
+    before = capability_mapping_snapshot(mapping)
+    db.delete(mapping)
+    add_audit_log(db, auth, "capability_mapping", "delete", before, {}, "human")
+    db.commit()
+    return {"deleted": True, "id": mapping_id}
 
 
 @app.get("/api/v1/ai/agent-configs", response_model=list[AgentConfigOut])
