@@ -1137,7 +1137,7 @@ export function CategoryList() {
             {aiMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
             {t("categoryImport.sendToAi")}
           </button>
-          <ImportPreviewTable rows={recognizedRows} onChange={(id, key, value) => updatePreviewRow(id, key, value, "ai")} showConfidence />
+          <ImportPreviewTable rows={recognizedRows} onChange={(id, key, value) => updatePreviewRow(id, key, value, "ai")} showConfidence maxLevel={5} />
         </div>
       </Modal>
       </main>
