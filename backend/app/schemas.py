@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProductNameOut(BaseModel):
@@ -657,6 +657,101 @@ class AgentConfigTestOut(BaseModel):
     provider: str
     model: str
     last_test_at: str | None = None
+
+
+MODEL_PROVIDERS = {"dashscope", "azure", "openai", "vllm", "ollama", "deepseek", "moonshot", "custom"}
+
+
+class ModelCreate(BaseModel):
+    display_name: str
+    provider: str
+    model_name: str
+    base_url: str
+    api_key: str | None = None
+    timeout: int = Field(default=30, ge=1, le=120)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    enabled: bool = True
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in MODEL_PROVIDERS:
+            raise ValueError(f"provider must be one of: {', '.join(sorted(MODEL_PROVIDERS))}")
+        return provider
+
+
+class ModelUpdate(BaseModel):
+    display_name: str | None = None
+    provider: str | None = None
+    model_name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    timeout: int | None = Field(default=None, ge=1, le=120)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    enabled: bool | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        provider = value.strip().lower()
+        if provider not in MODEL_PROVIDERS:
+            raise ValueError(f"provider must be one of: {', '.join(sorted(MODEL_PROVIDERS))}")
+        return provider
+
+
+class ModelRead(BaseModel):
+    id: int
+    display_name: str
+    provider: str
+    model_name: str
+    base_url: str
+    timeout: int
+    temperature: float | None = None
+    max_tokens: int | None = None
+    enabled: bool
+    connection_status: str
+    last_tested_at: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ModelTestResult(BaseModel):
+    ok: bool
+    status: str
+    message: str
+    latency_ms: int
+    provider: str
+    model_name: str
+    tested_at: str
+    last_tested_at: str
+
+
+class CapabilityMappingCreate(BaseModel):
+    capability: str
+    primary_model_id: int | None = None
+    fallback_model_id: int | None = None
+    enabled: bool = True
+
+
+class CapabilityMappingUpdate(BaseModel):
+    primary_model_id: int | None = None
+    fallback_model_id: int | None = None
+    enabled: bool | None = None
+
+
+class CapabilityMappingRead(BaseModel):
+    id: int
+    capability: str
+    primary_model_id: int | None = None
+    fallback_model_id: int | None = None
+    enabled: bool
+    created_at: str
+    updated_at: str
 
 
 class CapabilityMappingIn(BaseModel):

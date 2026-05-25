@@ -1135,9 +1135,16 @@ export function CategoryList() {
             className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
             {aiMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-            {t("categoryImport.sendToAi")}
+            {aiMutation.isPending ? t("categoryImport.aiRecognizing") : t("categoryImport.sendToAi")}
           </button>
-          <ImportPreviewTable rows={recognizedRows} onChange={(id, key, value) => updatePreviewRow(id, key, value, "ai")} showConfidence maxLevel={5} />
+          {recognizedRows.length > 0 && (
+            <ImportPreviewTable
+              rows={recognizedRows}
+              maxLevel={recognizedRows.reduce((max, r) => Math.max(max, r.maxLevel ?? 0), 0)}
+              onChange={(id, key, value) => updatePreviewRow(id, key, value, "ai")}
+              showConfidence
+            />
+          )}
         </div>
       </Modal>
       </main>

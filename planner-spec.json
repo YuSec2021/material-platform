@@ -89,7 +89,7 @@
     "llm": "统一模型网关 - DashScope(Qwen3-Max) / Azure OpenAI / 本地vLLM / Ollama, OpenAI兼容格式",
     "embedding": "text-embedding-3-small (OpenAI) 或本地 BGE 模型, 维度 256/768 可选",
     "deployment": "Docker Compose (私有化) / 阿里云 OSS (SaaS) + Nginx负载均衡",
-    "observability": "AITracer自研链路追踪框架 (tracer.spans衡) + structlog JSON日志 -> ELK"
+    "observability": "AITracer自研链路追踪框架 (tracer.spans池) + structlog JSON日志 -> ELK"
   },
   "verification": {
     "mode": "browser",
@@ -337,6 +337,34 @@
       "name": "Qdrant Vector Database Integration for Category Embeddings",
       "module": "ai_infrastructure",
       "description": "Integrate Qdrant vector database to store and retrieve category embeddings, enabling AI-powered semantic search for material-category matching. (1) Qdrant collection management: create one Qdrant collection per category library (collection naming: category_library_{id}); store category records as points with payload (category_id, level1/2/3 names, path_string) and dense vector embedding. (2) Category embedding pipeline: when a new category is created or updated in a category library that has Qdrant integration enabled, generate text embedding (concatenation of level1/level2/level3 names and description) via the embedding service and upsert the point into Qdrant. (3) Delete synchronization: when a category is deleted, remove the corresponding point from Qdrant. (4) Material-to-category matching endpoint: POST /api/v1/ai/material-category-match queries the Qdrant collection(s) corresponding to the specified category_library_ids using the material's name+brand+description as the search vector; returns top-N results with score and category metadata. (5) Re-embedding job: admin-triggered bulk re-embedding endpoint to regenerate all category embeddings for a given category library (useful after model upgrades). (6) Configuration: per-category-library flag qdrant_enabled to control whether embeddings are generated; graceful skip if Qdrant is unavailable.",
+      "priority": "P0"
+    },
+    {
+      "id": "F35",
+      "name": "Category Properties Data Model and Backend APIs",
+      "module": "standard_management",
+      "description": "Every category has two property dimensions: own (自有属性) and inherited (继承属性). Level 1 categories have no inherited properties, only own properties. Level 2 categories inherit 100% of Level 1's own properties. Level 3 inherits Level 2's own properties, and so on. Each category attribute has: name, type (string/number/enum/date), options (for enum type), required (boolean), default_value, inherited_from (category_id for inherited attrs). Backend data model: category_attribute table (id, category_id, name, display_name_zh, display_name_en, attr_type, options JSON, required boolean, allow_empty boolean, default_value, sort_order, created_at, updated_at). Inheritance resolution function: compute_category_properties(category_id) returns combined list of own + all ancestor own properties. CRUD APIs for category attributes at the category level. Own properties are nullable (allow_empty=true).",
+      "priority": "P0"
+    },
+    {
+      "id": "F36",
+      "name": "Category Properties UI and Material Form Integration",
+      "module": "standard_management",
+      "description": "Frontend category properties management UI on the category management page: display a 'category attributes' section below the category tree, showing own properties for the selected category and inherited properties with their source category indicated. When creating/editing a material, if the material is bound to a category, the form must display all required properties (own + inherited) from the bound category hierarchy. Required properties with allow_empty=false must be filled before submission. Optional properties are pre-filled with defaults if available. Visual distinction between own and inherited property groups in the material form.",
+      "priority": "P0"
+    },
+    {
+      "id": "F37",
+      "name": "Category Management Scroll Decoupling",
+      "module": "standard_management",
+      "description": "Decouple scroll binding between the tree sidebar and the content area on both category management and material management pages. Currently both areas may be in a shared scroll container; split them into independent scroll containers so that scrolling the tree sidebar does not scroll the content area, and vice versa. This applies to: category library page, category management page with tree + list/table layout, material library page, and materials page with tree + list layout.",
+      "priority": "P1"
+    },
+    {
+      "id": "F38",
+      "name": "Category Table Column Refinement and Immediate Children Filtering",
+      "module": "standard_management",
+      "description": "Remove the '类目库' (category library) and '层级' (level) columns from the category table display. When a category library is selected in the tree, show only all Level 1 categories under that library. When a Level 1 category is selected, show only its Level 2 children (not grandchildren). When a Level 2 category is selected, show only its Level 3 children. The filtering is based on immediate children only -- no nested grandchildren appear in the table. Backend API: GET /api/v1/categories?parent_id={id} returns immediate children; GET /api/v1/categories?category_library_id={id}&level=1 returns level 1 categories for a library. Frontend: remove 类目库 and 层级 columns from the DataTable; implement level-based filtering in the category list when a tree node is selected.",
       "priority": "P0"
     }
   ],
@@ -924,6 +952,209 @@
         "F32-F33-F34-Documentation: add inline API documentation comments; update any relevant API reference docs for changed endpoints; document Qdrant collection naming conventions and vector dimension requirements",
         "F32-F33-F34-Bug fixes: address any issues discovered during testing of the three sprints; ensure no regressions in existing Sprint 42 permission isolation or other completed features"
       ]
+    },
+    {
+      "id": 46,
+      "title": "Category Properties: Data Model, Backend APIs, and Inheritance Logic",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl/httpx against /api/v1/categories/{id}/attributes endpoints"
+      },
+      "features": [
+        "F35-Backend data model: create category_attribute table with fields id, category_id (FK to category), name, display_name_zh, display_name_en, attr_type (enum: string/number/enum/date), options (JSON array for enum type), required (boolean, default false), allow_empty (boolean, default true), default_value (nullable string), sort_order (integer), created_at, updated_at; ensure unique constraint on (category_id, name)",
+        "F35-Backend inheritance resolution function: compute_category_properties(category_id) traverses the category hierarchy upward, collecting all own properties from ancestors; returns combined list where each attribute includes inherited_from field (null for own attributes); Level 1 has no inherited properties, Level 2 inherits all Level 1 own properties, Level 3 inherits Level 2 own properties, and so on",
+        "F35-CRUD APIs for category attributes: GET /api/v1/categories/{category_id}/attributes returns combined own + inherited properties with source info; GET /api/v1/categories/{category_id}/attributes/own returns only own properties; POST /api/v1/categories/{category_id}/attributes creates own attribute; PUT /api/v1/categories/{category_id}/attributes/{attr_id} updates own attribute (cannot update inherited attributes); DELETE /api/v1/categories/{category_id}/attributes/{attr_id} deletes own attribute (cascades to child categories' inherited copies?)",
+        "F35-Batch attribute creation: POST /api/v1/categories/{category_id}/attributes/batch accepts array of attribute definitions; creates multiple own attributes in one call",
+        "F35-Pydantic v2 schemas: CategoryAttributeCreate, CategoryAttributeUpdate, CategoryAttributeRead (with inherited_from, is_own, is_inherited computed fields), CategoryPropertyList (combined own + inherited with grouping)",
+        "F35-Audit logging: all attribute CRUD operations logged with before/after values; inheritance chain changes logged when parent properties change",
+        "F35-zh-CN/en-US i18n keys: attr_type labels, validation messages, error responses",
+        "F35-Seed data: add 3-5 sample category attributes for demonstration categories (e.g., for 办公用品 category, own properties like 规格, 颜色; for 纸张 subcategory, own property like 纸张克重 plus inherited from parent)"
+      ],
+      "status": "completed",
+      "completed_version": "14.2.0"
+    },
+    {
+      "id": 47,
+      "title": "Category Properties: Frontend UI and Material Form Integration",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F36-Frontend category attributes section: on the category management page, add a '类目属性' (Category Properties) panel below the category tree; when a category is selected, display its own properties (editable) and inherited properties (read-only, with source category indicator); inherited properties shown with a different visual style (e.g., muted color, lock icon, source label like '继承自: 办公用品')",
+        "F36-Create/edit attribute form: inline or slide-out form for managing own attributes of a category; fields: attribute name, display name (zh/en), type (select), options (for enum type), required (checkbox), allow_empty (checkbox), default value (text input); drag-to-reorder attributes; sort_order auto-incremented",
+        "F36-Attribute type editors: string type shows text input; number type shows number input; enum type shows tag/input multi-select for options; date type shows date picker",
+        "F36-Material form integration: when creating/editing a material that is bound to a category, automatically load all category properties (own + inherited) into the material form as dynamic fields; required properties (allow_empty=false) marked with red asterisk; form submission blocked until all required properties are filled",
+        "F36-Property grouping in material form: group properties into sections '自有属性' and '继承属性' with section headers; inherited properties shown first (from highest ancestor), then own properties",
+        "F36-Pre-fill behavior: optional properties with default values pre-filled; user can override; empty optional properties allowed",
+        "F36-zh-CN/en-US i18n for all labels, type names, section headers, placeholder text, validation messages, and error states",
+        "F36-Super admin can edit own attributes; regular users have read-only view of attribute section",
+        "F36-Responsive layout: category attributes section adapts to available width; long property lists use virtual scrolling or pagination"
+      ],
+      "status": "completed",
+      "completed_version": "14.3.0"
+    },
+    {
+      "id": 48,
+      "title": "Scroll Decoupling for Category and Material Management Pages",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F37-Scroll container analysis: inspect existing layout of category library page, category management page (tree + list/table), material library page, and materials management page to identify shared scroll container issues",
+        "F37-Layout refactoring: split the layout into independent scroll containers -- a sidebar container for the tree/navigation panel and a content container for the list/table/data area; use CSS overflow-y: auto on each container separately",
+        "F37-Implementation approach: wrap the tree sidebar in a div with overflow-y: auto and max-height set to viewport or parent height; wrap the content area in a separate div with its own overflow-y: auto; ensure both containers can scroll independently without affecting each other",
+        "F37-Responsive considerations: maintain scroll decoupling across viewport sizes; on smaller screens where layout may stack vertically, ensure each section still scrolls independently",
+        "F37-CSS changes: modify layout container CSS (likely in global.css or layout components); do not change component logic, data fetching, or API behavior",
+        "F37-Affected pages: /materials/libraries (material library list), /materials/categories (category management with tree + list), /standard/categories (standard category management), and any related sub-pages",
+        "F37-Test: verify that scrolling the tree does not scroll the table, and scrolling the table does not scroll the tree; verify both areas scroll independently when content overflows"
+      ],
+      "status": "completed",
+      "completed_version": "14.4.0"
+    },
+    {
+      "id": 49,
+      "title": "Category Table Column Refinement and Immediate Children Filtering",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "F38-Backend API updates: GET /api/v1/categories supports ?parent_id={id} to return only immediate children (direct descendants); GET /api/v1/categories supports ?category_library_id={id}&level=1 to return only level 1 categories for a library; remove '层级' field from category list response (or make it derived, not stored)",
+        "F38-Remove 类目库 column: remove category_library_name from category table columns in the frontend DataTable; the category library context is already established by the tree selection",
+        "F38-Remove 层级 column: remove the level/层级 column from the category table display; the level is implicit from the tree structure (root=Level 1, children=Level 2, etc.)",
+        "F38-Frontend level-based filtering: when a category library is selected in the tree, fetch only Level 1 categories for that library and display in the table; when a Level 1 category is selected, fetch and display only its Level 2 children; when a Level 2 category is selected, fetch and display only its Level 3 children; the table always shows only immediate children of the selected tree node",
+        "F38-Empty state: when no tree node is selected, show an empty state message prompting user to select a category library or category from the tree; do not display all categories by default",
+        "F38-Remove tree expand: since the table now shows only immediate children, the tree expand/collapse becomes less critical; but keep tree expand for navigation context",
+        "F38-zh-CN/en-US i18n: update empty state messages, column headers (removed), and any related labels",
+        "F38-Do not change backend API behavior beyond the filtering additions; existing category CRUD should remain compatible"
+      ],
+      "status": "completed",
+      "completed_version": "14.5.0"
+    },
+    {
+      "id": 50,
+      "title": "类目层级扩展：批量导入和AI识别支持任意层级（最多五级）",
+      "status": "planned",
+      "origin": "minor_feature"
+    },
+    {
+      "id": 51,
+      "title": "AI模型配置架构重构：合并 Model 表 + CapabilityMapping 表 + 迁移脚本",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl/httpx against /api/v1/models and /api/v1/capability-mappings endpoints"
+      },
+      "features": [
+        "New Model table schema: merge fields from ModelConfig (base_url, api_key, timeout, provider, model_name, display_name) and AIAgentConfig (base_url, api_key, timeout, provider, model_name, temperature, max_tokens, config_key) into a single unified model table with fields: id, display_name, provider (enum: dashscope/azure/openai/vllm/ollama/deepseek/moonshot/custom), model_name, base_url, api_key_encrypted (AES-256), timeout (int, seconds), temperature (float, nullable), max_tokens (int, nullable), enabled (boolean), connection_status (enum: untested/ok/error), last_tested_at (datetime), created_at, updated_at; add unique constraint on (provider, model_name)",
+        "New CapabilityMapping table schema: merge capability_model_mapping and capability_agent_mapping into a single table with fields: id, capability (VARCHAR(50), e.g., material_add, category_recognition, material_match, attr_recommend, material_governance), primary_model_id (FK to Model, nullable), fallback_model_id (FK to Model, nullable), enabled (boolean), created_at, updated_at; add unique constraint on capability; add check constraint that primary_model_id != fallback_model_id when both are set",
+        "Database migration: create the new Model table and CapabilityMapping table; add a migration_data_version column to track migration state (pre-migration/in-progress/migrated); keep old tables (model_config, ai_agent_config, capability_model_mapping, capability_agent_mapping) intact during migration for rollback safety",
+        "Backend CRUD for Model: GET /api/v1/models (list with ?provider filter, ?enabled filter, pagination), POST (create), GET /:id (detail), PUT /:id (update), DELETE /:id (soft delete or hard delete with constraint check), PATCH /:id/toggle (enable/disable)",
+        "Backend test connection: GET /api/v1/models/:id/test -- ping the model's provider endpoint with the configured credentials; update connection_status and last_tested_at; return detailed result with latency",
+        "Backend CRUD for CapabilityMapping: GET /api/v1/capability-mappings (list all capability mappings), GET /:id, PUT /:id (update primary/fallback model, enabled); POST creates mapping if capability doesn't exist",
+        "Pydantic v2 schemas: ModelCreate, ModelUpdate, ModelRead (full model with connection status), ModelTestResult, CapabilityMappingCreate, CapabilityMappingUpdate, CapabilityMappingRead",
+        "Seed data: pre-populate default capability mappings for standard capabilities (material_add, category_recognition, material_match, attr_recommend, material_governance) with null primary/fallback models (to be configured later)",
+        "Audit logging: all Model and CapabilityMapping CRUD operations logged with before/after values",
+        "Super admin only: all write endpoints require super_admin role check"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
+    },
+    {
+      "id": 52,
+      "title": "AI模型配置架构重构：重写 model_for_capability() 统一查询逻辑",
+      "verification": {
+        "mode": "api",
+        "base_url": "http://localhost:8000",
+        "command": "curl/httpx against /api/v1/ai/resolve-model and existing AI capability endpoints"
+      },
+      "features": [
+        "Unified model_for_capability(capability: str, prefer_fallback: bool = False) function: queries the new CapabilityMapping table to find the primary_model_id for the given capability; if primary model is disabled or unavailable, falls back to fallback_model_id; returns full Model object with all connection details; if no mapping exists or both models are unavailable, raises an appropriate error with capability context",
+        "Rewrite all existing AI capability call sites to use the new unified model_for_capability(): Category Recognition Agent (F25), Material Category Match (F33/F34), Rule Engine evaluate (F21), and any other AI capability calls that currently reference model_config or ai_agent_config tables",
+        "Connection test on model switch: if the resolved model's connection_status is 'error' or 'untested', attempt a lightweight connectivity check before returning; if check fails, try the fallback model automatically",
+        "Update model selection in existing AI endpoints: POST /api/v1/ai/category-recognition/recognize, POST /api/v1/ai/material-category-match, POST /api/v1/rules/evaluate and any other AI endpoints to read provider/model from the unified Model table via model_for_capability()",
+        "Backward compatibility layer: during the transition, existing model_config and ai_agent_config records can still be read and referenced; the model_for_capability() function should check the new CapabilityMapping first, then fall back to legacy lookup if no mapping is found (with a deprecation warning logged)",
+        "Error response: when no model is available for a capability, return a structured error with capability name and suggestion to configure a model in the Model Gateway",
+        "Hot-switch support: model configuration changes (enable/disable, update credentials) take effect immediately without service restart; the model_for_capability() function always reads fresh data from the database (no caching, or short TTL cache with invalidation)",
+        "AITracer integration: log the resolved model_id, model_name, and provider in all AI capability spans for traceability",
+        "Test coverage: write unit tests for model_for_capability() covering primary resolution, fallback resolution, disabled model handling, missing mapping handling, and backward compatibility with legacy tables"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
+    },
+    {
+      "id": 53,
+      "title": "AI模型配置架构重构：前端模型网关页面",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Model Gateway page (模型网关) under AI Management navigation: route /ai/models displays a card-based grid layout of all models from the new unified Model table, showing model_name, provider badge, display_name, enabled/disabled status, connection status badge (ok=green, error=red, untested=gray), last_tested_at timestamp",
+        "Card layout: each model card shows provider icon/logo, model name (prominent), display name (subtitle), connection status indicator (colored dot), enabled toggle switch, action buttons (edit, test connection, delete)",
+        "Create model dialog: form with fields for display_name (text), provider (select dropdown with presets: DashScope/千问, Azure OpenAI, DeepSeek, Moonshot/月之暗面, OpenAI, vLLM, Ollama, Custom), model_name (text with autocomplete suggestions per provider), base_url (text, auto-filled by provider preset, editable for custom), API key (password input with show/hide toggle), timeout (number input, default 30), temperature (slider 0-2, advanced section), max_tokens (number input, advanced section), enabled (checkbox)",
+        "Edit model dialog: same form as create, pre-populated with existing values; API key field shows masked placeholder if already set, allows update or keep existing",
+        "Connection test: button on each card calls GET /api/v1/models/:id/test; shows loading spinner during test, then updates the connection_status badge and last_tested_at; displays result toast (success with latency, or error with message)",
+        "Delete model: confirmation dialog listing the model name; checks if the model is referenced in any CapabilityMapping; if referenced, shows warning and blocks delete or requires removing mappings first",
+        "Provider presets: selecting a provider auto-fills base_url with the default endpoint (e.g., DashScope -> https://dashscope.aliyuncs.com/compatible-mode/v1, Azure -> requires tenant/subscription config, DeepSeek -> https://api.deepseek.com, Moonshot -> https://api.moonshot.cn); model suggestions dropdown per provider",
+        "zh-CN/en-US i18n: all labels, placeholders, button text, toast messages, confirmation dialogs, error messages, empty state text, and status badges fully translated",
+        "Dark-theme CSS variables: apply bg-background, bg-card, text-foreground, border-border consistently; status badges use design language colors (success green, error red, warning amber)",
+        "Super admin only: navigation and all create/edit/delete actions restricted to super_admin users; regular users see read-only view"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
+    },
+    {
+      "id": 54,
+      "title": "AI模型配置架构重构：前端能力映射页面",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Capability Mapping page (能力映射) under AI Management navigation: route /ai/capability-mappings displays a table/list of all capability -> model mappings from the new unified CapabilityMapping table, clearly showing each capability and its configured primary and fallback models",
+        "Table layout: columns for capability name (with i18n display name, e.g., material_add -> 物料添加, category_recognition -> 类目识别), primary model (shows model display name + provider badge, or empty with '未配置' placeholder in red), fallback model (shows model display name + provider badge, or empty with '未配置' placeholder in gray), status (enabled/disabled badge), actions (edit button)",
+        "Edit mapping dialog: select primary model dropdown (lists all enabled models with display_name + model_name + provider, sorted by provider), select fallback model dropdown (same list, with '无' option and disabled selected primary model), enabled checkbox; validation prevents setting the same model as both primary and fallback",
+        "Visual status: capability rows with no primary model configured show a warning indicator; capability rows with only one model configured (no fallback) show an info indicator suggesting fallback configuration",
+        "Model reference: when a model is referenced in any mapping, it shows a usage count or '已在X个能力中使用' indicator on the Model Gateway card",
+        "Empty state: if no models are configured yet, show guidance message directing users to configure models in the Model Gateway first",
+        "Bulk operations: optional bulk enable/disable for all capability mappings",
+        "zh-CN/en-US i18n: capability names displayed in current locale, table headers, form labels, placeholder text, warning/info messages, empty state text, toast notifications all fully translated; capability display names: material_add (物料添加), category_recognition (类目识别), material_match (物料匹配), attr_recommend (属性推荐), material_governance (物料治理), material_analysis (物料分析)",
+        "Dark-theme CSS variables: consistent with Model Gateway page styling; warning/info indicators use design language colors",
+        "Super admin only: all edit actions restricted to super_admin users; regular users see read-only view"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
+    },
+    {
+      "id": 55,
+      "title": "AI模型配置架构重构：数据迁移 + 旧表清理 + E2E验收测试",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Data migration script: read all records from model_config table and ai_agent_config table; for each ModelConfig record, create a new Model record with merged fields (provider, model_name, base_url, api_key_encrypted, timeout, display_name derived from config_key or model_name); for each AIAgentConfig record, create a new Model record with additional fields (temperature, max_tokens); handle duplicates by matching on (provider, model_name) -- if a model with same provider+name already exists from a ModelConfig, skip the AIAgentConfig duplicate",
+        "Mapping migration: read all records from capability_model_mapping and capability_agent_mapping tables; for each mapping, create a CapabilityMapping record; if the same capability exists in both tables, prefer the agent mapping (more complete); if primary_model or fallback_model references a model that didn't survive migration, set to null and log a warning",
+        "Migration idempotency: migration script is idempotent -- running it multiple times produces the same result; it detects already-migrated records via migration_data_version column and skips them; a rollback script restores the old tables from backup",
+        "Migration with existing data: the 414 mock ModelConfig records and any existing AIAgentConfig records are all processed; mock/test records are flagged with is_test flag in the new Model table for easy filtering/removal",
+        "Old table cleanup: after migration is verified successful (all AI capabilities resolve models correctly, connection tests pass), drop the old tables: model_config, ai_agent_config, capability_model_mapping, capability_agent_mapping; remove the backward compatibility layer from Sprint 52; update Pydantic schemas to remove any legacy references",
+        "E2E testing of the complete refactor: Playwright tests covering Model Gateway CRUD (create model, edit credentials, test connection, delete), Capability Mapping configuration (assign primary/fallback models to each capability), end-to-end AI capability flow (trigger category recognition and verify it uses the resolved model from the new tables), and migration verification (confirm old table data is reflected correctly in new tables)",
+        "Regression testing: verify that existing AI features (F21 rule engine evaluate, F25 category recognition, F33/F34 material-category matching) still work correctly after migration; compare behavior before and after migration",
+        "Performance verification: model_for_capability() lookup performance is acceptable (<10ms for single lookup, <100ms for batch of 10); connection test endpoint responds within 30s timeout",
+        "Final cleanup: remove any deprecated API endpoints that referenced old tables; update API documentation; bump version to reflect the breaking schema change"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
     }
   ]
 }
