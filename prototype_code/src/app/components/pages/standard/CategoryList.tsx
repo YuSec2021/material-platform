@@ -43,6 +43,7 @@ type PreviewRow = CategoryImportRow & {
   id: string;
   errors: string[];
   confidence?: number;
+  maxLevel?: number;
 };
 
 type CategoryTreeSelection =
@@ -135,7 +136,7 @@ function parseImportCsv(text: string): PreviewRow[] {
   });
 }
 
-function toPreviewRow(row: CategoryImportRow, id: string, confidence?: number): PreviewRow {
+function toPreviewRow(row: CategoryImportRow, id: string, confidence?: number, maxLevel?: number): PreviewRow {
   const levels = CATEGORY_LEVEL_KEYS.map((key) => row[key]?.trim() ?? "");
   const errors: string[] = [];
   if (!levels[0]) {
@@ -152,6 +153,7 @@ function toPreviewRow(row: CategoryImportRow, id: string, confidence?: number): 
     id,
     errors,
     confidence,
+    maxLevel,
   };
 }
 
@@ -500,8 +502,16 @@ export function CategoryList() {
   const aiMutation = useMutation({
     mutationFn: () => apiClient.recognizeCategories(aiText, Number(importLibraryId) || null),
     onSuccess: (result) => {
-      const rows = result.categories.map((item, index) =>
-        toPreviewRow(
+      const rows = result.categories.map((item, index) => {
+        const maxLevel = Math.max(
+          1,
+          item.level1 ? 1 : 0,
+          item.level2 ? 2 : 0,
+          item.level3 ? 3 : 0,
+          item.level4 ? 4 : 0,
+          item.level5 ? 5 : 0,
+        );
+        return toPreviewRow(
           {
             "一级类目": item.level1,
             "二级类目": item.level2 ?? "",
@@ -511,8 +521,9 @@ export function CategoryList() {
           },
           `ai-${index + 1}`,
           item.confidence,
-        ),
-      );
+          maxLevel,
+        );
+      });
       setRecognizedRows(rows);
       toast.success(t("categoryImport.aiRecognized"));
     },
@@ -1150,10 +1161,12 @@ function ImportPreviewTable({
   rows,
   onChange,
   showConfidence = false,
+  maxLevel = 5,
 }: {
   rows: PreviewRow[];
   onChange: (id: string, key: keyof CategoryImportRow, value: string) => void;
   showConfidence?: boolean;
+  maxLevel?: number;
 }) {
   const { t } = useTranslation();
   if (rows.length === 0) {
@@ -1169,7 +1182,7 @@ function ImportPreviewTable({
       <table className="min-w-full divide-y divide-border text-sm">
         <thead className="bg-muted/30 text-left text-xs font-medium uppercase text-muted-foreground">
           <tr>
-            {CATEGORY_LEVEL_KEYS.map((key, index) => (
+            {CATEGORY_LEVEL_KEYS.slice(0, maxLevel).map((key, index) => (
               <th key={key} className="px-3 py-2">{t(`categoryImport.level${index + 1}`)}</th>
             ))}
             {showConfidence && <th className="px-3 py-2">{t("categoryImport.confidence")}</th>}
@@ -1177,9 +1190,11 @@ function ImportPreviewTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border bg-card">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const effectiveMaxLevel = row.maxLevel ?? maxLevel;
+            return (
             <tr key={row.id}>
-              {CATEGORY_LEVEL_KEYS.map((key) => (
+              {CATEGORY_LEVEL_KEYS.slice(0, effectiveMaxLevel).map((key) => (
                 <td key={key} className="px-3 py-2">
                   <input
                     value={row[key] ?? ""}
@@ -1207,7 +1222,8 @@ function ImportPreviewTable({
                 )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
