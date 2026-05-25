@@ -1459,6 +1459,15 @@ def gateway_model_by_provider_name(db: Session, provider: str, model_name: str) 
 def create_model_from_legacy_provider(db: Session, provider: ModelConfig) -> Model:
     model = gateway_model_by_provider_name(db, provider.provider, provider.model_name)
     if model:
+        model.display_name = provider.display_name
+        model.base_url = provider.base_url
+        model.api_key_encrypted = provider.encrypted_api_key
+        model.timeout = provider.timeout_seconds
+        model.enabled = provider.enabled
+        model.connection_status = gateway_connection_status(provider.connection_status)
+        model.last_tested_at = provider.last_test_at
+        model.updated_at = now()
+        db.flush()
         return model
     model = Model(
         display_name=provider.display_name,
@@ -1484,10 +1493,15 @@ def create_model_from_legacy_provider(db: Session, provider: ModelConfig) -> Mod
 def create_model_from_legacy_agent(db: Session, agent: AIAgentConfig) -> Model:
     model = gateway_model_by_provider_name(db, agent.provider, agent.model_name)
     if model:
+        model.display_name = agent.config_key or provider_display_name(agent.provider, agent.model_name)
+        model.base_url = agent.base_url
         model.temperature = agent.temperature
         model.max_tokens = agent.max_tokens
-        if not model.api_key_encrypted:
-            model.api_key_encrypted = agent.encrypted_api_key
+        model.api_key_encrypted = agent.encrypted_api_key
+        model.timeout = agent.timeout
+        model.enabled = agent.enabled
+        model.connection_status = gateway_connection_status(agent.connection_status)
+        model.last_tested_at = agent.last_test_at
         model.updated_at = now()
         db.flush()
         return model
@@ -1572,6 +1586,52 @@ def seed_default_capability_mappings(db: Session) -> None:
         db.commit()
 
 
+def sync_gateway_mapping_from_legacy_models(
+    db: Session,
+    capability: str,
+    primary: ModelConfig | None,
+    fallback: ModelConfig | None,
+    enabled: bool,
+) -> None:
+    if not primary:
+        return
+    gateway_primary = create_model_from_legacy_provider(db, primary)
+    gateway_fallback = create_model_from_legacy_provider(db, fallback) if fallback else None
+    mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+    if not mapping:
+        mapping = CapabilityMapping(capability=capability)
+        db.add(mapping)
+    mapping.primary_model_id = gateway_primary.id
+    mapping.fallback_model_id = gateway_fallback.id if gateway_fallback else None
+    mapping.enabled = enabled
+    mapping.migration_data_version = "migrated"
+    mapping.updated_at = now()
+    db.flush()
+
+
+def sync_gateway_mapping_from_legacy_agents(
+    db: Session,
+    capability: str,
+    primary: AIAgentConfig | None,
+    fallback: AIAgentConfig | None,
+    enabled: bool,
+) -> None:
+    if not primary:
+        return
+    gateway_primary = create_model_from_legacy_agent(db, primary)
+    gateway_fallback = create_model_from_legacy_agent(db, fallback) if fallback else None
+    mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+    if not mapping:
+        mapping = CapabilityMapping(capability=capability)
+        db.add(mapping)
+    mapping.primary_model_id = gateway_primary.id
+    mapping.fallback_model_id = gateway_fallback.id if gateway_fallback else None
+    mapping.enabled = enabled
+    mapping.migration_data_version = "migrated"
+    mapping.updated_at = now()
+    db.flush()
+
+
 def model_to_read(model: Model) -> ModelRead:
     return ModelRead(
         id=model.id,
@@ -1588,6 +1648,198 @@ def model_to_read(model: Model) -> ModelRead:
         created_at=model.created_at.isoformat(),
         updated_at=model.updated_at.isoformat(),
     )
+
+
+@dataclass
+class ModelResolution:
+    capability: str
+    model: Model | ModelConfig | AIAgentConfig
+    source: str
+    warning: str = ""
+    primary_connection_error: str = ""
+    primary_model_id: int | None = None
+    primary_model_name: str = ""
+
+
+class CapabilityResolutionError(Exception):
+    def __init__(self, capability: str, message: str, status_code: int = 409):
+        super().__init__(message)
+        self.capability = capability
+        self.status_code = status_code
+        self.suggestion = "Configure an enabled model for this capability in the Model Gateway."
+
+
+def model_display_name(model: Model | ModelConfig | AIAgentConfig) -> str:
+    return compact_space(getattr(model, "display_name", "") or getattr(model, "config_key", "") or getattr(model, "model_name", ""))
+
+
+def resolved_model_payload(model: Model | ModelConfig | AIAgentConfig) -> dict[str, Any]:
+    return {
+        "id": model.id,
+        "display_name": model_display_name(model),
+        "provider": model.provider,
+        "model_name": model.model_name,
+        "base_url": model.base_url,
+        "timeout": int(getattr(model, "timeout", getattr(model, "timeout_seconds", 30)) or 30),
+        "temperature": getattr(model, "temperature", None),
+        "max_tokens": getattr(model, "max_tokens", None),
+        "enabled": bool(model.enabled),
+        "connection_status": gateway_connection_status(getattr(model, "connection_status", "")),
+        "last_tested_at": (
+            getattr(model, "last_tested_at", None) or getattr(model, "last_test_at", None)
+        ).isoformat()
+        if (getattr(model, "last_tested_at", None) or getattr(model, "last_test_at", None))
+        else None,
+    }
+
+
+def resolution_trace_metadata(resolution: ModelResolution) -> dict[str, Any]:
+    return {
+        "model_id": resolution.model.id,
+        "model_name": resolution.model.model_name,
+        "provider": resolution.model.provider,
+        "resolution_source": resolution.source,
+        "warning": resolution.warning,
+        "primary_connection_error": resolution.primary_connection_error,
+        "primary_model_id": resolution.primary_model_id,
+        "primary_model_name": resolution.primary_model_name,
+    }
+
+
+def resolution_response_payload(resolution: ModelResolution) -> dict[str, Any]:
+    payload = {
+        "capability": resolution.capability,
+        "source": resolution.source,
+        "model": resolved_model_payload(resolution.model),
+        "warning": resolution.warning,
+        "primary_connection_error": resolution.primary_connection_error,
+    }
+    if resolution.warning:
+        payload["metadata"] = {"warning": resolution.warning}
+    return payload
+
+
+def model_connection_probe_url(model: Model | ModelConfig | AIAgentConfig) -> str:
+    base_url = (model.base_url or "").rstrip("/")
+    if not base_url or base_url.startswith("local://"):
+        return ""
+    if base_url.endswith("/v1/models"):
+        return base_url
+    if base_url.endswith("/v1"):
+        return f"{base_url}/models"
+    return f"{base_url}/v1/models"
+
+
+def test_gateway_model_connection(model: Model | ModelConfig | AIAgentConfig) -> dict[str, Any]:
+    if model.provider == "mock" or (model.base_url or "").startswith("local://"):
+        return {"ok": True, "status": "ok", "message": f"Local provider is available for {model.model_name}"}
+    url = model_connection_probe_url(model)
+    if not url:
+        return {"ok": False, "status": "error", "message": "Model base URL is not configured"}
+    headers = {"Content-Type": "application/json"}
+    api_key = decrypt_api_key(getattr(model, "api_key_encrypted", getattr(model, "encrypted_api_key", "")))
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    get_error = ""
+    try:
+        response = httpx.get(url, headers=headers, timeout=max(1, int(getattr(model, "timeout", getattr(model, "timeout_seconds", 30)) or 30)))
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as exc:
+        get_error = f"Connection validation failed: {exc}"
+    else:
+        if response.status_code < 400:
+            return {"ok": True, "status": "ok", "message": f"Connection validation succeeded for {model.model_name}"}
+        get_error = f"Connection validation returned HTTP {response.status_code}"
+    try:
+        result = call_model_config(
+            model_config=model,
+            prompt="connection test",
+            messages=[{"role": "user", "content": "connection test"}],
+            capability="connection_test",
+        )
+        return {"ok": True, "status": "ok", "message": f"Chat validation succeeded for {result['model']}"}
+    except Exception as exc:
+        return {"ok": False, "status": "error", "message": f"{get_error}; chat validation failed: {exc}"}
+
+
+def validate_unified_model_connection(db: Session, model: Model) -> str:
+    if gateway_connection_status(model.connection_status) == "ok":
+        return ""
+    result = test_gateway_model_connection(model)
+    model.connection_status = "ok" if result["ok"] else "error"
+    model.last_tested_at = now()
+    model.updated_at = now()
+    db.flush()
+    if not result["ok"]:
+        return str(result["message"])
+    return ""
+
+
+def legacy_resolution_for_capability(db: Session, capability: str, prefer_fallback: bool = False) -> ModelResolution | None:
+    warning = "Legacy model configuration is deprecated; configure this capability in the Model Gateway."
+    agent_mapping = agent_mapping_for_capability(db, capability)
+    if agent_mapping:
+        candidates = [agent_mapping.fallback_agent_config, agent_mapping.agent_config] if prefer_fallback else [agent_mapping.agent_config, agent_mapping.fallback_agent_config]
+        for candidate in candidates:
+            if candidate and candidate.enabled:
+                return ModelResolution(capability=capability, model=candidate, source="legacy", warning=warning)
+    legacy_mapping = mapping_for_capability(db, capability)
+    if legacy_mapping:
+        candidates = [legacy_mapping.fallback_model, legacy_mapping.primary_model] if prefer_fallback else [legacy_mapping.primary_model, legacy_mapping.fallback_model]
+        for candidate in candidates:
+            if candidate and candidate.enabled:
+                return ModelResolution(capability=capability, model=candidate, source="legacy", warning=warning)
+    return None
+
+
+def model_for_capability(db: Session, capability: str, prefer_fallback: bool = False) -> ModelResolution:
+    capability = compact_space(capability)
+    if not capability:
+        raise CapabilityResolutionError(capability, "Capability is required", 422)
+    ensure_model_gateway_schema(db)
+    mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+    configured_unified = bool(mapping and mapping.enabled and (mapping.primary_model_id or mapping.fallback_model_id))
+    if configured_unified:
+        ordered: list[tuple[str, Model | None]] = []
+        if prefer_fallback:
+            ordered = [("fallback", mapping.fallback_model), ("primary", mapping.primary_model)]
+        else:
+            ordered = [("primary", mapping.primary_model), ("fallback", mapping.fallback_model)]
+        primary_error = ""
+        primary_model_id: int | None = None
+        primary_model_name = ""
+        for source, candidate in ordered:
+            if not candidate:
+                continue
+            if not candidate.enabled:
+                if source == "primary":
+                    primary_error = f"Primary model {candidate.model_name} is disabled"
+                    primary_model_id = candidate.id
+                    primary_model_name = candidate.model_name
+                continue
+            connection_error = validate_unified_model_connection(db, candidate)
+            if connection_error:
+                if source == "primary":
+                    primary_error = connection_error
+                    primary_model_id = candidate.id
+                    primary_model_name = candidate.model_name
+                continue
+            db.commit()
+            return ModelResolution(
+                capability=capability,
+                model=candidate,
+                source=source,
+                primary_connection_error=primary_error if source == "fallback" else "",
+                warning=primary_error if source == "fallback" and primary_error else "",
+                primary_model_id=primary_model_id if source == "fallback" else None,
+                primary_model_name=primary_model_name if source == "fallback" else "",
+            )
+        db.commit()
+        raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
+
+    legacy = legacy_resolution_for_capability(db, capability, prefer_fallback)
+    if legacy:
+        return legacy
+    raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
 
 
 def model_snapshot(model: Model) -> dict[str, Any]:
@@ -1876,14 +2128,21 @@ def invoke_gateway_capability(
     prompt: str,
     messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    mapping = mapping_for_capability(db, capability)
-    primary = mapping.primary_model if mapping else provider_for_capability(db, capability)
-    fallback = mapping.fallback_model if mapping and mapping.fallback_model_id else None
-    if not fallback and primary.fallback_model_id:
-        fallback = db.get(ModelConfig, primary.fallback_model_id)
     collector = SpanCollector(f"gateway.{capability}", capability)
     attempted: list[dict[str, Any]] = []
     try:
+        resolution = model_for_capability(db, capability)
+        primary = resolution.model
+        mark_root_trace_model(collector, primary, primary.model_name, resolution_trace_metadata(resolution))
+        if resolution.source == "fallback" and resolution.primary_connection_error:
+            attempted.append(
+                {
+                    "model_id": resolution.primary_model_id,
+                    "model": resolution.primary_model_name,
+                    "status": "error",
+                    "error": resolution.primary_connection_error,
+                }
+            )
         try:
             result = call_model_config(
                 model_config=primary,
@@ -1891,23 +2150,44 @@ def invoke_gateway_capability(
                 messages=messages or [],
                 capability=capability,
                 collector=collector,
-                metadata={"role": "primary"},
+                metadata={"role": resolution.source, **resolution_trace_metadata(resolution)},
             )
             attempted.append({"model_id": primary.id, "model": primary.model_name, "status": "ok"})
-            collector.finish_span(collector.root_span_id, "ok", metadata={"fallback_used": False, "model": primary.model_name})
+            collector.finish_span(
+                collector.root_span_id,
+                "ok",
+                metadata={"fallback_used": resolution.source == "fallback", **resolution_trace_metadata(resolution)},
+            )
             return {
                 "capability": capability,
                 "trace_id": collector.trace_id,
                 "provider": primary.provider,
                 "model": primary.model_name,
+                "model_id": primary.id,
+                "resolution_source": resolution.source,
                 "content": result["content"],
                 "raw": result.get("raw", {}),
-                "fallback_used": False,
+                "fallback_used": resolution.source == "fallback",
+                "fallback_reason": resolution.primary_connection_error,
                 "attempted_models": attempted,
             }
         except Exception as primary_error:
             attempted.append({"model_id": primary.id, "model": primary.model_name, "status": "error", "error": str(primary_error)})
-            if not fallback or not fallback.enabled:
+            if isinstance(primary, Model):
+                primary.connection_status = "error"
+                primary.last_tested_at = now()
+                primary.updated_at = now()
+                db.commit()
+            try:
+                fallback_resolution = model_for_capability(db, capability, prefer_fallback=True)
+            except CapabilityResolutionError:
+                legacy = legacy_resolution_for_capability(db, capability, prefer_fallback=True)
+                if not legacy:
+                    collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
+                    raise
+                fallback_resolution = legacy
+            fallback = fallback_resolution.model
+            if fallback.id == primary.id and fallback.__class__ is primary.__class__:
                 collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
                 raise
             fallback_span = collector.start_span(
@@ -1924,21 +2204,30 @@ def invoke_gateway_capability(
                 messages=messages or [],
                 capability=capability,
                 collector=collector,
-                metadata={"role": "fallback"},
+                metadata={"role": "fallback", **resolution_trace_metadata(fallback_resolution)},
             )
             attempted.append({"model_id": fallback.id, "model": fallback.model_name, "status": "ok"})
-            collector.finish_span(collector.root_span_id, "ok", metadata={"fallback_used": True, "fallback_reason": str(primary_error)})
+            collector.finish_span(
+                collector.root_span_id,
+                "ok",
+                metadata={"fallback_used": True, "fallback_reason": str(primary_error), **resolution_trace_metadata(fallback_resolution)},
+            )
             return {
                 "capability": capability,
                 "trace_id": collector.trace_id,
                 "provider": fallback.provider,
                 "model": fallback.model_name,
+                "model_id": fallback.id,
+                "resolution_source": fallback_resolution.source,
                 "content": result["content"],
                 "raw": result.get("raw", {}),
                 "fallback_used": True,
                 "fallback_reason": str(primary_error),
                 "attempted_models": attempted,
             }
+    except CapabilityResolutionError as exc:
+        collector.finish_span(collector.root_span_id, "error", str(exc), {"capability": exc.capability})
+        raise
     finally:
         collector.flush(db)
 
@@ -2015,6 +2304,7 @@ def sync_model_capabilities(db: Session, provider: ModelConfig, capabilities: li
                 mapping.fallback_model_id = None
             mapping.enabled = True
         mapping.updated_at = now()
+        sync_gateway_mapping_from_legacy_models(db, capability, provider, None, True)
 
 
 @dataclass
@@ -4933,6 +5223,14 @@ def evaluate_rules(
 ) -> EvaluateResponse:
     current_auth(request, db)
     ensure_rule_engine_seed(db)
+    collector = SpanCollector("rules.evaluate", "material_governance")
+    try:
+        resolution = model_for_capability(db, "material_governance")
+    except CapabilityResolutionError as exc:
+        collector.finish_span(collector.root_span_id, "error", str(exc), {"capability": exc.capability})
+        collector.flush(db)
+        raise capability_resolution_http_error(exc) from exc
+    mark_root_trace_model(collector, resolution.model, resolution.model.model_name, resolution_trace_metadata(resolution))
     rules = (
         db.query(Rule)
         .join(RuleCategory)
@@ -4940,7 +5238,16 @@ def evaluate_rules(
         .order_by(RuleCategory.sort_order, Rule.priority, Rule.id)
         .all()
     )
-    return EvaluateResponse(results=[evaluate_rule(rule, payload) for rule in rules])
+    results = [evaluate_rule(rule, payload) for rule in rules]
+    collector.finish_span(collector.root_span_id, "ok", metadata={"rule_count": len(rules), **resolution_trace_metadata(resolution)})
+    collector.flush(db)
+    return EvaluateResponse(
+        results=results,
+        trace_id=collector.trace_id,
+        provider=resolution.model.provider,
+        model=resolution.model.model_name,
+        resolution_source=resolution.source,
+    )
 
 
 @app.get("/api/v1/rules/{rule_id}", response_model=RuleRead)
@@ -6215,12 +6522,17 @@ def local_category_recognition_response(text: str) -> dict[str, Any]:
     }
 
 
-def mark_root_trace_model(collector: SpanCollector, provider: ModelConfig, model_name: str) -> None:
+def mark_root_trace_model(
+    collector: SpanCollector,
+    provider: Model | ModelConfig | AIAgentConfig,
+    model_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     for span in collector.spans:
         if span["span_id"] == collector.root_span_id:
             span["provider"] = provider.provider
             span["model"] = model_name
-            span["metadata"].update({"provider": provider.provider, "model": model_name})
+            span["metadata"].update({"provider": provider.provider, "model": model_name, **(metadata or {})})
             return
 
 
@@ -6229,15 +6541,26 @@ def call_category_recognition_provider(
     request: CategoryRecognitionRequest,
     hierarchy_paths: list[list[str]],
 ) -> dict[str, Any]:
-    provider = agent_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY) or provider_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY)
+    resolution = model_for_capability(db, CATEGORY_RECOGNITION_CAPABILITY)
+    provider = resolution.model
     model_name = compact_space(request.model_override or provider.model_name or CATEGORY_RECOGNITION_DEFAULT_MODEL)
     collector = SpanCollector("category_recognition.recognize", CATEGORY_RECOGNITION_CAPABILITY)
-    mark_root_trace_model(collector, provider, model_name)
+    mark_root_trace_model(collector, provider, model_name, resolution_trace_metadata(resolution))
     try:
         if provider.provider == "mock" or (provider.base_url or "").startswith("local://"):
             result = local_category_recognition_response(request.text)
-            collector.finish_span(collector.root_span_id, "ok", metadata={"mode": "local", "model": model_name})
-            return result
+            collector.finish_span(
+                collector.root_span_id,
+                "ok",
+                metadata={"mode": "local", "model": model_name, **resolution_trace_metadata(resolution)},
+            )
+            return {
+                **result,
+                "trace_id": collector.trace_id,
+                "provider": provider.provider,
+                "model": model_name,
+                "resolution_source": resolution.source,
+            }
 
         url = model_chat_url(provider)
         if not url:
@@ -6266,7 +6589,7 @@ def call_category_recognition_provider(
                 parent_span_id=collector.root_span_id,
                 provider=provider.provider,
                 model=model_name,
-                metadata={"attempt": attempt + 1, "url": url},
+                metadata={"attempt": attempt + 1, "url": url, **resolution_trace_metadata(resolution)},
             )
             try:
                 response = httpx.post(url, json=body, headers=headers, timeout=timeout_seconds)
@@ -6298,12 +6621,39 @@ def call_category_recognition_provider(
                 collector.finish_span(span_id, "error", str(exc))
                 raise
             collector.finish_span(span_id, "ok", metadata={"status_code": response.status_code})
-            collector.finish_span(collector.root_span_id, "ok", metadata={"model": model_name, "attempts": attempt + 1})
-            return result
+            collector.finish_span(
+                collector.root_span_id,
+                "ok",
+                metadata={"model": model_name, "attempts": attempt + 1, **resolution_trace_metadata(resolution)},
+            )
+            return {
+                **result,
+                "trace_id": collector.trace_id,
+                "provider": provider.provider,
+                "model": model_name,
+                "resolution_source": resolution.source,
+            }
         raise CategoryRecognitionUpstreamError(last_error or "Provider request failed", 502, True)
-    except CategoryRecognitionUpstreamError as exc:
-        collector.finish_span(collector.root_span_id, "error", str(exc), {"model": model_name, "retryable": exc.retryable})
+    except CapabilityResolutionError:
         raise
+    except CategoryRecognitionUpstreamError as exc:
+        try:
+            result = local_category_recognition_response(request.text)
+        except HTTPException:
+            collector.finish_span(collector.root_span_id, "error", str(exc), {"model": model_name, "retryable": exc.retryable})
+            raise
+        collector.finish_span(
+            collector.root_span_id,
+            "ok",
+            metadata={"model": model_name, "retryable": exc.retryable, "local_fallback_reason": str(exc), **resolution_trace_metadata(resolution)},
+        )
+        return {
+            **result,
+            "trace_id": collector.trace_id,
+            "provider": provider.provider,
+            "model": model_name,
+            "resolution_source": resolution.source,
+        }
     except HTTPException:
         collector.finish_span(collector.root_span_id, "error", "local recognition failed", {"model": model_name})
         raise
@@ -6323,6 +6673,8 @@ def run_category_recognition(db: Session, payload: CategoryRecognitionRequest) -
     hierarchy_paths = category_hierarchy_paths(db, payload.category_library_id)
     try:
         return call_category_recognition_provider(db, payload, hierarchy_paths)
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
     except CategoryRecognitionUpstreamError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -7711,8 +8063,11 @@ def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> d
     text = compact_space(payload.input_text)
     if not text:
         raise HTTPException(status_code=422, detail="input_text is required")
-    gateway_result = invoke_gateway_capability(db, "material_add", text)
-    match_gateway = invoke_gateway_capability(db, "material_match", text)
+    try:
+        gateway_result = invoke_gateway_capability(db, "material_add", text)
+        match_gateway = invoke_gateway_capability(db, "material_match", text)
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
     library = db.get(MaterialLibrary, payload.material_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Material library not found")
@@ -7832,7 +8187,10 @@ def confirm_ai_material_add(
 ) -> dict[str, Any]:
     require_button_permission(auth, "button.material_archives.create")
     preview = payload.preview
-    provider = provider_for_capability(db, "material_add")
+    try:
+        resolution = model_for_capability(db, "material_add")
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
     errors = preview.get("validation_errors") or []
     if errors:
         raise HTTPException(status_code=422, detail={"validation_errors": errors})
@@ -7873,8 +8231,9 @@ def confirm_ai_material_add(
     db.refresh(material)
     return {
         "capability": "material_add",
-        "provider": provider.provider,
-        "model": provider.model,
+        "provider": resolution.model.provider,
+        "model": resolution.model.model_name,
+        "resolution_source": resolution.source,
         "trace_id": preview.get("trace_id") or f"trace-{sha1(material.code.encode('utf-8')).hexdigest()[:16]}",
         "material": material_to_out(material).model_dump(),
     }
@@ -7895,7 +8254,10 @@ def match_materials(
     require_library_scope(auth, library.id)
     brand = db.get(Brand, payload.brand_id).name if payload.brand_id and db.get(Brand, payload.brand_id) else (payload.brand or "")
     query_text = payload.query or material_search_text(payload.name or "", brand, payload.description, payload.attributes)
-    gateway_result = invoke_gateway_capability(db, "material_match", query_text)
+    try:
+        gateway_result = invoke_gateway_capability(db, "material_match", query_text)
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
     matches = material_matches(db, library.id, query_text, brand, payload.attributes, payload.top_k)
     return {
         "capability": "material_match",
@@ -7970,6 +8332,16 @@ def match_material_category(
         ]
         if part
     )
+    collector = SpanCollector("material_match.category_match", "material_match")
+    try:
+        resolution = model_for_capability(db, "material_match")
+    except CapabilityResolutionError as exc:
+        collector.finish_span(collector.root_span_id, "error", str(exc), {"capability": exc.capability})
+        collector.flush(db)
+        raise capability_resolution_http_error(exc) from exc
+    mark_root_trace_model(collector, resolution.model, resolution.model.model_name, resolution_trace_metadata(resolution))
+    collector.finish_span(collector.root_span_id, "ok", metadata={"query": query_text, **resolution_trace_metadata(resolution)})
+    collector.flush(db)
     vector = category_embedding(query_text)
     candidates: list[dict[str, Any]] = []
     for library in enabled_libraries:
@@ -7988,7 +8360,40 @@ def match_material_category(
             deduped[item["category_id"]] = item
     matches = sorted(deduped.values(), key=lambda item: item["score"], reverse=True)[:3]
     message = "" if matches else "No matching categories found"
-    return MaterialCategoryMatchOut(matches=matches, results=matches, message=message)
+    return MaterialCategoryMatchOut(
+        matches=matches,
+        results=matches,
+        message=message,
+        trace_id=collector.trace_id,
+        provider=resolution.model.provider,
+        model=resolution.model.model_name,
+        resolution_source=resolution.source,
+    )
+
+
+def capability_resolution_http_error(exc: CapabilityResolutionError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "error": str(exc),
+            "capability": exc.capability,
+            "suggestion": exc.suggestion,
+        },
+    )
+
+
+@app.get("/api/v1/ai/resolve-model")
+def resolve_ai_model(
+    capability: str,
+    prefer_fallback: bool = False,
+    request: Request = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    current_auth(request, db)
+    try:
+        return resolution_response_payload(model_for_capability(db, capability, prefer_fallback))
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
 
 
 @app.get("/api/v1/models", response_model=list[ModelRead])
@@ -8575,6 +8980,7 @@ def save_capability_mapping(
         mapping.fallback_agent_config_id = fallback_agent.id if fallback_agent else None
         mapping.enabled = payload.enabled
         mapping.updated_at = now()
+        sync_gateway_mapping_from_legacy_agents(db, capability, agent, fallback_agent, payload.enabled)
         db.commit()
         db.refresh(mapping)
         return agent_mapping_to_out(mapping)
@@ -8594,6 +9000,11 @@ def save_capability_mapping(
     mapping.fallback_model_id = fallback.id if fallback else None
     mapping.enabled = payload.enabled
     mapping.updated_at = now()
+    agent_mapping = db.query(CapabilityAgentMapping).filter(CapabilityAgentMapping.capability == capability).first()
+    if agent_mapping:
+        agent_mapping.enabled = False
+        agent_mapping.updated_at = now()
+    sync_gateway_mapping_from_legacy_models(db, capability, primary, fallback, payload.enabled)
     db.commit()
     db.refresh(mapping)
     return mapping_to_out(mapping)
@@ -8608,7 +9019,10 @@ def invoke_ai_capability(
 ) -> dict[str, Any]:
     if capability not in AI_CAPABILITIES:
         raise HTTPException(status_code=422, detail="Unsupported AI capability")
-    return invoke_gateway_capability(db, capability, payload.prompt, payload.messages)
+    try:
+        return invoke_gateway_capability(db, capability, payload.prompt, payload.messages)
+    except CapabilityResolutionError as exc:
+        raise capability_resolution_http_error(exc) from exc
 
 
 @app.get("/api/v1/debug/trace", response_model=list[TraceSummaryOut])

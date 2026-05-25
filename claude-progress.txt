@@ -1,7 +1,8 @@
-Project summary: Sprints 1-50 PASS. Sprint 51 implementation is present on codex/sprint-51-model-capability-schema but could not be committed because sandbox writes to .git are blocked. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v14.6.0.
+Project summary: Sprints 1-51 PASS. Sprint 52 implemented on codex/sprint-52-resolver-rewrite. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v14.6.0.
 
-Sprint 51-55: AI Model Config Architecture Refactor (Major Feature)
-Status: IN PROGRESS. Sprint 51 implemented new backend Model + CapabilityMapping tables/APIs with legacy migration and audit logging. Focused Sprint 51 API tests pass. Commit/eval trigger are blocked by sandbox denial on .git/index.lock creation.
+Sprint 52: AI model resolver rewrite
+Status: IMPLEMENTED BUT NOT COMMITTED. Added unified model_for_capability resolver, resolve-model API, connection fallback, hot-switch behavior, legacy compatibility, and AITracer model metadata.
+Verification: tests/test_sprint52_model_resolution.py passes; full backend pytest passes with isolated Git config because global Git GPG signing breaks orchestrator test commits. Commit/eval trigger blocked by sandbox denial creating .git/index.lock.
 
 Sprint 50: Category Level Expansion to Five Levels
 Status: SPRINT PASS. Notes: Backend CSV template/import accepts 一级类目 through 五级类目 with legacy 3-col CSV compatibility; AI recognition parsing supports level1-level5; frontend import and AI preview tables render 5 editable level columns with zh-CN/en-US i18n. 5/5 criteria PASS.

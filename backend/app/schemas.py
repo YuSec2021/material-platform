@@ -537,6 +537,11 @@ class MaterialCategoryMatchOut(BaseModel):
     matches: list[MaterialCategoryMatchItem] = Field(default_factory=list)
     results: list[MaterialCategoryMatchItem] = Field(default_factory=list)
     message: str = ""
+    trace_id: str | None = None
+    capability: str = "material_match"
+    provider: str = ""
+    model: str = ""
+    resolution_source: str = ""
 
 
 class CategoryRecognitionRequest(BaseModel):
@@ -557,6 +562,10 @@ class CategoryRecognitionCategory(BaseModel):
 class CategoryRecognitionResponse(BaseModel):
     categories: list[CategoryRecognitionCategory]
     suggestions: list[str] = Field(default_factory=list)
+    trace_id: str | None = None
+    provider: str = ""
+    model: str = ""
+    resolution_source: str = ""
 
 
 class CategoryRecognitionBatchRequest(BaseModel):
@@ -1117,3 +1126,8 @@ class EvaluateResult(BaseModel):
 
 class EvaluateResponse(BaseModel):
     results: list[EvaluateResult]
+    trace_id: str | None = None
+    capability: str = "material_governance"
+    provider: str = ""
+    model: str = ""
+    resolution_source: str = ""
