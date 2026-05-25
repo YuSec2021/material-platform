@@ -140,3 +140,5 @@
 - `POST /api/v1/category-libraries/{id}/re-embed` regenerates all category embeddings with job/progress status
 - Frontend AI matching button, result chips with confidence %, default selection, override capability
 - i18n zh-CN and en-US for all AI matching UI text
+
+## v14.6.0 — Sprint 50 [MINOR bump]

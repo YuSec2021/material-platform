@@ -1,7 +1,12 @@
-Project summary: Sprints 1-43 PASS. All features complete. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v13.0.0.
+Project summary: Sprints 1-49 PASS. Sprint 50 implemented pending Orchestrator commit/evaluation. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v14.5.0.
 
-Sprint 43: Material Library Multi-Select Form Support
-Status: SPRINT PASS. Notes: Multi-select admin roles and category libraries, array-based API, qdrant_enabled boolean, audit logging with arrays, i18n zh-CN/en-US. 6/6 criteria PASS.
+Sprint 50: Category Level Expansion to Five Levels
+Status: IMPLEMENTED, not committed. Notes: Backend CSV template/import accepts 一级类目 through 五级类目 with legacy shorter CSV compatibility; category recognition/parsing/schemas/vector payloads support level1-level5; frontend import and AI preview tables render five editable level columns with zh-CN/en-US i18n.
+Verification: focused backend tests passed, frontend production build passed, contract hash OK. Full pytest has unrelated GPG sandbox and Sprint 49 code-collision failures; type-check has pre-existing non-Sprint errors. Commit request written to .sprintfoundry/commit-requests/sprint-50.json.
+Branch note: run-state active_branch is codex/sprint-50-category-levels-expand, but git branch creation/switch was blocked by .git lock permissions; Orchestrator should commit requested paths on the active branch.
 
-Sprint 42: Material Library Permission Isolation
-Status: SPRINT PASS. Notes: Material library admin can only see their own libraries, backend API scoping, frontend filtered UI. 5/5 criteria PASS.
+Sprint 49: Category Table Column Refinement and Immediate Children Filtering
+Status: SPRINT PASS. Notes: Removed 类目库 and 层级 columns from category table, added parent_id and level=1 filtering on backend GET /api/v1/categories, table shows only immediate children of selected tree node, empty state when nothing selected, full zh-CN/en-US i18n. 6/6 criteria PASS.
+
+Sprint 48: Scroll Decoupling for Category and Material Management Pages
+Status: SPRINT PASS. Notes: Added independent scroll containers (overflow-y-auto) for tree sidebar and content area in CategoryList, MaterialList, CategoryLibraryList, MaterialLibraryList pages. 4/4 criteria PASS.
