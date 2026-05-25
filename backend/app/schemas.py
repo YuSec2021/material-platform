@@ -515,6 +515,8 @@ class MaterialCategoryMatchCategory(BaseModel):
     level1: str
     level2: str | None = None
     level3: str | None = None
+    level4: str | None = None
+    level5: str | None = None
 
 
 class MaterialCategoryMatchItem(BaseModel):
@@ -525,6 +527,8 @@ class MaterialCategoryMatchItem(BaseModel):
     level1: str
     level2: str | None = None
     level3: str | None = None
+    level4: str | None = None
+    level5: str | None = None
     score: float = Field(ge=0.0, le=1.0)
     confidence: float = Field(ge=0.0, le=1.0)
 
@@ -545,6 +549,8 @@ class CategoryRecognitionCategory(BaseModel):
     level1: str
     level2: str | None = None
     level3: str | None = None
+    level4: str | None = None
+    level5: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
 
 
