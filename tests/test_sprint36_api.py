@@ -38,7 +38,7 @@ class Sprint36CategoryBulkImportApiTest(unittest.TestCase):
         template = client.get("/api/v1/categories/template", headers=SUPER_ADMIN)
         self.assertEqual(template.status_code, 200, template.text)
         lines = [line for line in template.text.strip().splitlines() if line]
-        self.assertEqual(lines[0].strip(), "一级类目,二级类目,三级类目")
+        self.assertEqual(lines[0].strip(), "一级类目,二级类目,三级类目,四级类目,五级类目")
         self.assertGreaterEqual(len(lines), 4)
 
         rows = [

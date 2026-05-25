@@ -265,6 +265,8 @@ export type CategoryImportRow = {
   "一级类目": string;
   "二级类目"?: string;
   "三级类目"?: string;
+  "四级类目"?: string;
+  "五级类目"?: string;
 };
 
 export type CategoryBulkImportResult = {
@@ -282,6 +284,8 @@ export type CategoryRecognitionResult = {
     level1: string;
     level2?: string;
     level3?: string;
+    level4?: string;
+    level5?: string;
     confidence?: number;
   }>;
   suggestions?: string[];
@@ -512,6 +516,8 @@ export type MaterialCategoryMatch = {
   level1: string;
   level2?: string | null;
   level3?: string | null;
+  level4?: string | null;
+  level5?: string | null;
   score: number;
   confidence: number;
   category: {
@@ -520,6 +526,8 @@ export type MaterialCategoryMatch = {
     level1: string;
     level2?: string | null;
     level3?: string | null;
+    level4?: string | null;
+    level5?: string | null;
   };
 };
 

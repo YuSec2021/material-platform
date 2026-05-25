@@ -2957,6 +2957,8 @@ def category_payload(category: Category, by_id: dict[int, Category]) -> dict[str
         "level1": path[0] if len(path) > 0 else "",
         "level2": path[1] if len(path) > 1 else None,
         "level3": path[2] if len(path) > 2 else None,
+        "level4": path[3] if len(path) > 3 else None,
+        "level5": path[4] if len(path) > 4 else None,
         "path_string": " > ".join(path),
     }
 
@@ -3103,6 +3105,8 @@ def category_match_item(raw: dict[str, Any]) -> dict[str, Any] | None:
         "level1": str(payload.get("level1") or ""),
         "level2": payload.get("level2"),
         "level3": payload.get("level3"),
+        "level4": payload.get("level4"),
+        "level5": payload.get("level5"),
         "score": score,
         "confidence": score,
     }
@@ -3112,6 +3116,8 @@ def category_match_item(raw: dict[str, Any]) -> dict[str, Any] | None:
         "level1": item["level1"],
         "level2": item["level2"],
         "level3": item["level3"],
+        "level4": item["level4"],
+        "level5": item["level5"],
     }
     return item
 
@@ -5688,7 +5694,7 @@ def list_categories(
     return [category_to_out(category) for category in categories]
 
 
-CATEGORY_IMPORT_HEADERS = ["一级类目", "二级类目", "三级类目"]
+CATEGORY_IMPORT_HEADERS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"]
 
 
 def normalize_category_import_row(raw: Any, row_number: int) -> dict[str, Any]:
@@ -5698,17 +5704,17 @@ def normalize_category_import_row(raw: Any, row_number: int) -> dict[str, Any]:
     errors: list[str] = []
     if not levels[0]:
         errors.append("一级类目 is required")
-    if levels[2] and not levels[1]:
-        errors.append("二级类目 is required when 三级类目 is provided")
+    for index in range(1, len(levels)):
+        if levels[index] and not all(levels[previous] for previous in range(index)):
+            errors.append(f"{CATEGORY_IMPORT_HEADERS[index - 1]} is required when {CATEGORY_IMPORT_HEADERS[index]} is provided")
     return {"row_number": row_number, "levels": levels, "errors": errors}
 
 
 def parse_category_import_csv(text: str) -> list[dict[str, str]]:
     reader = csv.DictReader(StringIO(text))
     fieldnames = [name.strip() for name in (reader.fieldnames or [])]
-    missing_headers = [header for header in CATEGORY_IMPORT_HEADERS if header not in fieldnames]
-    if missing_headers:
-        raise HTTPException(status_code=422, detail=f"Missing CSV headers: {', '.join(missing_headers)}")
+    if CATEGORY_IMPORT_HEADERS[0] not in fieldnames:
+        raise HTTPException(status_code=422, detail=f"Missing CSV headers: {CATEGORY_IMPORT_HEADERS[0]}")
     return [{header: row.get(header, "") for header in CATEGORY_IMPORT_HEADERS} for row in reader]
 
 
@@ -5787,7 +5793,7 @@ def split_recognized_category_line(line: str) -> list[str]:
     parts = [compact_space(part) for part in cleaned.split("/") if compact_space(part)]
     if len(parts) == 1:
         parts = [compact_space(part) for part in re.split(r"\s+", parts[0]) if compact_space(part)]
-    return parts[:3]
+    return parts[:5]
 
 
 def confidence_for_category_levels(levels: list[str]) -> float:
@@ -5803,10 +5809,8 @@ def recognized_category_from_levels(levels: list[str]) -> dict[str, Any]:
         "level1": levels[0],
         "confidence": confidence_for_category_levels(levels),
     }
-    if len(levels) > 1:
-        result["level2"] = levels[1]
-    if len(levels) > 2:
-        result["level3"] = levels[2]
+    for index, level in enumerate(levels[1:5], start=2):
+        result[f"level{index}"] = level
     return result
 
 
@@ -5864,7 +5868,7 @@ def category_path_for(category: Category, by_id: dict[int, Category]) -> list[st
         path.append(parent.name)
         seen.add(parent.id)
         parent_id = parent.parent_category_id
-    return list(reversed(path))[:3]
+    return list(reversed(path))[:5]
 
 
 def category_hierarchy_paths(db: Session, library_id: int | None) -> list[list[str]]:
@@ -5890,7 +5894,7 @@ def category_recognition_messages(text: str, hierarchy_paths: list[list[str]]) -
         "You are a category recognition agent for an enterprise material master data system. "
         "Use the provided category hierarchy context and return structured JSON output only. "
         "The JSON schema is {\"categories\":[{\"level1\":\"...\",\"level2\":\"...\","
-        "\"level3\":\"...\",\"confidence\":0.0}],\"suggestions\":[\"...\"]}. "
+        "\"level3\":\"...\",\"level4\":\"...\",\"level5\":\"...\",\"confidence\":0.0}],\"suggestions\":[\"...\"]}. "
         "Return multiple category candidates when the input is ambiguous. Confidence must be between 0.0 and 1.0.\n\n"
         f"Category hierarchy:\n{hierarchy}\n\n"
         "Examples:\n"
@@ -5936,19 +5940,13 @@ def normalized_category_candidate(raw: Any) -> dict[str, Any] | None:
     elif raw.get("path"):
         levels = split_recognized_category_line(str(raw["path"]))
     else:
-        levels = [
-            compact_space(str(raw.get("level1") or "")),
-            compact_space(str(raw.get("level2") or "")),
-            compact_space(str(raw.get("level3") or "")),
-        ]
+        levels = [compact_space(str(raw.get(f"level{index}") or "")) for index in range(1, 6)]
         levels = [level for level in levels if level]
     if not levels:
         return None
     candidate: dict[str, Any] = {"level1": levels[0], "confidence": clamp_confidence(raw.get("confidence"))}
-    if len(levels) > 1:
-        candidate["level2"] = levels[1]
-    if len(levels) > 2:
-        candidate["level3"] = levels[2]
+    for index, level in enumerate(levels[1:5], start=2):
+        candidate[f"level{index}"] = level
     return candidate
 
 
@@ -6105,7 +6103,7 @@ def batch_item_text(item: Any) -> str:
     return compact_space(str(item))
 
 
-@app.post("/api/v1/ai/category-recognition/recognize", response_model=CategoryRecognitionResponse)
+@app.post("/api/v1/ai/category-recognition/recognize", response_model=CategoryRecognitionResponse, response_model_exclude_none=True)
 def recognize_categories(
     payload: CategoryRecognitionRequest,
     db: Session = Depends(get_db),
@@ -6198,9 +6196,10 @@ def download_category_template(
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(CATEGORY_IMPORT_HEADERS)
-    writer.writerow(["办公设备", "", ""])
-    writer.writerow(["办公设备", "打印设备", ""])
-    writer.writerow(["办公设备", "打印设备", "激光打印机"])
+    writer.writerow(["办公设备", "", "", "", ""])
+    writer.writerow(["办公设备", "打印设备", "", "", ""])
+    writer.writerow(["办公设备", "打印设备", "激光打印机", "", ""])
+    writer.writerow(["办公设备", "打印设备", "激光打印机", "A4纸", "80g"])
     content = output.getvalue()
     return StreamingResponse(
         iter([content]),

@@ -51,6 +51,7 @@ type CategoryTreeSelection =
   | null;
 
 const CATEGORY_PAGE_SIZE = 10;
+const CATEGORY_LEVEL_KEYS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"] as const;
 
 const emptyForm: CategoryFormState = {
   name: "",
@@ -59,6 +60,16 @@ const emptyForm: CategoryFormState = {
   parentCategoryId: "",
   description: "",
 };
+
+function categoryImportRowFromLevels(levels: string[]): CategoryImportRow {
+  return {
+    "一级类目": levels[0] ?? "",
+    "二级类目": levels[1] ?? "",
+    "三级类目": levels[2] ?? "",
+    "四级类目": levels[3] ?? "",
+    "五级类目": levels[4] ?? "",
+  };
+}
 
 function categoryToForm(category: Category): CategoryFormState {
   return {
@@ -114,42 +125,38 @@ function parseImportCsv(text: string): PreviewRow[] {
     .split(/\r?\n/)
     .filter((line) => line.trim().length > 0);
   const header = parseCsvLine(lines[0] ?? "");
-  const level1Index = header.indexOf("一级类目");
-  const level2Index = header.indexOf("二级类目");
-  const level3Index = header.indexOf("三级类目");
+  const levelIndexes = CATEGORY_LEVEL_KEYS.map((key) => header.indexOf(key));
   return lines.slice(1).map((line, index) => {
     const values = parseCsvLine(line);
-    return toPreviewRow(
-      {
-        "一级类目": values[level1Index] ?? "",
-        "二级类目": values[level2Index] ?? "",
-        "三级类目": values[level3Index] ?? "",
-      },
-      `csv-${index + 1}`,
+    const row = categoryImportRowFromLevels(
+      levelIndexes.map((headerIndex) => (headerIndex >= 0 ? values[headerIndex] ?? "" : "")),
     );
+    return toPreviewRow(row, `csv-${index + 1}`);
   });
 }
 
 function toPreviewRow(row: CategoryImportRow, id: string, confidence?: number): PreviewRow {
-  const level1 = row["一级类目"]?.trim() ?? "";
-  const level2 = row["二级类目"]?.trim() ?? "";
-  const level3 = row["三级类目"]?.trim() ?? "";
+  const levels = CATEGORY_LEVEL_KEYS.map((key) => row[key]?.trim() ?? "");
   const errors: string[] = [];
-  if (!level1) {
+  if (!levels[0]) {
     errors.push("missingLevel1");
   }
-  if (level3 && !level2) {
-    errors.push("missingLevel2");
+  for (let index = 1; index < levels.length; index += 1) {
+    if (levels[index] && levels.slice(0, index).some((level) => !level)) {
+      errors.push(index === 2 && !levels[1] ? "missingLevel2" : "missingPreviousLevel");
+      break;
+    }
   }
-  return { id, "一级类目": level1, "二级类目": level2, "三级类目": level3, errors, confidence };
+  return {
+    ...categoryImportRowFromLevels(levels),
+    id,
+    errors,
+    confidence,
+  };
 }
 
 function previewRowsToImportRows(rows: PreviewRow[]): CategoryImportRow[] {
-  return rows.map((row) => ({
-    "一级类目": row["一级类目"],
-    "二级类目": row["二级类目"],
-    "三级类目": row["三级类目"],
-  }));
+  return rows.map((row) => categoryImportRowFromLevels(CATEGORY_LEVEL_KEYS.map((key) => row[key] ?? "")));
 }
 
 function categoryPath(category: Category, categories: Category[]) {
@@ -499,6 +506,8 @@ export function CategoryList() {
             "一级类目": item.level1,
             "二级类目": item.level2 ?? "",
             "三级类目": item.level3 ?? "",
+            "四级类目": item.level4 ?? "",
+            "五级类目": item.level5 ?? "",
           },
           `ai-${index + 1}`,
           item.confidence,
@@ -1160,9 +1169,9 @@ function ImportPreviewTable({
       <table className="min-w-full divide-y divide-border text-sm">
         <thead className="bg-muted/30 text-left text-xs font-medium uppercase text-muted-foreground">
           <tr>
-            <th className="px-3 py-2">{t("categoryImport.level1")}</th>
-            <th className="px-3 py-2">{t("categoryImport.level2")}</th>
-            <th className="px-3 py-2">{t("categoryImport.level3")}</th>
+            {CATEGORY_LEVEL_KEYS.map((key, index) => (
+              <th key={key} className="px-3 py-2">{t(`categoryImport.level${index + 1}`)}</th>
+            ))}
             {showConfidence && <th className="px-3 py-2">{t("categoryImport.confidence")}</th>}
             <th className="px-3 py-2">{t("field.status")}</th>
           </tr>
@@ -1170,7 +1179,7 @@ function ImportPreviewTable({
         <tbody className="divide-y divide-border bg-card">
           {rows.map((row) => (
             <tr key={row.id}>
-              {(["一级类目", "二级类目", "三级类目"] as const).map((key) => (
+              {CATEGORY_LEVEL_KEYS.map((key) => (
                 <td key={key} className="px-3 py-2">
                   <input
                     value={row[key] ?? ""}
