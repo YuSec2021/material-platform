@@ -780,6 +780,45 @@ export type AiProviderTestResult = {
   message: string;
 };
 
+export type AiModel = {
+  id: number;
+  display_name: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  timeout: number;
+  temperature: number | null;
+  max_tokens: number | null;
+  enabled: boolean;
+  connection_status: "ok" | "error" | "untested" | string;
+  last_tested_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AiModelPayload = {
+  display_name: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  api_key?: string;
+  timeout: number;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  enabled: boolean;
+};
+
+export type AiModelTestResult = {
+  ok: boolean;
+  status: "ok" | "error" | "untested" | string;
+  message: string;
+  latency_ms: number;
+  provider: string;
+  model_name: string;
+  tested_at: string;
+  last_tested_at: string;
+};
+
 export type AiAgentConfig = {
   id: number;
   config_key: string;
@@ -1482,6 +1521,24 @@ export const apiClient = {
   },
   testAiProvider(id: number) {
     return request<AiProviderTestResult>(`/ai/providers/${id}/test`, { method: "POST" });
+  },
+  aiModels() {
+    return request<AiModel[]>("/models?page=1&page_size=100");
+  },
+  createAiModel(payload: AiModelPayload) {
+    return request<AiModel>("/models", { method: "POST", body: payload });
+  },
+  updateAiModel(id: number, payload: AiModelPayload) {
+    return request<AiModel>(`/models/${id}`, { method: "PUT", body: payload });
+  },
+  toggleAiModel(id: number) {
+    return request<AiModel>(`/models/${id}/toggle`, { method: "PATCH" });
+  },
+  deleteAiModel(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/models/${id}`, { method: "DELETE" });
+  },
+  testAiModel(id: number) {
+    return request<AiModelTestResult>(`/models/${id}/test`);
   },
   aiCapabilityMappings() {
     return request<AiCapabilityMapping[]>("/ai/capability-mappings");

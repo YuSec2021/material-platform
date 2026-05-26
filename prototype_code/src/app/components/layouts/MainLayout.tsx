@@ -101,6 +101,7 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
       icon: <BrainCircuit className="h-5 w-5" />,
       children: [
         { key: "aiAgentConfigs", title: t("nav.aiAgentConfigs"), path: "/ai/agent-configs" },
+        { key: "aiModels", title: t("nav.aiModels"), path: "/ai/models" },
         { key: "aiProviders", title: t("nav.aiProviders"), path: "/ai/providers" },
         { key: "aiCapabilityMappings", title: t("nav.aiCapabilityMappings"), path: "/ai/capability-mappings" },
         { key: "aiTokenUsage", title: t("nav.aiTokenUsage"), path: "/ai/token-usage" },

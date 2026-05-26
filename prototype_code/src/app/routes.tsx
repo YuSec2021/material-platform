@@ -9,6 +9,7 @@ import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
 import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
 import { AiAgentConfigsPage, AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
+import { AiModelGatewayPage } from "./components/pages/ai/ModelGatewayPage";
 import { RuleCategoryListPage, RuleFormPage, RuleListPage } from "./components/pages/rules/RuleEnginePages";
 
 // 标准管理
@@ -101,6 +102,7 @@ export const router = createBrowserRouter([
           { path: "system/approval-mode", Component: ApprovalMode },
 
           { path: "ai/agent-configs", Component: AiAgentConfigsPage },
+          { path: "ai/models", Component: AiModelGatewayPage },
 
           // AI管理
           {
@@ -108,6 +110,7 @@ export const router = createBrowserRouter([
             Component: SuperAdminRoute,
             children: [
               { path: "agent-configs", Component: AiAgentConfigsPage },
+              { path: "models", Component: AiModelGatewayPage },
               { path: "providers", Component: AiProvidersPage },
               { path: "capability-mappings", Component: AiCapabilityMappingsPage },
               { path: "token-usage", Component: AiTokenUsagePage },

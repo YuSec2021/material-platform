@@ -439,7 +439,7 @@ function AgentConfigDialog({
               step={0.1}
               value={[form.temperature]}
               disabled={readOnly}
-              onValueChange={([temperature]) => onFormChange({ ...form, temperature })}
+              onValueChange={([temperature]) => onFormChange({ ...form, temperature: temperature ?? form.temperature })}
             />
           </div>
 
