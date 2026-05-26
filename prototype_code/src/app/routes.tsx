@@ -8,7 +8,8 @@ import { ApiClientHealth } from "./components/pages/dev/ApiClientHealth";
 import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
 import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
-import { AiAgentConfigsPage, AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
+import { AiAgentConfigsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
+import { CapabilityMappingPage } from "./components/pages/ai/CapabilityMappingPage";
 import { AiModelGatewayPage } from "./components/pages/ai/ModelGatewayPage";
 import { RuleCategoryListPage, RuleFormPage, RuleListPage } from "./components/pages/rules/RuleEnginePages";
 
@@ -111,7 +112,7 @@ export const router = createBrowserRouter([
               { path: "agent-configs", Component: AiAgentConfigsPage },
               { path: "models", Component: AiModelGatewayPage },
               { path: "providers", Component: AiProvidersPage },
-              { path: "capability-mappings", Component: AiCapabilityMappingsPage },
+              { path: "capability-mappings", Component: CapabilityMappingPage },
               { path: "token-usage", Component: AiTokenUsagePage },
             ],
           },

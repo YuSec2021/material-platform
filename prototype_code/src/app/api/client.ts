@@ -883,6 +883,23 @@ export type AiCapabilityMappingPayload = {
   enabled: boolean;
 };
 
+export type GatewayCapabilityMapping = {
+  id: number;
+  capability: AiCapability | string;
+  primary_model_id: number | null;
+  fallback_model_id: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GatewayCapabilityMappingPayload = {
+  capability?: AiCapability | string;
+  primary_model_id: number | null;
+  fallback_model_id: number | null;
+  enabled: boolean;
+};
+
 export type RuleCategory = {
   id: number;
   slug: string;
@@ -1545,6 +1562,15 @@ export const apiClient = {
   },
   updateAiCapabilityMapping(capability: AiCapability, payload: AiCapabilityMappingPayload) {
     return request<AiCapabilityMapping>(`/ai/capability-mappings/${capability}`, { method: "PUT", body: payload });
+  },
+  gatewayCapabilityMappings() {
+    return request<GatewayCapabilityMapping[]>("/capability-mappings");
+  },
+  createGatewayCapabilityMapping(payload: GatewayCapabilityMappingPayload & { capability: AiCapability | string }) {
+    return request<GatewayCapabilityMapping>("/capability-mappings", { method: "POST", body: payload });
+  },
+  updateGatewayCapabilityMapping(id: number, payload: GatewayCapabilityMappingPayload) {
+    return request<GatewayCapabilityMapping>(`/capability-mappings/${id}`, { method: "PUT", body: payload });
   },
   aiAgentConfigs() {
     return request<AiAgentConfig[]>("/ai/agent-configs");
