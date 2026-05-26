@@ -168,6 +168,17 @@ const resources = {
           vllm: "vLLM",
           ollama: "Ollama",
           custom: "Custom",
+          mock: "Mock Provider",
+        },
+        provider: {
+          dashscope: "DashScope",
+          azure: "Azure OpenAI",
+          deepseek: "DeepSeek",
+          moonshot: "Moonshot",
+          openai: "OpenAI",
+          vllm: "vLLM",
+          ollama: "Ollama",
+          custom: "Custom",
         },
       },
       aiAgent: {

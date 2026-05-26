@@ -102,7 +102,6 @@ export const router = createBrowserRouter([
           { path: "system/approval-mode", Component: ApprovalMode },
 
           { path: "ai/agent-configs", Component: AiAgentConfigsPage },
-          { path: "ai/models", Component: AiModelGatewayPage },
 
           // AI管理
           {
