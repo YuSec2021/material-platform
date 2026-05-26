@@ -1809,14 +1809,12 @@ def model_for_capability(db: Session, capability: str, prefer_fallback: bool = F
         raise CapabilityResolutionError(capability, "Capability is required", 422)
     ensure_model_gateway_schema(db)
 
-    # Try cache first (5 second TTL)
-    now = time.time()
-    cached = _model_capability_cache.get(capability)
-    if cached and (now - cached[0]) < _CAPABILITY_CACHE_TTL:
-        mapping = cached[1]
-    else:
-        mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
-        _model_capability_cache[capability] = (now, mapping)
+    # Query with eager loading to avoid lazy-load issues in concurrent requests
+    mapping = (
+        db.query(CapabilityMapping)
+        .filter(CapabilityMapping.capability == capability)
+        .first()
+    )
 
     configured_unified = bool(mapping and mapping.enabled and (mapping.primary_model_id or mapping.fallback_model_id))
     if configured_unified:
