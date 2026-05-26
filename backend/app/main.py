@@ -27,6 +27,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .database import Base, SessionLocal, engine, get_db
+from .migrations.sprint55_migrate_ai_config import run_sprint55_migration
 from .models import (
     Attribute,
     AttributeChange,
@@ -79,9 +80,6 @@ from .schemas import (
     BrandLogo,
     BrandOut,
     BrandUpdate,
-    AgentConfigIn,
-    AgentConfigOut,
-    AgentConfigTestOut,
     CapabilityMappingIn,
     CapabilityMappingOut,
     CapabilityMappingCreate,
@@ -136,8 +134,6 @@ from .schemas import (
     ProductNameOut,
     ProductNameStatusUpdate,
     ProductNameUpdate,
-    ProviderConfigIn,
-    ProviderConfigOut,
     RecommendIn,
     RecodePreviewIn,
     PermissionEntry,
@@ -175,7 +171,9 @@ from .schemas import (
 )
 
 
-app = FastAPI(title="AI Material Management Platform", version="0.5.0")
+API_VERSION = "15.0.0"
+
+app = FastAPI(title="AI Material Management Platform", version=API_VERSION)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -1444,7 +1442,7 @@ def gateway_connection_status(status: str | None) -> str:
 
 def ensure_model_gateway_schema(db: Session) -> None:
     Base.metadata.create_all(bind=engine)
-    migrate_legacy_model_gateway_data(db)
+    run_sprint55_migration(db)
     seed_default_capability_mappings(db)
 
 
@@ -1633,6 +1631,7 @@ def sync_gateway_mapping_from_legacy_agents(
 
 
 def model_to_read(model: Model) -> ModelRead:
+    test_marker = " ".join([model.provider or "", model.model_name or "", model.base_url or "", model.migration_data_version or ""]).lower()
     return ModelRead(
         id=model.id,
         display_name=model.display_name,
@@ -1645,6 +1644,7 @@ def model_to_read(model: Model) -> ModelRead:
         enabled=model.enabled,
         connection_status=model.connection_status,
         last_tested_at=model.last_tested_at.isoformat() if model.last_tested_at else None,
+        is_test=model.provider == "mock" or "mock" in test_marker or "test" in test_marker or (model.base_url or "").startswith("local://"),
         created_at=model.created_at.isoformat(),
         updated_at=model.updated_at.isoformat(),
     )
@@ -1716,6 +1716,14 @@ def resolution_response_payload(resolution: ModelResolution) -> dict[str, Any]:
     }
     if resolution.warning:
         payload["metadata"] = {"warning": resolution.warning}
+    return payload
+
+
+def timed_resolution_response_payload(db: Session, capability: str, prefer_fallback: bool = False) -> dict[str, Any]:
+    started = time.perf_counter()
+    resolution = model_for_capability(db, capability, prefer_fallback)
+    payload = resolution_response_payload(resolution)
+    payload["lookup_ms"] = max(0, (time.perf_counter() - started) * 1000)
     return payload
 
 
@@ -1836,9 +1844,6 @@ def model_for_capability(db: Session, capability: str, prefer_fallback: bool = F
         db.commit()
         raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
 
-    legacy = legacy_resolution_for_capability(db, capability, prefer_fallback)
-    if legacy:
-        return legacy
     raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
 
 
@@ -1890,12 +1895,15 @@ def ensure_gateway_model_reference(db: Session, model_id: int | None, label: str
 
 
 def capability_mapping_to_read(mapping: CapabilityMapping) -> CapabilityMappingRead:
+    version = mapping.migration_data_version or ""
+    migration_source = version.split(":", 1)[1] if ":" in version else version
     return CapabilityMappingRead(
         id=mapping.id,
         capability=mapping.capability,
         primary_model_id=mapping.primary_model_id,
         fallback_model_id=mapping.fallback_model_id,
         enabled=mapping.enabled,
+        migration_source=migration_source,
         created_at=mapping.created_at.isoformat(),
         updated_at=mapping.updated_at.isoformat(),
     )
@@ -2164,7 +2172,7 @@ def invoke_gateway_capability(
                 "provider": primary.provider,
                 "model": primary.model_name,
                 "model_id": primary.id,
-                "resolution_source": resolution.source,
+                "resolution_source": "capability_mapping",
                 "content": result["content"],
                 "raw": result.get("raw", {}),
                 "fallback_used": resolution.source == "fallback",
@@ -2181,11 +2189,8 @@ def invoke_gateway_capability(
             try:
                 fallback_resolution = model_for_capability(db, capability, prefer_fallback=True)
             except CapabilityResolutionError:
-                legacy = legacy_resolution_for_capability(db, capability, prefer_fallback=True)
-                if not legacy:
-                    collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
-                    raise
-                fallback_resolution = legacy
+                collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
+                raise
             fallback = fallback_resolution.model
             if fallback.id == primary.id and fallback.__class__ is primary.__class__:
                 collector.finish_span(collector.root_span_id, "error", str(primary_error), {"fallback_used": False})
@@ -5070,7 +5075,7 @@ def infer_unit(text: str, data_type: str = "") -> str:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": API_VERSION}
 
 
 @app.get("/api/v1/health/qdrant")
@@ -5246,7 +5251,7 @@ def evaluate_rules(
         trace_id=collector.trace_id,
         provider=resolution.model.provider,
         model=resolution.model.model_name,
-        resolution_source=resolution.source,
+        resolution_source="capability_mapping",
     )
 
 
@@ -6559,7 +6564,7 @@ def call_category_recognition_provider(
                 "trace_id": collector.trace_id,
                 "provider": provider.provider,
                 "model": model_name,
-                "resolution_source": resolution.source,
+                "resolution_source": "capability_mapping",
             }
 
         url = model_chat_url(provider)
@@ -6631,7 +6636,7 @@ def call_category_recognition_provider(
                 "trace_id": collector.trace_id,
                 "provider": provider.provider,
                 "model": model_name,
-                "resolution_source": resolution.source,
+                "resolution_source": "capability_mapping",
             }
         raise CategoryRecognitionUpstreamError(last_error or "Provider request failed", 502, True)
     except CapabilityResolutionError:
@@ -6652,7 +6657,7 @@ def call_category_recognition_provider(
             "trace_id": collector.trace_id,
             "provider": provider.provider,
             "model": model_name,
-            "resolution_source": resolution.source,
+            "resolution_source": "capability_mapping",
         }
     except HTTPException:
         collector.finish_span(collector.root_span_id, "error", "local recognition failed", {"model": model_name})
@@ -8233,7 +8238,7 @@ def confirm_ai_material_add(
         "capability": "material_add",
         "provider": resolution.model.provider,
         "model": resolution.model.model_name,
-        "resolution_source": resolution.source,
+        "resolution_source": "capability_mapping",
         "trace_id": preview.get("trace_id") or f"trace-{sha1(material.code.encode('utf-8')).hexdigest()[:16]}",
         "material": material_to_out(material).model_dump(),
     }
@@ -8367,7 +8372,7 @@ def match_material_category(
         trace_id=collector.trace_id,
         provider=resolution.model.provider,
         model=resolution.model.model_name,
-        resolution_source=resolution.source,
+        resolution_source="capability_mapping",
     )
 
 
@@ -8386,14 +8391,56 @@ def capability_resolution_http_error(exc: CapabilityResolutionError) -> HTTPExce
 def resolve_ai_model(
     capability: str,
     prefer_fallback: bool = False,
+    include_metrics: bool = False,
     request: Request = None,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     current_auth(request, db)
     try:
-        return resolution_response_payload(model_for_capability(db, capability, prefer_fallback))
+        return timed_resolution_response_payload(db, capability, prefer_fallback)
     except CapabilityResolutionError as exc:
         raise capability_resolution_http_error(exc) from exc
+
+
+@app.post("/api/v1/ai/resolve-model/batch")
+def resolve_ai_model_batch(
+    payload: dict[str, Any] | list[str],
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    current_auth(request, db)
+    if isinstance(payload, list):
+        capabilities = payload
+    else:
+        raw = payload.get("capabilities") or payload.get("items") or []
+        capabilities = raw if isinstance(raw, list) else []
+    started = time.perf_counter()
+    results: list[dict[str, Any]] = []
+    for capability in capabilities:
+        try:
+            results.append(timed_resolution_response_payload(db, str(capability)))
+        except CapabilityResolutionError as exc:
+            results.append(
+                {
+                    "capability": exc.capability,
+                    "error": str(exc),
+                    "suggestion": exc.suggestion,
+                }
+            )
+    return {
+        "batch_lookup_ms": max(0, (time.perf_counter() - started) * 1000),
+        "results": results,
+    }
+
+
+@app.post("/api/v1/model-gateway-migration/run")
+def run_model_gateway_migration(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    return run_sprint55_migration(db)
 
 
 @app.get("/api/v1/models", response_model=list[ModelRead])
@@ -8669,345 +8716,6 @@ def delete_gateway_capability_mapping(
     add_audit_log(db, auth, "capability_mapping", "delete", before, {}, "human")
     db.commit()
     return {"deleted": True, "id": mapping_id}
-
-
-@app.get("/api/v1/ai/agent-configs", response_model=list[AgentConfigOut])
-def list_ai_agent_configs(
-    request: Request,
-    db: Session = Depends(get_db),
-) -> list[AgentConfigOut]:
-    current_auth(request, db)
-    Base.metadata.create_all(bind=engine)
-    configs = db.query(AIAgentConfig).order_by(AIAgentConfig.enabled.desc(), AIAgentConfig.id.desc()).all()
-    return [agent_config_to_out(config) for config in configs]
-
-
-@app.post("/api/v1/ai/agent-configs", response_model=AgentConfigOut)
-def create_ai_agent_config(
-    payload: AgentConfigIn,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AgentConfigOut:
-    require_super_admin(current_auth(request, db))
-    if not payload.api_key:
-        raise HTTPException(status_code=422, detail="api_key is required")
-    config = AIAgentConfig(config_key=compact_space(payload.config_key), provider=compact_space(payload.provider))
-    apply_agent_payload(config, payload)
-    db.add(config)
-    try:
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
-    db.refresh(config)
-    return agent_config_to_out(config)
-
-
-@app.get("/api/v1/ai/agent-configs/{config_id}", response_model=AgentConfigOut)
-def get_ai_agent_config(
-    config_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AgentConfigOut:
-    current_auth(request, db)
-    config = db.get(AIAgentConfig, config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="AI agent config not found")
-    return agent_config_to_out(config)
-
-
-@app.put("/api/v1/ai/agent-configs/{config_id}", response_model=AgentConfigOut)
-def update_ai_agent_config(
-    config_id: int,
-    payload: AgentConfigIn,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AgentConfigOut:
-    require_super_admin(current_auth(request, db))
-    config = db.get(AIAgentConfig, config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="AI agent config not found")
-    apply_agent_payload(config, payload)
-    if not config.encrypted_api_key:
-        raise HTTPException(status_code=422, detail="api_key is required")
-    try:
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
-    db.refresh(config)
-    return agent_config_to_out(config)
-
-
-@app.patch("/api/v1/ai/agent-configs/{config_id}/toggle", response_model=AgentConfigOut)
-def toggle_ai_agent_config(
-    config_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AgentConfigOut:
-    require_super_admin(current_auth(request, db))
-    config = db.get(AIAgentConfig, config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="AI agent config not found")
-    config.enabled = not config.enabled
-    config.updated_at = now()
-    db.commit()
-    db.refresh(config)
-    return agent_config_to_out(config)
-
-
-@app.delete("/api/v1/ai/agent-configs/{config_id}")
-def delete_ai_agent_config(
-    config_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    require_super_admin(current_auth(request, db))
-    config = db.get(AIAgentConfig, config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="AI agent config not found")
-    db.query(CapabilityAgentMapping).filter(
-        or_(
-            CapabilityAgentMapping.agent_config_id == config.id,
-            CapabilityAgentMapping.fallback_agent_config_id == config.id,
-        )
-    ).delete(synchronize_session=False)
-    db.delete(config)
-    db.commit()
-    return {"deleted": True, "id": config_id}
-
-
-@app.get("/api/v1/ai/agent-configs/{config_id}/test", response_model=AgentConfigTestOut)
-def test_saved_ai_agent_config(
-    config_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-) -> AgentConfigTestOut:
-    require_super_admin(current_auth(request, db))
-    config = db.get(AIAgentConfig, config_id)
-    if not config:
-        raise HTTPException(status_code=404, detail="AI agent config not found")
-    result = test_agent_config_connection(config)
-    db.commit()
-    return AgentConfigTestOut(
-        ok=result["ok"],
-        status=result["status"],
-        message=result["message"],
-        provider=config.provider,
-        model=config.model_name,
-        last_test_at=config.last_test_at.isoformat() if config.last_test_at else None,
-    )
-
-
-@app.get("/api/v1/ai/providers", response_model=list[ProviderConfigOut])
-def list_ai_providers(
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
-) -> list[ProviderConfigOut]:
-    ensure_provider_configs(db)
-    providers = db.query(ModelConfig).order_by(ModelConfig.enabled.desc(), ModelConfig.id.desc()).all()
-    return [provider_to_out(provider, db) for provider in providers]
-
-
-@app.post("/api/v1/ai/providers", response_model=ProviderConfigOut)
-def save_ai_provider(
-    payload: ProviderConfigIn,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> ProviderConfigOut:
-    values = model_values_from_payload(payload)
-    provider = (
-        db.query(ModelConfig)
-        .filter(ModelConfig.display_name == values["display_name"])
-        .first()
-    )
-    if not provider:
-        provider = ModelConfig(display_name=values["display_name"], provider=values["provider"], model_name=values["model_name"])
-        db.add(provider)
-    apply_model_payload(db, provider, payload)
-    db.commit()
-    db.refresh(provider)
-    return provider_to_out(provider, db)
-
-
-@app.get("/api/v1/ai/providers/{provider_id}", response_model=ProviderConfigOut)
-def get_ai_provider(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
-) -> ProviderConfigOut:
-    provider = db.get(ModelConfig, provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Model configuration not found")
-    return provider_to_out(provider, db)
-
-
-@app.put("/api/v1/ai/providers/{provider_id}", response_model=ProviderConfigOut)
-def update_ai_provider(
-    provider_id: int,
-    payload: ProviderConfigIn,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> ProviderConfigOut:
-    provider = db.get(ModelConfig, provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Model configuration not found")
-    apply_model_payload(db, provider, payload)
-    db.commit()
-    db.refresh(provider)
-    return provider_to_out(provider, db)
-
-
-@app.patch("/api/v1/ai/providers/{provider_id}/disable", response_model=ProviderConfigOut)
-def disable_ai_provider(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> ProviderConfigOut:
-    provider = db.get(ModelConfig, provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Model configuration not found")
-    provider.enabled = False
-    provider.updated_at = now()
-    db.commit()
-    db.refresh(provider)
-    return provider_to_out(provider, db)
-
-
-@app.delete("/api/v1/ai/providers/{provider_id}")
-def delete_ai_provider(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> dict[str, Any]:
-    provider = db.get(ModelConfig, provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Model configuration not found")
-    if db.query(CapabilityModelMapping).filter(
-        or_(
-            CapabilityModelMapping.primary_model_id == provider.id,
-            CapabilityModelMapping.fallback_model_id == provider.id,
-        )
-    ).first():
-        raise HTTPException(status_code=409, detail="Model is referenced by a capability mapping; disable it instead")
-    db.delete(provider)
-    db.commit()
-    return {"deleted": True, "id": provider_id}
-
-
-@app.post("/api/v1/ai/providers/test")
-def test_ai_provider(
-    payload: ProviderConfigIn,
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> dict[str, Any]:
-    values = model_values_from_payload(payload)
-    provider = ModelConfig(
-        display_name=values["display_name"],
-        provider=values["provider"],
-        model_name=values["model_name"],
-        base_url=values["base_url"],
-        timeout_seconds=values["timeout_seconds"],
-        encrypted_api_key=encrypt_api_key(payload.api_key),
-        enabled=values["enabled"],
-    )
-    result = test_model_connection(provider)
-    return {
-        "ok": result["ok"],
-        "provider": provider.provider,
-        "model": provider.model_name,
-        "capabilities": [capability for capability in provider_payload_capabilities(payload) if capability in AI_CAPABILITIES],
-        "status": result["status"],
-        "message": result["message"],
-    }
-
-
-@app.post("/api/v1/ai/providers/{provider_id}/test")
-def test_saved_ai_provider(
-    provider_id: int,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> dict[str, Any]:
-    provider = db.get(ModelConfig, provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail="Model configuration not found")
-    result = test_model_connection(provider)
-    provider.connection_status = result["status"]
-    provider.last_test_message = result["message"]
-    provider.last_test_at = now()
-    provider.updated_at = now()
-    db.commit()
-    return {"ok": result["ok"], "status": result["status"], "message": result["message"], "provider": provider.provider, "model": provider.model_name}
-
-
-@app.get("/api/v1/ai/capability-mappings", response_model=list[CapabilityMappingOut])
-def list_capability_mappings(
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/system/config")),
-) -> list[CapabilityMappingOut]:
-    ensure_provider_configs(db)
-    agent_mappings = db.query(CapabilityAgentMapping).order_by(CapabilityAgentMapping.capability).all()
-    agent_capabilities = {mapping.capability for mapping in agent_mappings}
-    model_query = db.query(CapabilityModelMapping)
-    if agent_capabilities:
-        model_query = model_query.filter(~CapabilityModelMapping.capability.in_(agent_capabilities))
-    model_mappings = model_query.order_by(CapabilityModelMapping.capability).all()
-    return [agent_mapping_to_out(mapping) for mapping in agent_mappings] + [mapping_to_out(mapping) for mapping in model_mappings]
-
-
-@app.put("/api/v1/ai/capability-mappings/{capability}", response_model=CapabilityMappingOut)
-def save_capability_mapping(
-    capability: str,
-    payload: CapabilityMappingIn,
-    db: Session = Depends(get_db),
-    auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
-) -> CapabilityMappingOut:
-    capability = capability or payload.capability
-    if capability not in AI_CAPABILITIES:
-        raise HTTPException(status_code=422, detail="Unsupported AI capability")
-    if payload.agent_config_id:
-        require_super_admin(auth)
-        agent = db.get(AIAgentConfig, payload.agent_config_id)
-        if not agent or not agent.enabled:
-            raise HTTPException(status_code=409, detail="Agent config must exist and be enabled")
-        fallback_agent = db.get(AIAgentConfig, payload.fallback_agent_config_id) if payload.fallback_agent_config_id else None
-        if payload.fallback_agent_config_id and (not fallback_agent or not fallback_agent.enabled):
-            raise HTTPException(status_code=409, detail="Fallback agent config must exist and be enabled")
-        mapping = db.query(CapabilityAgentMapping).filter(CapabilityAgentMapping.capability == capability).first()
-        if not mapping:
-            mapping = CapabilityAgentMapping(capability=capability, agent_config_id=agent.id)
-            db.add(mapping)
-        mapping.agent_config_id = agent.id
-        mapping.fallback_agent_config_id = fallback_agent.id if fallback_agent else None
-        mapping.enabled = payload.enabled
-        mapping.updated_at = now()
-        sync_gateway_mapping_from_legacy_agents(db, capability, agent, fallback_agent, payload.enabled)
-        db.commit()
-        db.refresh(mapping)
-        return agent_mapping_to_out(mapping)
-    if payload.primary_model_id is None:
-        raise HTTPException(status_code=422, detail="primary_model_id or agent_config_id is required")
-    primary = db.get(ModelConfig, payload.primary_model_id)
-    if not primary or not primary.enabled:
-        raise HTTPException(status_code=409, detail="Primary model must exist and be enabled")
-    fallback = db.get(ModelConfig, payload.fallback_model_id) if payload.fallback_model_id else None
-    if payload.fallback_model_id and (not fallback or not fallback.enabled):
-        raise HTTPException(status_code=409, detail="Fallback model must exist and be enabled")
-    mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == capability).first()
-    if not mapping:
-        mapping = CapabilityModelMapping(capability=capability, primary_model_id=primary.id)
-        db.add(mapping)
-    mapping.primary_model_id = primary.id
-    mapping.fallback_model_id = fallback.id if fallback else None
-    mapping.enabled = payload.enabled
-    mapping.updated_at = now()
-    agent_mapping = db.query(CapabilityAgentMapping).filter(CapabilityAgentMapping.capability == capability).first()
-    if agent_mapping:
-        agent_mapping.enabled = False
-        agent_mapping.updated_at = now()
-    sync_gateway_mapping_from_legacy_models(db, capability, primary, fallback, payload.enabled)
-    db.commit()
-    db.refresh(mapping)
-    return mapping_to_out(mapping)
 
 
 @app.post("/api/v1/ai/capabilities/{capability}/invoke")

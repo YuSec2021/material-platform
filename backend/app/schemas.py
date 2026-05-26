@@ -725,6 +725,7 @@ class ModelRead(BaseModel):
     enabled: bool
     connection_status: str
     last_tested_at: str | None = None
+    is_test: bool = False
     created_at: str
     updated_at: str
 
@@ -759,6 +760,7 @@ class CapabilityMappingRead(BaseModel):
     primary_model_id: int | None = None
     fallback_model_id: int | None = None
     enabled: bool
+    migration_source: str = ""
     created_at: str
     updated_at: str
 
