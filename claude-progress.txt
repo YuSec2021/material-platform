@@ -1,11 +1,10 @@
-Project summary: Sprints 1-51 PASS. Sprint 52 implemented on codex/sprint-52-resolver-rewrite. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Current version: v14.6.0.
+Project summary: Sprints 1-54 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config: unified Model+CapabilityMapping tables with model_for_capability() resolver.
+
+Sprint 54: AI Capability Mapping page
+Status: SPRINT PASS (2026-05-26). CapabilityMappingPage at /ai/capability-mappings with table layout, edit dialogs, health indicators, zh-CN/en-US i18n, usage count badges on Model Gateway. 7/7 criteria PASS.
+
+Sprint 53: AI Model Gateway page
+Status: SPRINT PASS. Model Gateway page at /ai/models with card grid, create/edit/delete dialogs, connection test, enabled toggle, zh-CN/en-US i18n. 7/7 criteria PASS.
 
 Sprint 52: AI model resolver rewrite
-Status: IMPLEMENTED BUT NOT COMMITTED. Added unified model_for_capability resolver, resolve-model API, connection fallback, hot-switch behavior, legacy compatibility, and AITracer model metadata.
-Verification: tests/test_sprint52_model_resolution.py passes; full backend pytest passes with isolated Git config because global Git GPG signing breaks orchestrator test commits. Commit/eval trigger blocked by sandbox denial creating .git/index.lock.
-
-Sprint 50: Category Level Expansion to Five Levels
-Status: SPRINT PASS. Notes: Backend CSV template/import accepts 一级类目 through 五级类目 with legacy 3-col CSV compatibility; AI recognition parsing supports level1-level5; frontend import and AI preview tables render 5 editable level columns with zh-CN/en-US i18n. 5/5 criteria PASS.
-
-Sprint 49: Category Table Column Refinement and Immediate Children Filtering
-Status: SPRINT PASS. Notes: Removed 类目库 and 层级 columns from category table, table shows only immediate children. 6/6 criteria PASS.
+Status: SPRINT PASS. Unified model_for_capability() resolver with primary+fallback resolution, connection health check, hot-switch, AITracer integration, legacy compatibility. 5/5 criteria PASS.

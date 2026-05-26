@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -444,7 +444,10 @@ class CapabilityModelMapping(Base):
 
 class Model(Base):
     __tablename__ = "models"
-    __table_args__ = (UniqueConstraint("provider", "model_name", name="uq_models_provider_model_name"),)
+    __table_args__ = (
+        UniqueConstraint("provider", "model_name", name="uq_models_provider_model_name"),
+        Index("ix_models_provider_model_name", "provider", "model_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     display_name: Mapped[str] = mapped_column(String(180), index=True)

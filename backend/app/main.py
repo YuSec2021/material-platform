@@ -11,7 +11,7 @@ import time
 import uuid
 import zipfile
 from dataclasses import dataclass
-from functools import wraps
+from functools import lru_cache, wraps
 from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
@@ -259,6 +259,10 @@ PRODUCT_NAME_STATUSES = {"active", "inactive"}
 PRODUCT_NAME_CODE_PATTERN = re.compile(r"^PM(\d{8,})$")
 SYSTEM_CONFIG_KEY = "system_configuration"
 DEFAULT_SYSTEM_NAME = "AI Material Management Platform"
+
+# Simple in-memory cache for model capability lookups ( TTL = 5 seconds )
+_model_capability_cache: dict[str, tuple[float, CapabilityMapping | None]] = {}
+_CAPABILITY_CACHE_TTL = 5.0
 DEFAULT_SYSTEM_ICON = {
     "filename": "default-system-icon.svg",
     "content_type": "image/svg+xml",
@@ -1804,7 +1808,16 @@ def model_for_capability(db: Session, capability: str, prefer_fallback: bool = F
     if not capability:
         raise CapabilityResolutionError(capability, "Capability is required", 422)
     ensure_model_gateway_schema(db)
-    mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+
+    # Try cache first (5 second TTL)
+    now = time.time()
+    cached = _model_capability_cache.get(capability)
+    if cached and (now - cached[0]) < _CAPABILITY_CACHE_TTL:
+        mapping = cached[1]
+    else:
+        mapping = db.query(CapabilityMapping).filter(CapabilityMapping.capability == capability).first()
+        _model_capability_cache[capability] = (now, mapping)
+
     configured_unified = bool(mapping and mapping.enabled and (mapping.primary_model_id or mapping.fallback_model_id))
     if configured_unified:
         ordered: list[tuple[str, Model | None]] = []
@@ -8316,7 +8329,7 @@ def match_material_category(
         raise HTTPException(status_code=422, detail="material_name is required")
     library_ids = unique_int_ids(payload.category_library_ids)
     if not library_ids:
-        return MaterialCategoryMatchOut(matches=[], results=[], message="No category libraries selected")
+        return MaterialCategoryMatchOut(matches=[], results=[], message="No category libraries selected", resolution_source="capability_mapping")
 
     libraries = db.query(CategoryLibrary).filter(CategoryLibrary.id.in_(library_ids)).order_by(CategoryLibrary.id).all()
     found_ids = {library.id for library in libraries}
@@ -8326,7 +8339,7 @@ def match_material_category(
 
     enabled_libraries = [library for library in libraries if library.qdrant_enabled]
     if not enabled_libraries:
-        return MaterialCategoryMatchOut(matches=[], results=[], message="No Qdrant-enabled category libraries selected")
+        return MaterialCategoryMatchOut(matches=[], results=[], message="No Qdrant-enabled category libraries selected", resolution_source="capability_mapping")
 
     query_text = " ".join(
         part

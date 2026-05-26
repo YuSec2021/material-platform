@@ -1,0 +1,22 @@
+[
+  {
+    "criterion": "Criterion 2",
+    "result": "FAIL",
+    "observation": "UI: allowed=false denied=false, API: allowed=true denied=false, denied_access=403, sa: allowed=true denied=true"
+  },
+  {
+    "criterion": "Criterion 3",
+    "result": "PASS",
+    "observation": "Create in allowed=true(200), blocked denied create(403), blocked denied update(403), denied lib hidden in UI"
+  },
+  {
+    "criterion": "Criterion 4",
+    "result": "PASS",
+    "observation": "Empty state: noRealLibNames=true, emptyText=true; i18n: empty=true, denied=true, role=true; indicators=true"
+  },
+  {
+    "criterion": "Criterion 5",
+    "result": "FAIL",
+    "observation": "Exception: Command failed: cd /Users/yusec/projects/material_retrieval/prototype_code && npx playwright test tests/sprint42.material-library-permission.spec.ts --reporter=line 2>&1\n"
+  }
+]
