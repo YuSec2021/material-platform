@@ -53,6 +53,7 @@ type CategoryTreeSelection =
 
 const CATEGORY_PAGE_SIZE = 10;
 const CATEGORY_LEVEL_KEYS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"] as const;
+const CATEGORY_IMPORT_ACCEPT = ".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
 const emptyForm: CategoryFormState = {
   name: "",
@@ -136,6 +137,20 @@ function parseImportCsv(text: string): PreviewRow[] {
   });
 }
 
+function isCsvImportFile(file: File) {
+  return file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv";
+}
+
+function isSpreadsheetImportFile(file: File) {
+  const name = file.name.toLowerCase();
+  return (
+    name.endsWith(".xlsx") ||
+    name.endsWith(".xls") ||
+    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.type === "application/vnd.ms-excel"
+  );
+}
+
 function toPreviewRow(row: CategoryImportRow, id: string, confidence?: number, maxLevel?: number): PreviewRow {
   const levels = CATEGORY_LEVEL_KEYS.map((key) => row[key]?.trim() ?? "");
   const errors: string[] = [];
@@ -189,15 +204,15 @@ function categoryLibraryId(category: Category, libraries: CategoryLibrary[]) {
 
 function treeIndentClass(depth: number) {
   if (depth <= 0) {
-    return "pl-2";
-  }
-  if (depth === 1) {
-    return "pl-5";
-  }
-  if (depth === 2) {
     return "pl-8";
   }
-  return "pl-11";
+  if (depth === 1) {
+    return "pl-11";
+  }
+  if (depth === 2) {
+    return "pl-14";
+  }
+  return "pl-17";
 }
 
 function resultSummary(result: CategoryBulkImportResult | null) {
@@ -299,11 +314,13 @@ export function CategoryList() {
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [importLibraryId, setImportLibraryId] = useState("");
   const [importRows, setImportRows] = useState<PreviewRow[]>([]);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [importFileName, setImportFileName] = useState("");
   const [importResult, setImportResult] = useState<CategoryBulkImportResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [aiText, setAiText] = useState("");
   const [recognizedRows, setRecognizedRows] = useState<PreviewRow[]>([]);
+  const [loadingDot, setLoadingDot] = useState(0);
 
   const query = useQuery({
     queryKey: ["categories"],
@@ -488,7 +505,10 @@ export function CategoryList() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (rows: CategoryImportRow[]) => apiClient.bulkImportCategories(Number(importLibraryId), rows),
+    mutationFn: (payload: CategoryImportRow[] | File) =>
+      payload instanceof File
+        ? apiClient.bulkImportCategoriesFile(Number(importLibraryId), payload)
+        : apiClient.bulkImportCategories(Number(importLibraryId), payload),
     onSuccess: async (result) => {
       setImportResult(result);
       setExpandedLibraryIds((current) => Array.from(new Set([...current, Number(importLibraryId)])));
@@ -530,6 +550,18 @@ export function CategoryList() {
     onError: (error) => toast.error(`${t("toast.aiFailed")}: ${error.message}`),
   });
 
+  // Animate loading dots while AI recognition is in progress
+  useEffect(() => {
+    if (!aiMutation.isPending) {
+      setLoadingDot(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setLoadingDot((d) => (d >= 3 ? 0 : d + 1));
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [aiMutation.isPending]);
+
   const aiConfirmMutation = useMutation({
     mutationFn: (rows: CategoryImportRow[]) => apiClient.bulkImportCategories(Number(importLibraryId), rows),
     onSuccess: async (result) => {
@@ -544,6 +576,10 @@ export function CategoryList() {
     },
     onError: (error) => toast.error(`${t("categoryImport.importFailed")}: ${error.message}`),
   });
+  const canRunImport =
+    Boolean(importLibraryId) &&
+    !importMutation.isPending &&
+    (importFile ? true : importRows.length > 0 && invalidImportRows.length === 0);
 
   const openCreateForm = () => {
     setEditingCategory(null);
@@ -566,8 +602,20 @@ export function CategoryList() {
   const handleFile = async (file: File) => {
     setImportFileName(file.name);
     setImportResult(null);
-    const text = await file.text();
-    setImportRows(parseImportCsv(text));
+    if (isCsvImportFile(file)) {
+      setImportFile(null);
+      const text = await file.text();
+      setImportRows(parseImportCsv(text));
+      return;
+    }
+    if (isSpreadsheetImportFile(file)) {
+      setImportFile(file);
+      setImportRows([]);
+      return;
+    }
+    setImportFile(null);
+    setImportRows([]);
+    toast.error(t("categoryImport.unsupportedFile"));
   };
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
@@ -668,12 +716,12 @@ export function CategoryList() {
                     aria-expanded={expanded}
                     aria-label={t(expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: library.name })}
                     onClick={() => toggleLibrary(library)}
-                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                       selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
                     }`}
                   >
-                    <span className="truncate">{library.name}</span>
                     {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                    <span className="truncate">{library.name}</span>
                   </button>
                   {expanded && (
                     <div className="mt-1 space-y-1">
@@ -996,8 +1044,8 @@ export function CategoryList() {
             </button>
             <button
               type="button"
-              onClick={() => importMutation.mutate(previewRowsToImportRows(importRows))}
-              disabled={importRows.length === 0 || invalidImportRows.length > 0 || importMutation.isPending}
+              onClick={() => importMutation.mutate(importFile ?? previewRowsToImportRows(importRows))}
+              disabled={!canRunImport}
               className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
             >
               {importMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -1046,9 +1094,14 @@ export function CategoryList() {
             <UploadCloud className="mb-2 h-8 w-8 text-blue-600" />
             <span className="text-sm font-medium text-foreground">{t("categoryImport.dropCsv")}</span>
             <span className="mt-1 text-xs text-muted-foreground">{importFileName || t("categoryImport.csvHint")}</span>
+            {importFile && (
+              <span className="mt-2 rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                {t("categoryImport.spreadsheetReady")}
+              </span>
+            )}
             <input
               type="file"
-              accept=".csv,text/csv"
+              accept={CATEGORY_IMPORT_ACCEPT}
               className="sr-only"
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -1134,8 +1187,17 @@ export function CategoryList() {
             disabled={!aiText.trim() || aiMutation.isPending}
             className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
-            {aiMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-            {aiMutation.isPending ? t("categoryImport.aiRecognizing") : t("categoryImport.sendToAi")}
+            {aiMutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t("categoryImport.aiRecognizing")}{".".repeat(loadingDot + 1)}
+              </>
+            ) : (
+              <>
+                <Bot className="h-4 w-4" />
+                {t("categoryImport.sendToAi")}
+              </>
+            )}
           </button>
           {recognizedRows.length > 0 && (
             <ImportPreviewTable
