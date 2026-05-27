@@ -1,10 +1,12 @@
-Project summary: Sprints 1-54 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config: unified Model+CapabilityMapping tables with model_for_capability() resolver.
+Project summary: Sprints 1-55 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config: unified Model+CapabilityMapping tables with model_for_capability() resolver.
+
+Sprint 56: Category import XLSX/XLS support
+Status: implemented, not committed per user instruction. Backend accepts CSV/XLSX/XLS uploads; frontend picker accepts all three and sends spreadsheets as files.
+Verification: Sprint 56 API tests pass; CSV compatibility import checks pass; frontend build passes. Full pytest still has existing legacy AI endpoint/git-signing failures.
+Commit handoff: wrote .sprintfoundry/commit-requests/sprint-56.json for Orchestrator commit; did not write eval-trigger.txt.
+
+Sprint 55: Data migration + legacy cleanup
+Status: SPRINT PASS (2026-05-26). Migrated 414 legacy model configs to unified Model table, removed legacy AI surfaces, E2E flows working. 7/7 criteria PASS.
 
 Sprint 54: AI Capability Mapping page
-Status: SPRINT PASS (2026-05-26). CapabilityMappingPage at /ai/capability-mappings with table layout, edit dialogs, health indicators, zh-CN/en-US i18n, usage count badges on Model Gateway. 7/7 criteria PASS.
-
-Sprint 53: AI Model Gateway page
-Status: SPRINT PASS. Model Gateway page at /ai/models with card grid, create/edit/delete dialogs, connection test, enabled toggle, zh-CN/en-US i18n. 7/7 criteria PASS.
-
-Sprint 52: AI model resolver rewrite
-Status: SPRINT PASS. Unified model_for_capability() resolver with primary+fallback resolution, connection health check, hot-switch, AITracer integration, legacy compatibility. 5/5 criteria PASS.
+Status: SPRINT PASS (2026-05-26). CapabilityMappingPage at /ai/capability-mappings. 7/7 criteria PASS.

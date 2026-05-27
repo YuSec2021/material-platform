@@ -5,5 +5,7 @@
 |--------|-------|--------|---------|------|--------|
 | 50 | 类目层级扩展：批量导入和AI识别支持任意层级（最多五级） | PASS | v14.6.0 | 2026-05-25 | minor_feature |
 
-## Latest version: v14.6.0
-## Max sprint ID: 50
+| 56 | 类目管理导入支持 xlsx/xls 文件格式 | PASS | v14.7.0 | 2026-05-27 | minor_feature |
+
+## Latest version: v14.7.0
+## Max sprint ID: 56

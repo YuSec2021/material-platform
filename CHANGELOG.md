@@ -142,3 +142,5 @@
 - i18n zh-CN and en-US for all AI matching UI text
 
 ## v14.6.0 — Sprint 50 [MINOR bump]
+
+## v14.7.0 — Sprint 56 [MINOR bump]

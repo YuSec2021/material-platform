@@ -1155,6 +1155,22 @@
       ],
       "status": "planned",
       "origin": "major_feature"
+    },
+    {
+      "id": 56,
+      "title": "类目管理导入支持 xlsx/xls 文件格式",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Category management import UI accepts .csv, .xlsx, and .xls files in the file picker/upload control.",
+        "Backend category import parsing supports CSV, XLSX, and XLS workbook formats using the existing CSV import behavior as the reference contract for headers, rows, validation, and created category records.",
+        "Failed spreadsheet parsing returns a clear user-visible error message that identifies unsupported, malformed, or unreadable files without silently ignoring the failure."
+      ],
+      "status": "planned",
+      "origin": "minor_feature"
     }
   ]
 }

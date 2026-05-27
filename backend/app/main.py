@@ -16,6 +16,7 @@ from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
 from typing import Any, Callable
+from xml.etree import ElementTree
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -1446,7 +1447,11 @@ def gateway_connection_status(status: str | None) -> str:
 
 def ensure_model_gateway_schema(db: Session) -> None:
     Base.metadata.create_all(bind=engine)
-    run_sprint55_migration(db)
+    # Migration sprint55_run_once already ran during sprint 55 deployment.
+    # Re-running on every request would overwrite manual capability-mapping
+    # updates (the migration syncs from legacy tables that still reference
+    # mock models). Run `python -m app.migrations.sprint55_migrate_ai_config`
+    # manually if you need to re-migrate.
     seed_default_capability_mappings(db)
 
 
@@ -6280,20 +6285,344 @@ def parse_category_import_csv(text: str) -> list[dict[str, str]]:
     return [{header: row.get(header, "") for header in CATEGORY_IMPORT_HEADERS} for row in reader]
 
 
+def xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def category_import_rows_from_table(table_rows: list[list[Any]], source: str) -> list[dict[str, str]]:
+    non_empty_rows = [
+        [compact_space(str(cell or "")) for cell in row]
+        for row in table_rows
+        if any(compact_space(str(cell or "")) for cell in row)
+    ]
+    if not non_empty_rows:
+        raise HTTPException(status_code=422, detail=f"{source} category import file is empty")
+    headers = [cell.strip() for cell in non_empty_rows[0]]
+    if CATEGORY_IMPORT_HEADERS[0] not in headers:
+        raise HTTPException(status_code=422, detail=f"Missing {source} headers: {CATEGORY_IMPORT_HEADERS[0]}")
+    indexes = [headers.index(header) if header in headers else -1 for header in CATEGORY_IMPORT_HEADERS]
+    rows: list[dict[str, str]] = []
+    for raw_row in non_empty_rows[1:]:
+        rows.append(
+            {
+                header: raw_row[index] if index >= 0 and index < len(raw_row) else ""
+                for header, index in zip(CATEGORY_IMPORT_HEADERS, indexes)
+            }
+        )
+    return rows
+
+
+def xlsx_column_index(cell_ref: str, fallback: int) -> int:
+    letters = re.match(r"([A-Za-z]+)", cell_ref or "")
+    if not letters:
+        return fallback
+    value = 0
+    for char in letters.group(1).upper():
+        value = value * 26 + (ord(char) - ord("A") + 1)
+    return max(0, value - 1)
+
+
+def xlsx_shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        data = archive.read("xl/sharedStrings.xml")
+    except KeyError:
+        return []
+    root = ElementTree.fromstring(data)
+    values: list[str] = []
+    for item in root:
+        if xml_local_name(item.tag) != "si":
+            continue
+        values.append("".join(text.text or "" for text in item.iter() if xml_local_name(text.tag) == "t"))
+    return values
+
+
+def xlsx_first_sheet_path(archive: zipfile.ZipFile) -> str:
+    try:
+        workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+    except KeyError as exc:
+        raise ValueError("workbook.xml is missing") from exc
+    relationship_targets: dict[str, str] = {}
+    try:
+        rels = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        for rel in rels:
+            rel_id = rel.attrib.get("Id")
+            target = rel.attrib.get("Target")
+            if rel_id and target:
+                relationship_targets[rel_id] = target
+    except KeyError:
+        relationship_targets = {}
+    for element in workbook.iter():
+        if xml_local_name(element.tag) != "sheet":
+            continue
+        rel_id = element.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        target = relationship_targets.get(rel_id or "")
+        if target:
+            return f"xl/{target.lstrip('/')}" if not target.startswith("xl/") else target
+        sheet_id = compact_space(str(element.attrib.get("sheetId") or "1"))
+        return f"xl/worksheets/sheet{sheet_id}.xml"
+    return "xl/worksheets/sheet1.xml"
+
+
+def parse_xlsx_category_import(content: bytes) -> list[dict[str, str]]:
+    with zipfile.ZipFile(BytesIO(content)) as archive:
+        shared_strings = xlsx_shared_strings(archive)
+        sheet = ElementTree.fromstring(archive.read(xlsx_first_sheet_path(archive)))
+    table_rows: list[list[str]] = []
+    for row in [element for element in sheet.iter() if xml_local_name(element.tag) == "row"]:
+        cells: dict[int, str] = {}
+        fallback_index = 0
+        for cell in [element for element in row if xml_local_name(element.tag) == "c"]:
+            column_index = xlsx_column_index(cell.attrib.get("r", ""), fallback_index)
+            fallback_index = column_index + 1
+            cell_type = cell.attrib.get("t", "")
+            if cell_type == "inlineStr":
+                value = "".join(text.text or "" for text in cell.iter() if xml_local_name(text.tag) == "t")
+            else:
+                raw_value = next((child.text or "" for child in cell if xml_local_name(child.tag) == "v"), "")
+                if cell_type == "s" and raw_value.strip().isdigit():
+                    value = shared_strings[int(raw_value)] if int(raw_value) < len(shared_strings) else ""
+                else:
+                    value = raw_value
+            cells[column_index] = compact_space(value)
+        if cells:
+            table_rows.append([cells.get(index, "") for index in range(max(cells) + 1)])
+    return category_import_rows_from_table(table_rows, "XLSX")
+
+
+def parse_xml_xls_category_import(content: bytes) -> list[dict[str, str]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("gb18030")
+    root = ElementTree.fromstring(text.lstrip())
+    table_rows: list[list[str]] = []
+    for row in [element for element in root.iter() if xml_local_name(element.tag).lower() in {"row", "tr"}]:
+        values: list[str] = []
+        for cell in [element for element in row if xml_local_name(element.tag).lower() in {"cell", "td", "th"}]:
+            values.append(compact_space("".join(cell.itertext())))
+        if values:
+            table_rows.append(values)
+    return category_import_rows_from_table(table_rows, "XLS")
+
+
+def read_u16(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 2], "little")
+
+
+def read_u32(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 4], "little")
+
+
+def read_u64(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 8], "little")
+
+
+def cfb_sector(content: bytes, sector_size: int, sector_id: int) -> bytes:
+    start = (sector_id + 1) * sector_size
+    return content[start : start + sector_size]
+
+
+def cfb_read_regular_chain(content: bytes, sector_size: int, fat: list[int], start_sector: int, size: int | None = None) -> bytes:
+    end_of_chain = 0xFFFFFFFE
+    chunks: list[bytes] = []
+    sector_id = start_sector
+    seen: set[int] = set()
+    while 0 <= sector_id < len(fat) and sector_id not in seen and sector_id != end_of_chain:
+        seen.add(sector_id)
+        chunks.append(cfb_sector(content, sector_size, sector_id))
+        next_sector = fat[sector_id]
+        if next_sector >= 0xFFFFFFF8:
+            break
+        sector_id = next_sector
+    data = b"".join(chunks)
+    return data[:size] if size is not None else data
+
+
+def cfb_workbook_stream(content: bytes) -> bytes:
+    if content[:8] != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise ValueError("not an OLE2 XLS workbook")
+    sector_size = 1 << read_u16(content, 30)
+    mini_sector_size = 1 << read_u16(content, 32)
+    first_dir_sector = read_u32(content, 48)
+    mini_stream_cutoff = read_u32(content, 56)
+    first_mini_fat_sector = read_u32(content, 60)
+    mini_fat_sector_count = read_u32(content, 64)
+    difat = [read_u32(content, offset) for offset in range(76, 512, 4)]
+    fat_sectors = [sector_id for sector_id in difat if sector_id < 0xFFFFFFF8]
+    fat: list[int] = []
+    for sector_id in fat_sectors:
+        sector = cfb_sector(content, sector_size, sector_id)
+        fat.extend(read_u32(sector, offset) for offset in range(0, len(sector), 4))
+    directory = cfb_read_regular_chain(content, sector_size, fat, first_dir_sector)
+    entries: dict[str, dict[str, Any]] = {}
+    root_entry: dict[str, Any] | None = None
+    for offset in range(0, len(directory), 128):
+        entry = directory[offset : offset + 128]
+        if len(entry) < 128:
+            continue
+        name_length = read_u16(entry, 64)
+        if name_length < 2:
+            continue
+        name = entry[: name_length - 2].decode("utf-16le", errors="ignore")
+        item = {
+            "type": entry[66],
+            "start": read_u32(entry, 116),
+            "size": read_u64(entry, 120),
+        }
+        entries[name.lower()] = item
+        if item["type"] == 5:
+            root_entry = item
+    workbook = entries.get("workbook") or entries.get("book")
+    if not workbook:
+        raise ValueError("Workbook stream is missing")
+    workbook_size = int(workbook["size"])
+    if workbook_size >= mini_stream_cutoff or not root_entry:
+        return cfb_read_regular_chain(content, sector_size, fat, int(workbook["start"]), workbook_size)
+
+    mini_fat_stream = cfb_read_regular_chain(
+        content,
+        sector_size,
+        fat,
+        first_mini_fat_sector,
+        mini_fat_sector_count * sector_size,
+    )
+    mini_fat = [read_u32(mini_fat_stream, offset) for offset in range(0, len(mini_fat_stream), 4)]
+    root_stream = cfb_read_regular_chain(content, sector_size, fat, int(root_entry["start"]), int(root_entry["size"]))
+    chunks: list[bytes] = []
+    mini_sector_id = int(workbook["start"])
+    seen: set[int] = set()
+    while 0 <= mini_sector_id < len(mini_fat) and mini_sector_id not in seen:
+        seen.add(mini_sector_id)
+        start = mini_sector_id * mini_sector_size
+        chunks.append(root_stream[start : start + mini_sector_size])
+        next_sector = mini_fat[mini_sector_id]
+        if next_sector >= 0xFFFFFFF8:
+            break
+        mini_sector_id = next_sector
+    return b"".join(chunks)[:workbook_size]
+
+
+def parse_biff_unicode_string(data: bytes, offset: int = 0) -> tuple[str, int]:
+    if offset + 3 > len(data):
+        return "", len(data)
+    char_count = read_u16(data, offset)
+    flags = data[offset + 2]
+    offset += 3
+    rich_text_runs = 0
+    phonetic_size = 0
+    if flags & 0x08 and offset + 2 <= len(data):
+        rich_text_runs = read_u16(data, offset)
+        offset += 2
+    if flags & 0x04 and offset + 4 <= len(data):
+        phonetic_size = read_u32(data, offset)
+        offset += 4
+    is_utf16 = bool(flags & 0x01)
+    byte_length = char_count * (2 if is_utf16 else 1)
+    raw = data[offset : offset + byte_length]
+    offset += byte_length
+    text = raw.decode("utf-16le" if is_utf16 else "latin1", errors="ignore")
+    offset += rich_text_runs * 4 + phonetic_size
+    return text, offset
+
+
+def parse_biff_xls_category_import(content: bytes) -> list[dict[str, str]]:
+    stream = cfb_workbook_stream(content)
+    shared_strings: list[str] = []
+    cells: dict[tuple[int, int], str] = {}
+    in_first_sheet = False
+    first_sheet_seen = False
+    offset = 0
+    while offset + 4 <= len(stream):
+        record_id = read_u16(stream, offset)
+        record_size = read_u16(stream, offset + 2)
+        record = stream[offset + 4 : offset + 4 + record_size]
+        offset += 4 + record_size
+        if record_id == 0x0809 and len(record) >= 4:
+            bof_type = read_u16(record, 2)
+            if bof_type == 0x0010 and not first_sheet_seen:
+                in_first_sheet = True
+                first_sheet_seen = True
+            elif bof_type == 0x0010:
+                in_first_sheet = False
+        elif record_id == 0x000A and in_first_sheet:
+            break
+        elif record_id == 0x00FC and len(record) >= 8:
+            unique_count = read_u32(record, 4)
+            position = 8
+            strings: list[str] = []
+            for _ in range(unique_count):
+                if position >= len(record):
+                    break
+                value, position = parse_biff_unicode_string(record, position)
+                strings.append(value)
+            shared_strings = strings
+        elif in_first_sheet and record_id == 0x00FD and len(record) >= 10:
+            row = read_u16(record, 0)
+            column = read_u16(record, 2)
+            string_index = read_u32(record, 6)
+            cells[(row, column)] = shared_strings[string_index] if string_index < len(shared_strings) else ""
+        elif in_first_sheet and record_id == 0x0204 and len(record) >= 9:
+            row = read_u16(record, 0)
+            column = read_u16(record, 2)
+            value, _ = parse_biff_unicode_string(record, 6)
+            cells[(row, column)] = value
+        elif in_first_sheet and record_id == 0x0203 and len(record) >= 14:
+            row = read_u16(record, 0)
+            column = read_u16(record, 2)
+            number = int.from_bytes(record[6:14], "little")
+            cells[(row, column)] = str(number)
+    if not cells:
+        raise ValueError("no readable worksheet cells found")
+    max_row = max(row for row, _column in cells)
+    max_column = max(column for _row, column in cells)
+    table_rows = [
+        [compact_space(cells.get((row, column), "")) for column in range(max_column + 1)]
+        for row in range(max_row + 1)
+    ]
+    return category_import_rows_from_table(table_rows, "XLS")
+
+
+def parse_category_import_file(content: bytes, filename: str, content_type: str) -> list[dict[str, str]]:
+    lowered = filename.lower()
+    if lowered.endswith(".csv") or "text/csv" in content_type:
+        try:
+            return parse_category_import_csv(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV category import file: {exc}") from exc
+    if lowered.endswith(".xlsx") or "spreadsheetml.sheet" in content_type or zipfile.is_zipfile(BytesIO(content)):
+        try:
+            return parse_xlsx_category_import(content)
+        except (KeyError, ValueError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLSX category import file: {exc}") from exc
+    if lowered.endswith(".xls") or "application/vnd.ms-excel" in content_type:
+        try:
+            stripped = content.lstrip()
+            if stripped.startswith(b"<"):
+                return parse_xml_xls_category_import(content)
+            return parse_biff_xls_category_import(content)
+        except (UnicodeDecodeError, ValueError, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLS category import file: {exc}") from exc
+    raise HTTPException(status_code=422, detail="Unsupported category import file type. Upload CSV, XLSX, or XLS.")
+
+
 async def category_import_rows_from_request(request: Request) -> list[dict[str, str]]:
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" in content_type:
         form = await request.form()
         upload = form.get("file") or form.get("csv") or form.get("upload")
         if upload is None or not hasattr(upload, "read"):
-            raise HTTPException(status_code=422, detail="CSV file is required")
+            raise HTTPException(status_code=422, detail="Category import file is required")
         content = await upload.read()
-        text = content.decode("utf-8-sig")
-        return parse_category_import_csv(text)
+        filename = compact_space(str(getattr(upload, "filename", "") or ""))
+        upload_content_type = compact_space(str(getattr(upload, "content_type", "") or ""))
+        return parse_category_import_file(content, filename, upload_content_type)
 
     if "text/csv" in content_type:
         content = await request.body()
-        return parse_category_import_csv(content.decode("utf-8-sig"))
+        try:
+            return parse_category_import_csv(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV category import file: {exc}") from exc
 
     payload = await request.json()
     if isinstance(payload, list):
