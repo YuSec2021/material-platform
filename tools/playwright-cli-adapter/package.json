@@ -1,0 +1,9 @@
+{
+  "name": "playwright",
+  "version": "1.60.0",
+  "bin": {
+    "playwright": "cli.js"
+  },
+  "main": "index.js",
+  "license": "Apache-2.0"
+}

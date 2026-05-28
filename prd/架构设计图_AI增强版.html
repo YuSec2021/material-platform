@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AI物料治理平台 · 架构设计图 V2.0</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  background: #F0F2F5;
+  padding: 28px 24px;
+}
+
+.page-title {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1A1A2E;
+  margin-bottom: 20px;
+  letter-spacing: 1.5px;
+}
+.page-subtitle {
+  text-align: center;
+  font-size: 12px;
+  color: #7F8C8D;
+  margin-top: -14px;
+  margin-bottom: 20px;
+}
+
+/* ── outer container ── */
+.diagram {
+  width: 1060px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── arrow connector ── */
+.connector {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 22px;
+  color: #B0B8C1;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.connector-text {
+  font-size: 10px;
+  color: #95A5A6;
+  margin: 0 6px;
+  white-space: nowrap;
+}
+
+/* ── shared layer shell ── */
+.layer {
+  border-radius: 10px;
+  padding: 14px 16px;
+  position: relative;
+}
+.layer-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+.layer-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 20px;
+  color: #fff;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.layer-desc {
+  font-size: 11px;
+  color: #7F8C8D;
+}
+
+/* ── Layer 1: 数据接入层 ── */
+.layer-1 {
+  background: #EBF5FB;
+  border: 1.5px solid #5DADE2;
+}
+.badge-1 { background: #2E86C1; }
+.entry-row {
+  display: flex;
+  gap: 8px;
+}
+.entry-box {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #AED6F1;
+  border-radius: 7px;
+  padding: 9px 6px;
+  text-align: center;
+}
+.entry-box-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1A5276;
+  margin-bottom: 3px;
+}
+.entry-box-sub {
+  font-size: 10.5px;
+  color: #7F8C8D;
+}
+.entry-pipeline {
+  background: #D6EAF8;
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #2E86C1;
+  text-align: center;
+}
+
+/* ── Layer 2: AI核心能力中台 (MAIN) ── */
+.layer-2 {
+  background: linear-gradient(150deg, #EAFAF1 0%, #EBF5FB 50%, #F5EEF8 100%);
+  border: 2.5px solid #1E8449;
+}
+.badge-2 { background: linear-gradient(90deg, #1E8449, #27AE60); }
+.ai-core-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1E8449;
+  letter-spacing: 3px;
+  flex: 1;
+  text-align: center;
+}
+.ai-core-subtitle {
+  font-size: 11px;
+  color: #7F8C8D;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+/* orchestration bar */
+.orch-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.6);
+  border: 1px dashed #A9DFBF;
+  border-radius: 7px;
+  padding: 7px 10px;
+  align-items: center;
+}
+.orch-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E8449;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.orch-tag {
+  font-size: 11px;
+  color: #555;
+  background: white;
+  border: 1px solid #D5F5E3;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+/* 3-column inner layout */
+.ai-inner {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.ai-side {
+  width: 148px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.75);
+  border: 1px solid #A9DFBF;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.ai-side-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1E8449;
+  text-align: center;
+  padding-bottom: 7px;
+  border-bottom: 1.5px dashed #A9DFBF;
+  margin-bottom: 8px;
+}
+.side-chip {
+  font-size: 11px;
+  color: #444;
+  background: white;
+  border: 1px solid #D5F5E3;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 5px;
+  text-align: center;
+}
+
+/* 6 AI capability cards */
+.ai-caps {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, auto);
+  gap: 10px;
+}
+.cap-card {
+  background: #fff;
+  border-radius: 9px;
+  padding: 12px 14px;
+  border: 1.5px solid #D5EAD5;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.2s;
+}
+.cap-card:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+}
+.cap-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3.5px;
+  border-radius: 9px 9px 0 0;
+}
+.c1::after { background: #3498DB; }
+.c2::after { background: #27AE60; }
+.c3::after { background: #E74C3C; }
+.c4::after { background: #F39C12; }
+.c5::after { background: #8E44AD; }
+.c6::after { background: #16A085; }
+
+.cap-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+.cap-icon {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.ic1 { background: #EBF5FB; }
+.ic2 { background: #EAFAF1; }
+.ic3 { background: #FDEDEC; }
+.ic4 { background: #FEF9E7; }
+.ic5 { background: #F5EEF8; }
+.ic6 { background: #E8F8F5; }
+
+.cap-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1A1A2E;
+  line-height: 1.2;
+}
+.cap-title span {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  color: #95A5A6;
+  margin-top: 1px;
+}
+
+.cap-items {
+  list-style: none;
+  flex: 1;
+}
+.cap-items li {
+  font-size: 11px;
+  color: #5D6D7E;
+  padding: 2.5px 0;
+  border-bottom: 1px solid #F7F9F9;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.cap-items li:last-child { border-bottom: none; }
+.bullet {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.b1 { color: #3498DB; }
+.b2 { color: #27AE60; }
+.b3 { color: #E74C3C; }
+.b4 { color: #F39C12; }
+.b5 { color: #8E44AD; }
+.b6 { color: #16A085; }
+
+/* ── Layer 3: AI模型底座 ── */
+.layer-3 {
+  background: #F5EEF8;
+  border: 1.5px solid #9B59B6;
+}
+.badge-3 { background: #7D3C98; }
+.model-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.model-gw {
+  background: linear-gradient(135deg, #7D3C98, #9B59B6);
+  color: white;
+  border-radius: 8px;
+  padding: 10px 18px;
+  width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.gw-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.gw-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.gw-tag {
+  font-size: 10px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.model-types {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+}
+.model-type {
+  flex: 1;
+  background: white;
+  border: 1px solid #D2B4DE;
+  border-radius: 8px;
+  padding: 10px 14px;
+  text-align: center;
+}
+.mt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #7D3C98;
+  margin-bottom: 5px;
+}
+.mt-sub {
+  font-size: 11px;
+  color: #7F8C8D;
+  line-height: 1.6;
+}
+.mt-examples {
+  font-size: 10.5px;
+  color: #BDC3C7;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* ── Layer 4: 结果决策层 ── */
+.layer-4 {
+  background: #FEF9E7;
+  border: 1.5px solid #F39C12;
+}
+.badge-4 { background: #E67E22; }
+.gov-row {
+  display: flex;
+  gap: 8px;
+}
+.gov-box {
+  flex: 1;
+  background: white;
+  border: 1px solid #FAD7A0;
+  border-radius: 7px;
+  padding: 9px 12px;
+  text-align: center;
+}
+.gb-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #E67E22;
+  margin-bottom: 4px;
+}
+.gb-sub {
+  font-size: 10.5px;
+  color: #7F8C8D;
+  line-height: 1.5;
+}
+.gov-box.wide {
+  flex: 1.4;
+}
+.gov-box.accent {
+  background: #FDFBEF;
+  border-color: #F8C471;
+}
+
+/* ── Layer 5: 数据沉淀层 ── */
+.layer-5 {
+  background: #F2F3F4;
+  border: 1.5px solid #99A3A4;
+}
+.badge-5 { background: #5D6D7E; }
+.data-row {
+  display: flex;
+  gap: 8px;
+}
+.data-box {
+  flex: 1;
+  background: white;
+  border: 1px solid #D5D8DC;
+  border-radius: 7px;
+  padding: 9px 12px;
+  text-align: center;
+}
+.db-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #5D6D7E;
+  margin-bottom: 4px;
+}
+.db-sub {
+  font-size: 10.5px;
+  color: #95A5A6;
+  line-height: 1.5;
+}
+.data-box.highlight {
+  border-color: #AEB6BF;
+  background: #FAFAFA;
+}
+
+/* ── Right floating panel: 模型效果评估 ── */
+.layout-outer {
+  position: relative;
+  width: 1060px;
+  margin: 0 auto;
+}
+.right-float {
+  position: absolute;
+  right: -188px;
+  top: 0;
+  width: 178px;
+}
+.eval-panel {
+  background: #EBF5FB;
+  border: 1.5px solid #5DADE2;
+  border-radius: 10px;
+  padding: 12px 12px;
+}
+.ep-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2E86C1;
+  text-align: center;
+  padding-bottom: 8px;
+  border-bottom: 1.5px dashed #AED6F1;
+  margin-bottom: 8px;
+}
+.ep-item {
+  font-size: 11px;
+  color: #444;
+  padding: 4px 0;
+  border-bottom: 1px solid #D6EAF8;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ep-item:last-child { border-bottom: none; }
+.ep-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #5DADE2;
+  flex-shrink: 0;
+}
+
+/* version tag */
+.version-tag {
+  position: absolute;
+  top: -10px;
+  right: 16px;
+  background: #E74C3C;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+</style>
+</head>
+<body>
+
+<div class="page-title">AI 物料治理平台 · 架构设计图</div>
+<div class="page-subtitle">V2.0 · 以AI为核心的端到端物料智能治理架构</div>
+
+<div class="layout-outer">
+
+  <div class="diagram">
+
+    <!-- ══════════ Layer 1: 数据接入层 ══════════ -->
+    <div class="layer layer-1">
+      <div class="layer-header">
+        <div class="layer-badge badge-1">数据接入层</div>
+        <div class="layer-desc">多源数据统一入口 · 字段映射 · 格式校验 · 任务生成</div>
+      </div>
+      <div class="entry-row">
+        <div class="entry-box">
+          <div class="entry-box-title">📊 Excel批量导入</div>
+          <div class="entry-box-sub">模板校验 · 批量解析</div>
+        </div>
+        <div class="entry-box">
+          <div class="entry-box-title">🔗 ERP对接</div>
+          <div class="entry-box-sub">实时接口 · 增量同步</div>
+        </div>
+        <div class="entry-box">
+          <div class="entry-box-title">🛒 商品库增量同步</div>
+          <div class="entry-box-sub">变更监听 · 差异推送</div>
+        </div>
+        <div class="entry-box">
+          <div class="entry-box-title">🌐 Open API推送</div>
+          <div class="entry-box-sub">标准接口 · 鉴权管理</div>
+        </div>
+      </div>
+      <div class="entry-pipeline">→ 统一预处理管道：字段映射 · 格式校验 · batch_id生成 · 错误清单输出 →</div>
+    </div>
+
+    <!-- connector -->
+    <div class="connector">↓</div>
+
+    <!-- ══════════ Layer 2: AI核心能力中台 ══════════ -->
+    <div class="layer layer-2" style="position:relative;">
+      <div class="version-tag">AI CORE</div>
+      <div class="layer-header">
+        <div class="layer-badge badge-2">AI 核心能力中台</div>
+        <div class="ai-core-title">— 六大智能治理域 —</div>
+        <div class="layer-desc">规则 + AI 协同 · 全流程智能覆盖</div>
+      </div>
+
+      <!-- orchestration bar -->
+      <div class="orch-bar">
+        <span class="orch-label">治理编排：</span>
+        <span class="orch-tag">🔀 智能路由调度</span>
+        <span class="orch-tag">⚙️ 任务状态机</span>
+        <span class="orch-tag">⚡ 冲突检测</span>
+        <span class="orch-tag">👤 转人工规则</span>
+        <span class="orch-tag">📋 优先级队列</span>
+        <span class="orch-tag">🔁 重试/降级策略</span>
+      </div>
+
+      <div class="ai-inner">
+
+        <!-- Left: 规则引擎辅助 -->
+        <div class="ai-side">
+          <div class="ai-side-title">规则引擎辅助</div>
+          <div class="side-chip">单位标准化</div>
+          <div class="side-chip">品牌词库归一</div>
+          <div class="side-chip">标题格式清洗</div>
+          <div class="side-chip">枚举值校验</div>
+          <div class="side-chip">必填项检查</div>
+          <div class="side-chip">黑白名单过滤</div>
+          <div style="flex:1;"></div>
+          <div style="font-size:10px;color:#95A5A6;text-align:center;margin-top:8px;line-height:1.5;">确定性规则优先<br>降低模型成本</div>
+        </div>
+
+        <!-- Center: 6 AI Capabilities -->
+        <div class="ai-caps">
+
+          <!-- 1. AI类目治理 -->
+          <div class="cap-card c1">
+            <div class="cap-head">
+              <div class="cap-icon ic1">🏷️</div>
+              <div class="cap-title">AI类目治理<span>Category Governance</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b1">▸</span>类目树语义解析与优化</li>
+              <li><span class="bullet b1">▸</span>错挂类目自动识别纠偏</li>
+              <li><span class="bullet b1">▸</span>类目标题标准化</li>
+              <li><span class="bullet b1">▸</span>异常类目异常识别告警</li>
+            </ul>
+          </div>
+
+          <!-- 2. AI类目匹配 -->
+          <div class="cap-card c2">
+            <div class="cap-head">
+              <div class="cap-icon ic2">🔍</div>
+              <div class="cap-title">AI类目匹配<span>Category Matching</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b2">▸</span>语义向量相似度计算</li>
+              <li><span class="bullet b2">▸</span>跨系统类目映射对齐</li>
+              <li><span class="bullet b2">▸</span>模糊描述类目推荐</li>
+              <li><span class="bullet b2">▸</span>置信度分级与分流</li>
+            </ul>
+          </div>
+
+          <!-- 3. AI属性治理 -->
+          <div class="cap-card c3">
+            <div class="cap-head">
+              <div class="cap-icon ic3">🧩</div>
+              <div class="cap-title">AI属性治理<span>Attribute Governance</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b3">▸</span>属性值清洗与规范化</li>
+              <li><span class="bullet b3">▸</span>属性冲突检测与消解</li>
+              <li><span class="bullet b3">▸</span>属性模板版本管理</li>
+              <li><span class="bullet b3">▸</span>属性缺失率监控</li>
+            </ul>
+          </div>
+
+          <!-- 4. AI属性推荐 -->
+          <div class="cap-card c4">
+            <div class="cap-head">
+              <div class="cap-icon ic4">✨</div>
+              <div class="cap-title">AI属性推荐<span>Attribute Recommendation</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b4">▸</span>从物料描述中提取属性</li>
+              <li><span class="bullet b4">▸</span>必填属性智能预测补全</li>
+              <li><span class="bullet b4">▸</span>同类物料属性值参考</li>
+              <li><span class="bullet b4">▸</span>属性推荐理由可解释</li>
+            </ul>
+          </div>
+
+          <!-- 5. AI添加物料 -->
+          <div class="cap-card c5">
+            <div class="cap-head">
+              <div class="cap-icon ic5">➕</div>
+              <div class="cap-title">AI添加物料<span>AI Material Creation</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b5">▸</span>自然语言描述智能录入</li>
+              <li><span class="bullet b5">▸</span>图片/文档信息自动提取</li>
+              <li><span class="bullet b5">▸</span>批量物料结构化生成</li>
+              <li><span class="bullet b5">▸</span>录入前重复物料预警</li>
+            </ul>
+          </div>
+
+          <!-- 6. AI物料匹配 -->
+          <div class="cap-card c6">
+            <div class="cap-head">
+              <div class="cap-icon ic6">🔗</div>
+              <div class="cap-title">AI物料匹配<span>Material Matching</span></div>
+            </div>
+            <ul class="cap-items">
+              <li><span class="bullet b6">▸</span>跨库相似物料去重识别</li>
+              <li><span class="bullet b6">▸</span>物料与主数据关联映射</li>
+              <li><span class="bullet b6">▸</span>商品挂靠物料智能推荐</li>
+              <li><span class="bullet b6">▸</span>品类映射关系维护</li>
+            </ul>
+          </div>
+
+        </div><!-- /ai-caps -->
+
+        <!-- Right: 物料库管理 -->
+        <div class="ai-side">
+          <div class="ai-side-title">物料库管理</div>
+          <div class="side-chip">品类清洗</div>
+          <div class="side-chip">属性清洗&推荐</div>
+          <div class="side-chip">物料去重&清洗</div>
+          <div class="side-chip">物料库&品类映射</div>
+          <div class="side-chip">商品挂靠物料</div>
+          <div class="side-chip">销售单位推荐</div>
+          <div style="flex:1;"></div>
+          <div style="font-size:10px;color:#95A5A6;text-align:center;margin-top:8px;line-height:1.5;">主数据双向绑定<br>供应链精细运营</div>
+        </div>
+
+      </div><!-- /ai-inner -->
+    </div><!-- /layer-2 -->
+
+    <!-- connector -->
+    <div class="connector">↓ <span class="connector-text">Prompt / Schema → LLM调用</span> ↓</div>
+
+    <!-- ══════════ Layer 3: AI模型底座 ══════════ -->
+    <div class="layer layer-3">
+      <div class="layer-header">
+        <div class="layer-badge badge-3">AI 模型底座</div>
+        <div class="layer-desc">统一接口 · 动态路由 · 故障降级 · Token监控 · 成本管控</div>
+      </div>
+      <div class="model-row">
+        <div class="model-gw">
+          <div class="gw-title">🔌 模型网关</div>
+          <div class="gw-tags">
+            <span class="gw-tag">统一接口</span>
+            <span class="gw-tag">动态路由</span>
+            <span class="gw-tag">故障降级</span>
+            <span class="gw-tag">Token监控</span>
+            <span class="gw-tag">版本管理</span>
+            <span class="gw-tag">Prompt池</span>
+          </div>
+        </div>
+        <div class="model-types">
+          <div class="model-type">
+            <div class="mt-title">☁️ 通用大模型</div>
+            <div class="mt-sub">API调用 · 高精度<br>适合复杂语义任务</div>
+            <div class="mt-examples">GPT-4o · Claude</div>
+          </div>
+          <div class="model-type">
+            <div class="mt-title">🇨🇳 国产大模型</div>
+            <div class="mt-sub">API调用 · 合规优先<br>中文语料更优</div>
+            <div class="mt-examples">Qwen · GLM · ERNIE</div>
+          </div>
+          <div class="model-type">
+            <div class="mt-title">🖥️ 开源/本地模型</div>
+            <div class="mt-sub">私有化部署 · 低延迟<br>数据不出域</div>
+            <div class="mt-examples">Llama · Baichuan · Qwen-local</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector -->
+    <div class="connector">↓ <span class="connector-text">结构化输出 → 校验分流</span> ↓</div>
+
+    <!-- ══════════ Layer 4: 结果决策层 ══════════ -->
+    <div class="layer layer-4">
+      <div class="layer-header">
+        <div class="layer-badge badge-4">结果校验与决策层</div>
+        <div class="layer-desc">Schema校验 · 置信度判断 · 风险分级分流</div>
+      </div>
+      <div class="gov-row">
+        <div class="gov-box">
+          <div class="gb-title">📐 Schema校验</div>
+          <div class="gb-sub">JSON格式验证<br>必填字段检查</div>
+        </div>
+        <div class="gov-box">
+          <div class="gb-title">📊 置信度判断</div>
+          <div class="gb-sub">高置信 → 自动落库<br>低置信 → 人工审核</div>
+        </div>
+        <div class="gov-box">
+          <div class="gb-title">⚠️ 风险分流</div>
+          <div class="gb-sub">差异对比标记<br>批量审核队列</div>
+        </div>
+        <div class="gov-box accent">
+          <div class="gb-title">👤 人工审核</div>
+          <div class="gb-sub">差异对比 · 批量审核<br>驳回/修改/录入</div>
+        </div>
+        <div class="gov-box accent">
+          <div class="gb-title">✅ 自动落库</div>
+          <div class="gb-sub">高质量结果直写<br>变更日志记录</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector -->
+    <div class="connector">↓ <span class="connector-text">数据回流 · 样本沉淀</span> ↓</div>
+
+    <!-- ══════════ Layer 5: 数据沉淀层 ══════════ -->
+    <div class="layer layer-5">
+      <div class="layer-header">
+        <div class="layer-badge badge-5">数据沉淀层</div>
+        <div class="layer-desc">主数据回流 · 样本积累 · 持续迭代优化</div>
+      </div>
+      <div class="data-row">
+        <div class="data-box highlight">
+          <div class="db-title">📦 主数据回流</div>
+          <div class="db-sub">治理结果写回主数据<br>版本快照 · 变更溯源</div>
+        </div>
+        <div class="data-box highlight">
+          <div class="db-title">🧪 样本沉淀</div>
+          <div class="db-sub">人工审核结果标注<br>构建训练/测试集</div>
+        </div>
+        <div class="data-box highlight">
+          <div class="db-title">📈 效果监控</div>
+          <div class="db-sub">准确率/召回率追踪<br>多维度指标看板</div>
+        </div>
+        <div class="data-box highlight">
+          <div class="db-title">🔄 模型迭代</div>
+          <div class="db-sub">Fine-tune / Prompt优化<br>模型版本对比评估</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /diagram -->
+
+  <!-- ══════════ Right Float: 模型效果评估体系 ══════════ -->
+  <div class="right-float">
+    <div class="eval-panel">
+      <div class="ep-title">📋 模型效果评估体系</div>
+      <div class="ep-item"><div class="ep-dot"></div>标准测试集建设</div>
+      <div class="ep-item"><div class="ep-dot"></div>多维度指标计算</div>
+      <div class="ep-item"><div class="ep-dot"></div>准确率 / 召回率</div>
+      <div class="ep-item"><div class="ep-dot"></div>自动化人工评估</div>
+      <div class="ep-item"><div class="ep-dot"></div>A/B模型对比</div>
+      <div class="ep-item"><div class="ep-dot"></div>选型决策报告</div>
+      <div class="ep-item"><div class="ep-dot"></div>成本效率分析</div>
+    </div>
+  </div>
+
+</div><!-- /layout-outer -->
+
+</body>
+</html>
