@@ -1,126 +1,235 @@
-# AI Material Management Platform
+# AI物料中台
 
-Enterprise material standardization and lifecycle management platform with FastAPI, a browser UI, PostgreSQL-ready deployment, Qdrant service wiring, and Playwright smoke verification.
+AI物料中台是一套面向企业物料标准化、物料库治理、申请审批和 AI 辅助治理的中台系统。当前 `main` 已合并后端 API、React 管理台、私有化部署入口、Qdrant 向量检索接入、统一模型网关、能力映射、物料编码规则、批量重编码和类目 CSV/XLSX/XLS 导入能力。
 
-## Prerequisites
+## 核心能力
 
-- Python 3.11+
-- Node.js 18+
-- Docker Desktop with Docker Compose
-- Playwright browsers: `npx playwright install chromium`
+- 标准管理：类目库、层级类目、类目属性、品名、属性、品牌维护。
+- 物料管理：物料库、物料档案、生命周期状态、物料库权限隔离。
+- 编码治理：物料库级编码规则版本、自动编码、重编码预览、执行、映射查询和回滚。
+- 申请流程：新增类目、新增物料编码、停采、停用、审批模式配置。
+- 系统治理：用户、角色、功能/API 权限、原因选项、系统信息、操作审计和导出。
+- AI 能力：类目识别、物料新增预览、物料匹配、物料治理、属性治理、属性推荐。
+- AI 基础设施：统一模型管理、能力到模型映射、fallback 模型、OpenAI 兼容调用、AI trace。
+- 导入导出：类目模板下载、CSV/XLSX/XLS 导入、审计日志 XLSX 导出、编码映射导出。
 
-## Local Development
+## 当前架构
 
-Start the local development stack:
+```mermaid
+flowchart LR
+    User["浏览器用户"] --> ReactUI["React/Vite 管理台<br/>prototype_code"]
+    User --> Nginx["Nginx 私有化入口<br/>nginx.conf"]
+    Nginx --> StaticUI["Node 静态前端<br/>frontend"]
+    ReactUI --> API["FastAPI API<br/>backend/app/main.py"]
+    StaticUI --> API
+    API --> DB[("SQLite 本地默认<br/>PostgreSQL Compose")]
+    API --> Qdrant[("Qdrant 向量库")]
+    API --> LLM["统一模型网关<br/>DashScope / Azure / OpenAI / vLLM / Ollama / DeepSeek / Moonshot / Custom"]
+    API --> Audit[("审计日志 / Trace Span")]
+```
+
+## 代码结构
+
+| 路径 | 说明 |
+| --- | --- |
+| `backend/app/main.py` | FastAPI 应用入口，集中实现业务 API、权限检查、审计、AI 网关、Qdrant 同步和导入解析。 |
+| `backend/app/models.py` | SQLAlchemy 2.0 数据模型，覆盖标准域、物料域、流程域、权限域、AI 配置、审计和规则引擎。 |
+| `backend/app/schemas.py` | Pydantic v2 请求/响应模型。 |
+| `backend/app/migrations/` | 数据迁移与 AI 配置迁移脚本。 |
+| `prototype_code/` | 当前主要业务管理台，React 18 + TypeScript + Vite。 |
+| `frontend/` | Docker Compose 私有化链路使用的轻量 Node 静态前端。 |
+| `tests/` | 后端 API 测试与根级 Playwright 冒烟测试。 |
+| `prototype_code/tests/` | 前端专项 Playwright 测试。 |
+| `docker-compose.yml` | PostgreSQL、Qdrant、后端、前端、Nginx 私有化编排。 |
+| `nginx.conf` | 统一 HTTP 入口，代理 `/api`、`/docs`、`/health` 和前端路由。 |
+| `prd/` | PRD、TDD 和架构图资料。 |
+
+## 业务模块
+
+### 标准域
+
+- 类目库：顶层类目容器，支持启用 Qdrant 语义检索和重建向量索引。
+- 类目：支持多层级结构、父子节点、类目属性、筛选、树形展示、批量导入和 AI 识别。
+- 品名：维护标准品名、单位、分类、`PM` 顺序编码和启停状态。
+- 属性：按品名维护属性定义、类型、单位、选项、必填规则和变更记录。
+- 品牌：维护品牌编码、名称、描述、启停状态和 logo。
+
+### 物料域
+
+- 物料库：维护物料库编码、管理员角色、关联类目库、自动编码开关和重编码开关。
+- 物料档案：维护物料编码、品名、类目、品牌、单位、状态、属性和生命周期历史。
+- 生命周期：支持 `normal -> stop_purchase -> stop_use` 的受控状态流转。
+- 权限隔离：物料库管理员与角色权限共同控制可见和可操作范围。
+
+### 编码规则与重编码
+
+- 规则版本：每个物料库可维护多版本编码规则，编辑生成新版本，不覆盖历史。
+- 编码片段：支持固定文本、类目路径、属性、日期、流水号等片段组合。
+- 重编码预览：支持全部物料或选中物料生成变更预览并检测冲突。
+- 执行与回滚：执行后保留批次、明细和编码映射，可按批次回滚。
+- 映射导出：支持编码映射查询和 CSV/XLSX 导出。
+
+### 流程域
+
+- 新增物料类目申请。
+- 新增物料编码申请。
+- 停采申请。
+- 停用申请。
+- 我的申请、待办任务、审批通过/驳回、流程历史。
+- 简单审批和多节点审批模式配置。
+
+### 系统治理
+
+- 用户管理：HCM/本地账号归属、本地用户新增编辑、密码重置和删除。
+- 角色管理：角色顺序编码、启停、角色用户绑定。
+- 权限配置：目录、按钮、API 权限目录与角色授权。
+- 系统配置：系统名称、图标、停采/停用原因选项。
+- 审计日志：写操作自动记录，支持查询、详情和导出。
+
+### AI 基础设施
+
+- 模型管理：统一 `Model` 表维护供应商、模型名、base URL、API Key、能力标签和启停状态。
+- 支持供应商：DashScope、Azure、OpenAI、vLLM、Ollama、DeepSeek、Moonshot、Custom。
+- 能力映射：`CapabilityMapping` 将业务能力映射到主模型和 fallback 模型。
+- 模型解析：`model_for_capability()` 为 AI 能力选择可用模型。
+- 网关调用：后端以 OpenAI 兼容格式调用模型，并在超时/失败时尝试 fallback。
+- 密钥保护：API Key 使用 AES-GCM 加密保存。
+- Trace：`TracerSpan` 记录 trace id、span 类型、状态和耗时，前端 `/debug/trace` 可查看。
+
+## 技术栈
+
+### 后端
+
+- Python 3.11+ / 3.12
+- FastAPI 0.128，当前 API 版本 `15.0.0`
+- Pydantic 2.9
+- SQLAlchemy 2.0
+- Uvicorn
+- httpx
+- cryptography AES-GCM
+- openpyxl，以及内置 XML/BIFF 解析逻辑用于 XLSX/XLS 类目导入
+
+### 前端
+
+- React 18
+- TypeScript 5
+- Vite 6
+- React Router 7
+- TanStack Query 5
+- Zustand 5
+- Tailwind CSS 4
+- Radix UI / shadcn 风格组件
+- lucide-react
+- Recharts
+- Playwright
+
+### 数据与部署
+
+- 本地默认数据库：SQLite，位于 `backend/app/material_retrieval.db`。
+- 私有化数据库：PostgreSQL 15。
+- 向量检索：Qdrant 1.12.6。
+- 容器编排：Docker Compose。
+- 统一入口：Nginx。
+- 后端镜像：`python:3.12-slim`。
+- 前端镜像：`node:22-alpine`。
+
+## 本地启动
+
+推荐使用统一启动脚本：
 
 ```bash
 bash init.sh
 ```
 
-The script installs Python and frontend dependencies, starts PostgreSQL and Qdrant from `docker-compose.yml`, initializes backend tables and seed data, then starts:
+脚本会检查 Python、Node、Docker、Git，安装依赖，初始化数据库表，并启动：
 
-- Frontend: `http://localhost:5173`
-- Backend API docs: `http://localhost:8000/docs`
-- Backend health: `http://localhost:8000/health`
+- 后端 API：`http://localhost:8000`
+- API 文档：`http://localhost:8000/docs`
+- React/Vite 管理台：`http://localhost:5173`
 
-Stop local services:
+如果 Docker daemon 未运行，脚本会跳过 PostgreSQL 和 Qdrant 容器，本地默认使用 SQLite。
+
+单独启动主前端：
 
 ```bash
-docker compose -p ai-material-platform down
-kill "$(cat logs/backend.pid)" "$(cat logs/frontend.pid)" 2>/dev/null || true
+cd prototype_code
+npm run dev -- --port 5173
 ```
 
-## Private Deployment With Docker Compose
+停止本地进程：
 
-Build and start the private化 deployment:
+```bash
+kill "$(cat logs/backend.pid)" "$(cat logs/frontend.pid)" 2>/dev/null || true
+docker-compose -p ai-material-platform down
+```
+
+## Docker Compose 私有化运行
 
 ```bash
 docker compose up -d --build
 ```
 
-This starts:
+Compose 服务：
 
-- `postgres` on `localhost:5432`
-- `qdrant` on `localhost:6333`
-- `backend` on `http://localhost:8000`
-- `frontend` on `http://localhost:5173`
-- `nginx` production entrypoint on `http://localhost`
+- `postgres`：`localhost:5432`
+- `qdrant`：`localhost:6333` / `localhost:6334`
+- `backend`：`http://localhost:8000`
+- `frontend`：`http://localhost:5173`
+- `nginx`：`http://localhost`
 
-Verify services:
+Nginx 路由：
 
-```bash
-docker compose ps
-curl -fsS http://localhost:8000/docs >/dev/null
-curl -fsS http://localhost:5173 >/dev/null
-```
+- 前端页面：`http://localhost/materials`
+- API：`http://localhost/api/v1/...`
+- API 文档：`http://localhost/docs`
+- 健康检查：`http://localhost/health`
 
-Restart without manual database initialization:
-
-```bash
-docker compose down
-docker compose up -d
-```
-
-Shutdown and remove volumes when a clean database is required:
+清空容器和数据卷：
 
 ```bash
 docker compose down -v
 ```
 
-## Production Nginx Entrypoint
+## 验证
 
-`nginx.conf` serves one HTTP entrypoint at `http://localhost` in the Compose deployment:
-
-- Frontend routes: `http://localhost/materials`, `http://localhost/system/config`
-- API routes: `http://localhost/api/v1/materials`
-- API docs: `http://localhost/docs`
-- Health: `http://localhost/health`
-
-The frontend automatically uses `/api/v1` when served through Nginx, and `http://localhost:8000/api/v1` during local port `5173` development.
-
-## Environment Variables
-
-- `DATABASE_URL`: SQLAlchemy URL. Compose uses `postgresql+psycopg://material:material_password@postgres:5432/material_retrieval`; local development defaults to SQLite if unset.
-- `QDRANT_URL`: vector database URL, defaulted to `http://qdrant:6333` in Compose.
-- `LLM_GATEWAY_AES_KEY`: optional AES key seed for encrypted provider secrets.
-- `AI_DEBUG`: enables trace debug UI when set to `true`.
-- `E2E_BASE_URL`: Playwright frontend URL, default `http://localhost:5173`.
-- `E2E_API_URL`: Playwright backend URL, default `http://localhost:8000`.
-
-## E2E Verification
-
-Start the system first:
+后端冒烟：
 
 ```bash
-bash init.sh
+curl -fsS http://localhost:8000/docs >/dev/null
 ```
 
-Run the browser smoke suite from the repository root:
+主前端构建：
+
+```bash
+cd prototype_code
+npm run build
+```
+
+浏览器 E2E：
 
 ```bash
 npx playwright test
 ```
 
-Open the HTML report:
+后端 API 测试：
 
 ```bash
-npx playwright show-report
+pytest -q
 ```
 
-The smoke tests cover standard management, material management, workflow pages, user and role administration, system configuration, audit logs, LLM gateway UI availability, a harmless persisted reason-option update, and OpenAPI route availability.
+## 关键环境变量
 
-To prove the suite fails when the backend is down, stop the backend and run the negative smoke:
+| 变量 | 说明 |
+| --- | --- |
+| `DATABASE_URL` | SQLAlchemy 数据库连接；未设置时使用本地 SQLite。 |
+| `QDRANT_URL` | Qdrant 地址；Compose 中为 `http://qdrant:6333`。 |
+| `LLM_GATEWAY_AES_KEY` | 模型 API Key 加密使用的 AES key 种子。 |
+| `AI_DEBUG` | 设置为 `true` 时允许访问 AI trace 调试能力。 |
+| `BACKEND_PORT` | `init.sh` 启动后端的端口，默认 `8000`。 |
+| `FRONTEND_PORT` | `init.sh` 启动前端的端口，默认 `5173`。 |
+| `E2E_BASE_URL` | Playwright 前端地址，默认 `http://localhost:5173`。 |
+| `E2E_API_URL` | Playwright 后端地址，默认 `http://localhost:8000`。 |
 
-```bash
-kill "$(cat logs/backend.pid)"
-E2E_EXPECT_BACKEND_DOWN=1 npx playwright test tests/e2e/backend-down.spec.js
-```
+## 当前说明
 
-## Troubleshooting
-
-- Occupied ports: stop old processes with `lsof -ti :8000 :5173 | xargs kill` and run `docker compose down`.
-- Docker daemon unavailable: start Docker Desktop, then retry `bash init.sh` or `docker compose up -d --build`.
-- Database connectivity: check `docker compose ps postgres`, then run `docker compose logs postgres backend`.
-- Qdrant startup: check `docker compose ps qdrant` and `curl http://localhost:6333/healthz`.
-- Playwright browser missing: run `npx playwright install chromium`.
-- Blank frontend or API errors: open browser dev tools, confirm `http://localhost:8000/docs` or `http://localhost/docs` is reachable, then inspect `logs/backend.log` and `logs/frontend.log`.
+当前主要业务实现位于 `backend/app/` 和 `prototype_code/`。`frontend/` 是 Compose 私有化入口使用的轻量静态前端，后续若要继续完善完整管理台体验，应优先在 `prototype_code/` 迭代。
