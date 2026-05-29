@@ -1,0 +1,19 @@
+{
+  "criteria": {
+    "c1": {
+      "pass": true,
+      "evidence": [
+        "/Users/yusec/projects/material_retrieval/.sprintfoundry/eval-results/screenshots-47-final/c1-category-with-panel.png"
+      ],
+      "observation": "类目属性 panel with \"继承属性\" and \"自有属性\" section headers. Lock icon present. 办公设备：自有 0 个，继承 0 个"
+    },
+    "c2": {
+      "pass": true,
+      "evidence": [
+        "/Users/yusec/projects/material_retrieval/.sprintfoundry/eval-results/screenshots-47-final/c2-attr-form.png"
+      ],
+      "observation": "Attribute form has all required fields: 属性名, 属性类型文本数字枚举日期, 中文显示名, 英文显示名, 默认值, 必填, 允许为空, 搜索类目名称、编码、描述或类目库.... Type select options: 文本, 数字, 枚举, 日期."
+    }
+  },
+  "timestamp": "2026-05-22T09:37:48.420Z"
+}

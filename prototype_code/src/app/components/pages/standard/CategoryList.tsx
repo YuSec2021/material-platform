@@ -55,10 +55,6 @@ const CATEGORY_PAGE_SIZE = 10;
 const CATEGORY_LEVEL_KEYS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"] as const;
 const CATEGORY_IMPORT_ACCEPT = ".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
-function categoryChildrenKey(parentId: number) {
-  return ["categories", "children", parentId] as const;
-}
-
 const emptyForm: CategoryFormState = {
   name: "",
   code: "",
@@ -229,52 +225,28 @@ function resultSummary(result: CategoryBulkImportResult | null) {
 function CategoryTreeItem({
   category,
   categories,
-  children,
-  childrenByParentId,
-  parentId,
   depth,
   selectedTree,
   expandedCategoryIds,
-  loadingCategoryIds,
   onToggle,
-  onLoadChildren,
   onSelect,
 }: {
   category: Category;
   categories: Category[];
-  children: Category[] | undefined;
-  childrenByParentId: Map<number, Category[]>;
-  parentId: number | null;
   depth: number;
   selectedTree: CategoryTreeSelection;
   expandedCategoryIds: number[];
-  loadingCategoryIds: number[];
   onToggle: (id: number) => void;
-  onLoadChildren: (id: number) => Promise<Category[]>;
   onSelect: (category: Category) => void;
 }) {
   const { t } = useTranslation();
-  const childCategories = (children ?? []).slice().sort((left, right) => left.name.localeCompare(right.name));
-  const childrenLoaded = children !== undefined;
-  const hasChildren = !childrenLoaded || childCategories.length > 0;
+  const childCategories = categories
+    .filter((item) => item.parent_category_id === category.id)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const hasChildren = childCategories.length > 0;
   const expanded = expandedCategoryIds.includes(category.id);
   const selected = selectedTree?.type === "category" && selectedTree.id === category.id;
   const label = categoryPath(category, categories);
-  const isLoadingChildren = loadingCategoryIds.includes(category.id);
-
-  const handleClick = async () => {
-    if (hasChildren) {
-      if (expanded) {
-        onToggle(category.id);
-      } else {
-        const loadedChildren = childrenLoaded ? childCategories : await onLoadChildren(category.id);
-        if (loadedChildren.length > 0) {
-          onToggle(category.id);
-        }
-      }
-    }
-    onSelect(category);
-  };
 
   return (
     <div>
@@ -282,18 +254,18 @@ function CategoryTreeItem({
         type="button"
         aria-expanded={hasChildren ? expanded : undefined}
         aria-label={hasChildren ? t(expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: category.name }) : category.name}
-        data-parent-id={parentId ?? undefined}
         onClick={() => {
-          void handleClick();
+          if (hasChildren) {
+            onToggle(category.id);
+          }
+          onSelect(category);
         }}
         className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm transition-colors ${treeIndentClass(depth)} ${
           selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
         }`}
         title={label}
       >
-        {isLoadingChildren ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-        ) : hasChildren ? (
+        {hasChildren ? (
           expanded ? (
             <ChevronDown className="h-3.5 w-3.5 shrink-0" />
           ) : (
@@ -311,15 +283,10 @@ function CategoryTreeItem({
               key={child.id}
               category={child}
               categories={categories}
-              children={childrenByParentId.get(child.id)}
-              childrenByParentId={childrenByParentId}
-              parentId={category.id}
               depth={depth + 1}
               selectedTree={selectedTree}
               expandedCategoryIds={expandedCategoryIds}
-              loadingCategoryIds={loadingCategoryIds}
               onToggle={onToggle}
-              onLoadChildren={onLoadChildren}
               onSelect={onSelect}
             />
           ))}
@@ -354,12 +321,10 @@ export function CategoryList() {
   const [aiText, setAiText] = useState("");
   const [recognizedRows, setRecognizedRows] = useState<PreviewRow[]>([]);
   const [loadingDot, setLoadingDot] = useState(0);
-  const [loadedChildParentIds, setLoadedChildParentIds] = useState<number[]>([]);
-  const [loadingCategoryIds, setLoadingCategoryIds] = useState<number[]>([]);
 
   const query = useQuery({
     queryKey: ["categories"],
-    queryFn: () => apiClient.categoriesByParams({ level: 1 }),
+    queryFn: apiClient.categories,
     retry: false,
   });
 
@@ -371,26 +336,8 @@ export function CategoryList() {
 
   const categories = query.data ?? [];
   const libraries = librariesQuery.data ?? [];
-  const childrenByParentId = useMemo(() => {
-    const childMap = new Map<number, Category[]>();
-    loadedChildParentIds.forEach((parentId) => {
-      const cachedChildren = queryClient.getQueryData<Category[]>(categoryChildrenKey(parentId));
-      if (cachedChildren) {
-        childMap.set(parentId, cachedChildren);
-      }
-    });
-    return childMap;
-  }, [loadedChildParentIds, queryClient]);
-  const knownCategories = useMemo(() => {
-    const byId = new Map<number, Category>();
-    categories.forEach((category) => byId.set(category.id, category));
-    childrenByParentId.forEach((childCategories) => {
-      childCategories.forEach((category) => byId.set(category.id, category));
-    });
-    return Array.from(byId.values());
-  }, [categories, childrenByParentId]);
   const selectedCategory =
-    selectedTree?.type === "category" ? knownCategories.find((category) => category.id === selectedTree.id) ?? null : null;
+    selectedTree?.type === "category" ? categories.find((category) => category.id === selectedTree.id) ?? null : null;
   const selectedLibrary =
     selectedTree?.type === "library"
       ? libraries.find((library) => library.id === selectedTree.id) ?? null
@@ -404,31 +351,32 @@ export function CategoryList() {
     if (selectedTree?.type === "category") {
       return { parent_id: selectedTree.id };
     }
-    return { level: 1 };
+    return null;
   }, [selectedTree]);
-  const isRootTable = selectedTree === null;
   const tableQuery = useQuery({
     queryKey: ["categories", "table", tableCategoryParams],
     queryFn: () => apiClient.categoriesByParams(tableCategoryParams ?? {}),
-    enabled: !isRootTable,
+    enabled: tableCategoryParams !== null,
     retry: false,
   });
-  const tableCategories = isRootTable ? categories : tableQuery.data ?? [];
   const categoryTreeByLibrary = useMemo(
     () =>
       libraries.map((library) => ({
         library,
-        categories: knownCategories
+        categories: categories
           .filter((category) => categoryMatchesLibrary(category, library))
-          .sort((left, right) => categoryPath(left, knownCategories).localeCompare(categoryPath(right, knownCategories))),
+          .sort((left, right) => categoryPath(left, categories).localeCompare(categoryPath(right, categories))),
       })),
-    [knownCategories, libraries],
+    [categories, libraries],
   );
   const invalidImportRows = importRows.filter((row) => row.errors.length > 0);
   const invalidRecognizedRows = recognizedRows.filter((row) => row.errors.length > 0);
   const filteredCategories = useMemo(() => {
+    if (!tableCategoryParams) {
+      return [];
+    }
     const term = searchTerm.trim().toLowerCase();
-    return tableCategories
+    return (tableQuery.data ?? [])
       .filter((category) => {
         if (!term) {
           return true;
@@ -438,11 +386,11 @@ export function CategoryList() {
           category.code,
           category.description,
           category.category_library,
-          categoryPath(category, knownCategories),
+          categoryPath(category, categories),
         ].some((value) => value.toLowerCase().includes(term));
       })
-      .sort((left, right) => categoryPath(left, knownCategories).localeCompare(categoryPath(right, knownCategories)));
-  }, [knownCategories, searchTerm, tableCategories]);
+      .sort((left, right) => categoryPath(left, categories).localeCompare(categoryPath(right, categories)));
+  }, [categories, searchTerm, tableCategoryParams, tableQuery.data]);
   const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CATEGORY_PAGE_SIZE));
   const paginatedCategories = filteredCategories.slice(
     (currentPage - 1) * CATEGORY_PAGE_SIZE,
@@ -474,16 +422,16 @@ export function CategoryList() {
     if (selectedTree?.type === "library" && !libraries.some((library) => library.id === selectedTree.id)) {
       setSelectedTree(null);
     }
-    if (selectedTree?.type === "category" && !knownCategories.some((category) => category.id === selectedTree.id)) {
+    if (selectedTree?.type === "category" && !categories.some((category) => category.id === selectedTree.id)) {
       setSelectedTree(null);
     }
-  }, [knownCategories, libraries, selectedTree]);
+  }, [categories, libraries, selectedTree]);
 
   const expandCategoryAncestors = (category: Category) => {
     const ancestorIds: number[] = [];
     let parentId = category.parent_category_id;
     while (parentId) {
-      const parent = knownCategories.find((item) => item.id === parentId);
+      const parent = categories.find((item) => item.id === parentId);
       if (!parent) {
         break;
       }
@@ -492,33 +440,6 @@ export function CategoryList() {
     }
     if (ancestorIds.length > 0) {
       setExpandedCategoryIds((current) => Array.from(new Set([...current, ...ancestorIds])));
-    }
-  };
-
-  const clearCategoryChildrenCache = () => {
-    queryClient.removeQueries({ queryKey: ["categories", "children"] });
-    setLoadedChildParentIds([]);
-    setLoadingCategoryIds([]);
-  };
-
-  const loadChildren = async (parentId: number) => {
-    const cachedChildren = queryClient.getQueryData<Category[]>(categoryChildrenKey(parentId));
-    if (cachedChildren) {
-      return cachedChildren;
-    }
-    setLoadingCategoryIds((current) => Array.from(new Set([...current, parentId])));
-    try {
-      const childCategories = await queryClient.fetchQuery({
-        queryKey: categoryChildrenKey(parentId),
-        queryFn: () => apiClient.categoriesByParams({ parent_id: parentId }),
-      });
-      setLoadedChildParentIds((current) => Array.from(new Set([...current, parentId])));
-      return childCategories;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-      return [];
-    } finally {
-      setLoadingCategoryIds((current) => current.filter((id) => id !== parentId));
     }
   };
 
@@ -548,11 +469,7 @@ export function CategoryList() {
 
   const expandAllTree = () => {
     setExpandedLibraryIds(libraries.map((library) => library.id));
-    setExpandedCategoryIds(
-      Array.from(childrenByParentId.entries())
-        .filter(([, childCategories]) => childCategories.length > 0)
-        .map(([parentId]) => parentId),
-    );
+    setExpandedCategoryIds(categories.filter((category) => categories.some((item) => item.parent_category_id === category.id)).map((category) => category.id));
   };
 
   const collapseAllTree = () => {
@@ -567,7 +484,6 @@ export function CategoryList() {
       setIsFormOpen(false);
       setEditingCategory(null);
       setForm(emptyForm);
-      clearCategoryChildrenCache();
       selectCategory(savedCategory);
       toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
@@ -582,7 +498,6 @@ export function CategoryList() {
         setSelectedTree(null);
       }
       setExpandedCategoryIds((current) => current.filter((id) => id !== deletedId));
-      clearCategoryChildrenCache();
       toast.success(t("toast.deleteSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
@@ -598,7 +513,6 @@ export function CategoryList() {
       setImportResult(result);
       setExpandedLibraryIds((current) => Array.from(new Set([...current, Number(importLibraryId)])));
       setSelectedTree({ type: "library", id: Number(importLibraryId) });
-      clearCategoryChildrenCache();
       toast.success(t("categoryImport.importComplete"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
@@ -657,7 +571,6 @@ export function CategoryList() {
       setAiText("");
       setExpandedLibraryIds((current) => Array.from(new Set([...current, Number(importLibraryId)])));
       setSelectedTree({ type: "library", id: Number(importLibraryId) });
-      clearCategoryChildrenCache();
       toast.success(t("categoryImport.importComplete"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
@@ -737,12 +650,12 @@ export function CategoryList() {
   const canSave = Boolean(form.name.trim() && form.categoryLibraryId) && !saveMutation.isPending;
   const isLoading = query.isLoading || librariesQuery.isLoading;
   const isError = query.isError || librariesQuery.isError;
-  const isTableLoading = isLoading || (!isRootTable && tableQuery.isLoading);
-  const isTableError = isError || (!isRootTable && tableQuery.isError);
-  const emptyCategoryTitle = t("state.emptyCategories");
-  const emptyCategoryHint = t("categoryImport.emptyHint");
+  const isTableLoading = isLoading || (tableCategoryParams !== null && tableQuery.isLoading);
+  const isTableError = isError || (tableCategoryParams !== null && tableQuery.isError);
+  const emptyCategoryTitle = tableCategoryParams ? t("state.emptyCategories") : t("categoryImport.emptySelectionTitle");
+  const emptyCategoryHint = tableCategoryParams ? t("categoryImport.emptyHint") : t("categoryImport.emptySelectionHint");
   const selectedContext = selectedCategory
-    ? t("categoryImport.selectedCategory", { path: categoryPath(selectedCategory, knownCategories) })
+    ? t("categoryImport.selectedCategory", { path: categoryPath(selectedCategory, categories) })
     : selectedLibrary
       ? t("categoryImport.selectedLibrary", { name: selectedLibrary.name })
       : t("categoryImport.noSelection");
@@ -819,16 +732,11 @@ export function CategoryList() {
                           <CategoryTreeItem
                             key={category.id}
                             category={category}
-                            categories={knownCategories}
-                            children={childrenByParentId.get(category.id)}
-                            childrenByParentId={childrenByParentId}
-                            parentId={null}
+                            categories={libraryCategories}
                             depth={0}
                             selectedTree={selectedTree}
                             expandedCategoryIds={expandedCategoryIds}
-                            loadingCategoryIds={loadingCategoryIds}
                             onToggle={toggleCategory}
-                            onLoadChildren={loadChildren}
                             onSelect={selectCategory}
                           />
                         ))
@@ -840,6 +748,7 @@ export function CategoryList() {
             })}
           </div>
         </ApiState>
+        <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
       </aside>
 
       <main className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-1">
@@ -905,9 +814,7 @@ export function CategoryList() {
         onRetry={() => {
           void query.refetch();
           void librariesQuery.refetch();
-          if (!isRootTable) {
-            void tableQuery.refetch();
-          }
+          void tableQuery.refetch();
         }}
       >
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
@@ -946,7 +853,7 @@ export function CategoryList() {
                           }}
                           className="mt-4 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
                         >
-                          {t("categoryImport.resetFilters")}
+                          {tableCategoryParams ? t("categoryImport.resetFilters") : t("categoryImport.clearSelection")}
                         </button>
                       </div>
                     </td>
@@ -954,14 +861,14 @@ export function CategoryList() {
                 ) : (
                   paginatedCategories.map((category) => {
                     const parent = category.parent_category_id
-                      ? knownCategories.find((item) => item.id === category.parent_category_id)
+                      ? categories.find((item) => item.id === category.parent_category_id)
                       : null;
                     return (
                       <tr key={category.id} className="transition-colors hover:bg-muted/40">
                         <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
                         <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
                         <td className="px-4 py-3 text-sm text-foreground">
-                          {parent ? categoryPath(parent, knownCategories) : t("categoryImport.noParent")}
+                          {parent ? categoryPath(parent, categories) : t("categoryImport.noParent")}
                         </td>
                         <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
                           <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
@@ -1096,7 +1003,7 @@ export function CategoryList() {
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
             >
               <option value="">{t("categoryImport.noParent")}</option>
-              {knownCategories
+              {categories
                 .filter(
                   (category) =>
                     String(category.category_library_id ?? "") === form.categoryLibraryId &&
@@ -1104,7 +1011,7 @@ export function CategoryList() {
                 )
                 .map((category) => (
                   <option key={category.id} value={category.id}>
-                    {categoryPath(category, knownCategories)}
+                    {categoryPath(category, categories)}
                   </option>
                 ))}
             </select>
@@ -1302,7 +1209,6 @@ export function CategoryList() {
           )}
         </div>
       </Modal>
-      <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
       </main>
     </div>
   );

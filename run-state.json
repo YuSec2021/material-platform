@@ -1,15 +1,15 @@
 {
   "mode": "planning",
-  "current_sprint": 57,
+  "current_sprint": 56,
   "retry_count": 0,
-  "last_successful_sprint": 56,
+  "last_successful_sprint": 54,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "main",
+  "active_branch": "codex/sprint-56-xlsx-import",
   "base_branch": "main",
-  "last_run_at": "2026-05-28T00:00:00+08:00",
+  "last_run_at": "2026-05-27T09:30:00+08:00",
   "sprint_origin": "minor_feature",
-  "current_version": "14.7.0",
+  "current_version": "14.6.0",
   "quality_retry_count": 0,
   "merge_retry_count": 0
 }
