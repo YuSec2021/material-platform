@@ -282,6 +282,8 @@ function CategoryTreeItem({
         type="button"
         aria-expanded={hasChildren ? expanded : undefined}
         aria-label={hasChildren ? t(expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: category.name }) : category.name}
+        data-testid="category-tree-node"
+        data-node-type="category"
         data-parent-id={parentId ?? undefined}
         onClick={() => {
           void handleClick();
@@ -749,7 +751,10 @@ export function CategoryList() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
-      <aside className="max-h-[36vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm lg:max-h-none lg:w-72 lg:shrink-0">
+      <aside
+        data-testid="category-tree-container"
+        className="max-h-[36vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm lg:max-h-none lg:w-72 lg:shrink-0"
+      >
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-medium text-foreground">{t("categoryImport.treeTitle")}</h2>
@@ -840,194 +845,197 @@ export function CategoryList() {
             })}
           </div>
         </ApiState>
-        <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
       </aside>
 
-      <main className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-1">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl text-foreground">{t("page.categories")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("page.categoriesHelp")}</p>
-        </div>
-        {isSuperAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setIsBulkOpen(true)}
-              disabled={libraries.length === 0}
-              className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
-            >
-              <UploadCloud className="h-4 w-4" />
-              {t("categoryImport.bulkImport")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAiOpen(true)}
-              disabled={libraries.length === 0}
-              className="inline-flex items-center gap-2 rounded-md border border-emerald-200 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
-            >
-              <Bot className="h-4 w-4" />
-              {t("categoryImport.aiImport")}
-            </button>
-            <button
-              type="button"
-              onClick={openCreateForm}
-              disabled={libraries.length === 0}
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-            >
-              <Plus className="h-4 w-4" />
-              {t("action.addCategory")}
-            </button>
+      <main data-testid="category-content-container" className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-1">
+        <div data-testid="category-content-main" className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl text-foreground">{t("page.categories")}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">{t("page.categoriesHelp")}</p>
+            </div>
+            {isSuperAdmin && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkOpen(true)}
+                  disabled={libraries.length === 0}
+                  className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
+                >
+                  <UploadCloud className="h-4 w-4" />
+                  {t("categoryImport.bulkImport")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAiOpen(true)}
+                  disabled={libraries.length === 0}
+                  className="inline-flex items-center gap-2 rounded-md border border-emerald-200 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
+                >
+                  <Bot className="h-4 w-4" />
+                  {t("categoryImport.aiImport")}
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateForm}
+                  disabled={libraries.length === 0}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+                >
+                  <Plus className="h-4 w-4" />
+                  {t("action.addCategory")}
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-4">
-          <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-ring/40">
-            <Search className="h-5 w-5 text-muted-foreground" />
-            <span className="sr-only">{t("field.searchCategories")}</span>
-            <input
-              type="search"
-              placeholder={t("field.searchCategories")}
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </label>
-        </div>
-      </div>
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-ring/40">
+                <Search className="h-5 w-5 text-muted-foreground" />
+                <span className="sr-only">{t("field.searchCategories")}</span>
+                <input
+                  type="search"
+                  placeholder={t("field.searchCategories")}
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                />
+              </label>
+            </div>
+          </div>
 
-      <ApiState
-        isLoading={isTableLoading}
-        isError={isTableError}
-        isEmpty={false}
-        emptyLabel={emptyCategoryTitle}
-        onRetry={() => {
-          void query.refetch();
-          void librariesQuery.refetch();
-          if (!isRootTable) {
-            void tableQuery.refetch();
-          }
-        }}
-      >
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px]">
-              <thead className="border-b border-border bg-muted/40">
-                <tr>
-                  {[
-                    t("categoryImport.categoryName"),
-                    t("field.code"),
-                    t("categoryImport.parentCategory"),
-                    t("field.description"),
-                    t("action.operations"),
-                  ].map((header) => (
-                    <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {paginatedCategories.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-14 text-center">
-                      <div className="mx-auto flex max-w-sm flex-col items-center">
-                        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
-                          <Inbox className="h-6 w-6" />
-                        </div>
-                        <p className="text-sm font-medium text-foreground">{emptyCategoryTitle}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{emptyCategoryHint}</p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSearchTerm("");
-                            setSelectedTree(null);
-                          }}
-                          className="mt-4 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
-                        >
-                          {t("categoryImport.resetFilters")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedCategories.map((category) => {
-                    const parent = category.parent_category_id
-                      ? knownCategories.find((item) => item.id === category.parent_category_id)
-                      : null;
-                    return (
-                      <tr key={category.id} className="transition-colors hover:bg-muted/40">
-                        <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
-                        <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">
-                          {parent ? categoryPath(parent, knownCategories) : t("categoryImport.noParent")}
-                        </td>
-                        <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
-                          <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {isSuperAdmin ? (
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditForm(category)}
-                                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
-                              >
-                                <Edit className="h-3.5 w-3.5" />
-                                {t("action.edit")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(category)}
-                                disabled={deleteMutation.isPending}
-                                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                {t("action.delete")}
-                              </button>
+          <ApiState
+            isLoading={isTableLoading}
+            isError={isTableError}
+            isEmpty={false}
+            emptyLabel={emptyCategoryTitle}
+            onRetry={() => {
+              void query.refetch();
+              void librariesQuery.refetch();
+              if (!isRootTable) {
+                void tableQuery.refetch();
+              }
+            }}
+          >
+            <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px]">
+                  <thead className="border-b border-border bg-muted/40">
+                    <tr>
+                      {[
+                        t("categoryImport.categoryName"),
+                        t("field.code"),
+                        t("categoryImport.parentCategory"),
+                        t("field.description"),
+                        t("action.operations"),
+                      ].map((header) => (
+                        <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {paginatedCategories.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-14 text-center">
+                          <div className="mx-auto flex max-w-sm flex-col items-center">
+                            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                              <Inbox className="h-6 w-6" />
                             </div>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">-</span>
-                          )}
+                            <p className="text-sm font-medium text-foreground">{emptyCategoryTitle}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{emptyCategoryHint}</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearchTerm("");
+                                setSelectedTree(null);
+                              }}
+                              className="mt-4 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted/40"
+                            >
+                              {t("categoryImport.resetFilters")}
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-            <div className="text-sm text-muted-foreground">
-              {t("categoryImport.paginationSummary", {
-                page: currentPage,
-                totalPages,
-                total: filteredCategories.length,
-              })}
+                    ) : (
+                      paginatedCategories.map((category) => {
+                        const parent = category.parent_category_id
+                          ? knownCategories.find((item) => item.id === category.parent_category_id)
+                          : null;
+                        return (
+                          <tr key={category.id} className="transition-colors hover:bg-muted/40">
+                            <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
+                            <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
+                            <td className="px-4 py-3 text-sm text-foreground">
+                              {parent ? categoryPath(parent, knownCategories) : t("categoryImport.noParent")}
+                            </td>
+                            <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
+                              <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {isSuperAdmin ? (
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditForm(category)}
+                                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                                  >
+                                    <Edit className="h-3.5 w-3.5" />
+                                    {t("action.edit")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDelete(category)}
+                                    disabled={deleteMutation.isPending}
+                                    className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    {t("action.delete")}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <div className="text-sm text-muted-foreground">
+                  {t("categoryImport.paginationSummary", {
+                    page: currentPage,
+                    totalPages,
+                    total: filteredCategories.length,
+                  })}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={currentPage === 1}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t("categoryImport.previousPage")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                    disabled={currentPage === totalPages}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t("categoryImport.nextPage")}
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                disabled={currentPage === 1}
-                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t("categoryImport.previousPage")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-                disabled={currentPage === totalPages}
-                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t("categoryImport.nextPage")}
-              </button>
-            </div>
-          </div>
+          </ApiState>
         </div>
-      </ApiState>
+
+        <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
 
       <Modal
         isOpen={isFormOpen}

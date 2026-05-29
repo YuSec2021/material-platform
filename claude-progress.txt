@@ -1,12 +1,16 @@
 Project summary: Sprints 1-55 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config: unified Model+CapabilityMapping tables with model_for_capability() resolver.
 
+Sprint 57: Category attributes panel layout fix
+Status: implemented, not committed per user instruction. Moved CategoryPropertiesPanel from the left tree aside into the right category content container below the category table area.
+Verification: in-process backend smoke passed; contract hash unchanged; frontend build passes. Playwright was blocked by sandbox Chromium permission; type-check/pytest still have existing adapter/import failures.
+Commit handoff: wrote .sprintfoundry/commit-requests/sprint-57.json for Orchestrator commit; did not run git add, git commit, or write eval-trigger.txt.
+
 Sprint 56: Category import XLSX/XLS support
 Status: implemented, not committed per user instruction. Backend accepts CSV/XLSX/XLS uploads; frontend picker accepts all three and sends spreadsheets as files.
 Verification: Sprint 56 API tests pass; CSV compatibility import checks pass; frontend build passes. Full pytest still has existing legacy AI endpoint/git-signing failures.
 Commit handoff: wrote .sprintfoundry/commit-requests/sprint-56.json for Orchestrator commit; did not write eval-trigger.txt.
 
 Sprint 55: Data migration + legacy cleanup
-Status: SPRINT PASS (2026-05-26). Migrated 414 legacy model configs to unified Model table, removed legacy AI surfaces, E2E flows working. 7/7 criteria PASS.
-
-Sprint 54: AI Capability Mapping page
-Status: SPRINT PASS (2026-05-26). CapabilityMappingPage at /ai/capability-mappings. 7/7 criteria PASS.
+Status: SPRINT PASS (2026-05-26). Migrated 414 legacy model configs to unified Model table, removed legacy AI surfaces, E2E flows working.
+Verification: 7/7 criteria PASS.
+Commit handoff: completed and evaluated before this handoff.

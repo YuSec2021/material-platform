@@ -1171,6 +1171,22 @@
       ],
       "status": "planned",
       "origin": "minor_feature"
+    },
+    {
+      "id": 57,
+      "title": "修复分类管理页类目属性面板布局位置",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "On the category management page, move the category attributes panel out of the left CategoryTree area and render it below the right-side category content area.",
+        "Keep the category tree dedicated to hierarchy navigation only, with its expand, collapse, and selection behavior unchanged.",
+        "Keep the category attributes panel bound to the currently selected category after the layout move, without changing attribute editing behavior."
+      ],
+      "status": "planned",
+      "origin": "bugfix"
     }
   ]
 }
