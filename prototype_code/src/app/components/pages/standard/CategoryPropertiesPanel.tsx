@@ -235,7 +235,11 @@ export function CategoryPropertiesPanel({
 
   if (!selectedCategory) {
     return (
-      <section className="mt-4 rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+      <section
+        data-testid="category-attributes-panel"
+        data-selected-category-id=""
+        className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground"
+      >
         <h3 className="mb-1 font-medium text-foreground">{t("categoryProperties.title")}</h3>
         {t("categoryProperties.emptySelection")}
       </section>
@@ -243,11 +247,15 @@ export function CategoryPropertiesPanel({
   }
 
   return (
-    <section className="mt-4 rounded-lg border border-border bg-card p-4 shadow-sm">
+    <section
+      data-testid="category-attributes-panel"
+      data-selected-category-id={selectedCategory.id}
+      className="rounded-lg border border-border bg-card p-4 shadow-sm"
+    >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">{t("categoryProperties.title")}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p data-testid="category-attributes-summary" className="mt-1 text-xs text-muted-foreground">
             {t("categoryProperties.summary", {
               own: ownAttributes.length,
               inherited: inheritedAttributes.length,

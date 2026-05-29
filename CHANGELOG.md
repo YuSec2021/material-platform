@@ -144,3 +144,9 @@
 ## v14.6.0 — Sprint 50 [MINOR bump]
 
 ## v14.7.0 — Sprint 56 [MINOR bump]
+
+## v14.8.0 — Sprint 58 [MINOR bump]
+- Two-level lazy loading for category tree
+
+## v14.8.1 — Sprint 57 [PATCH bump]
+- Move category attributes panel to content area below category table
