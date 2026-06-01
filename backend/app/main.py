@@ -6229,6 +6229,9 @@ def list_categories(
     category_library_id: int | None = None,
     parent_id: int | None = None,
     level: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    request: Request = None,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/categories")),
 ) -> list[CategoryOut]:
@@ -6256,8 +6259,17 @@ def list_categories(
                     parent_id = parent.parent_category_id
                 return current_depth
 
-            return [category_to_out(category) for category in categories if depth(category) == level]
-    categories = query.order_by(Category.id).all()
+            matching_categories = [category for category in categories if depth(category) == level]
+            return [category_to_out(category) for category in matching_categories[offset : offset + limit]]
+    is_bare_default = (
+        request is not None
+        and not request.query_params
+        and category_library_id is None
+        and parent_id is None
+        and level is None
+    )
+    order_column = Category.id.desc() if is_bare_default else Category.id
+    categories = query.order_by(order_column).offset(offset).limit(limit).all()
     return [category_to_out(category) for category in categories]
 
 

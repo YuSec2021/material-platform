@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type UIEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -52,11 +52,17 @@ type CategoryTreeSelection =
   | null;
 
 const CATEGORY_PAGE_SIZE = 10;
+const CATEGORY_TREE_BATCH_SIZE = 200;
+const CATEGORY_TREE_WINDOW_SIZE = 240;
 const CATEGORY_LEVEL_KEYS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"] as const;
 const CATEGORY_IMPORT_ACCEPT = ".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
 function categoryChildrenKey(parentId: number) {
   return ["categories", "children", parentId] as const;
+}
+
+function categoryLibraryRootsKey(libraryId: number) {
+  return ["categories", "library-roots", libraryId] as const;
 }
 
 const emptyForm: CategoryFormState = {
@@ -180,23 +186,25 @@ function previewRowsToImportRows(rows: PreviewRow[]): CategoryImportRow[] {
   return rows.map((row) => categoryImportRowFromLevels(CATEGORY_LEVEL_KEYS.map((key) => row[key] ?? "")));
 }
 
-function categoryPath(category: Category, categories: Category[]) {
+function categoryPathMap(categories: Category[]) {
   const byId = new Map(categories.map((item) => [item.id, item]));
-  const path = [category.name];
-  let parentId = category.parent_category_id;
-  while (parentId) {
-    const parent = byId.get(parentId);
-    if (!parent) {
-      break;
+  const pathById = new Map<number, string>();
+  const resolvePath = (category: Category, seen = new Set<number>()): string => {
+    const cached = pathById.get(category.id);
+    if (cached) {
+      return cached;
     }
-    path.unshift(parent.name);
-    parentId = parent.parent_category_id;
-  }
-  return path.join(" / ");
-}
-
-function categoryMatchesLibrary(category: Category, library: CategoryLibrary) {
-  return category.category_library_id === library.id || (!category.category_library_id && category.category_library === library.name);
+    if (seen.has(category.id)) {
+      return category.name;
+    }
+    seen.add(category.id);
+    const parent = category.parent_category_id ? byId.get(category.parent_category_id) : null;
+    const path = parent ? `${resolvePath(parent, seen)} / ${category.name}` : category.name;
+    pathById.set(category.id, path);
+    return path;
+  };
+  categories.forEach((category) => resolvePath(category));
+  return pathById;
 }
 
 function categoryLibraryId(category: Category, libraries: CategoryLibrary[]) {
@@ -226,109 +234,260 @@ function resultSummary(result: CategoryBulkImportResult | null) {
   return `${result.success_count} / ${result.skipped_count} / ${result.error_count}`;
 }
 
-function CategoryTreeItem({
-  category,
-  categories,
-  children,
-  childrenByParentId,
-  parentId,
-  depth,
-  selectedTree,
-  expandedCategoryIds,
-  loadingCategoryIds,
-  onToggle,
-  onLoadChildren,
-  onSelect,
+type CategoryTreeRow =
+  | {
+      type: "library";
+      id: string;
+      library: CategoryLibrary;
+      expanded: boolean;
+      selected: boolean;
+      loading: boolean;
+      rootsLoaded: boolean;
+    }
+  | {
+      type: "category";
+      id: string;
+      category: Category;
+      parentId: number | null;
+      depth: number;
+      expanded: boolean;
+      selected: boolean;
+      loading: boolean;
+      childrenLoaded: boolean;
+      hasLoadedChildren: boolean;
+      path: string;
+    }
+  | {
+      type: "load-more-roots";
+      id: string;
+      libraryId: number;
+      depth: number;
+      loading: boolean;
+    }
+  | {
+      type: "load-more-children";
+      id: string;
+      parentId: number;
+      depth: number;
+      loading: boolean;
+    };
+
+const VirtualizedCategoryTree = memo(function VirtualizedCategoryTree({
+  rows,
+  onToggleLibrary,
+  onToggleCategory,
+  onSelectCategory,
+  onLoadMoreRoots,
+  onLoadMoreChildren,
 }: {
-  category: Category;
-  categories: Category[];
-  children: Category[] | undefined;
-  childrenByParentId: Map<number, Category[]>;
-  parentId: number | null;
-  depth: number;
-  selectedTree: CategoryTreeSelection;
-  expandedCategoryIds: number[];
-  loadingCategoryIds: number[];
-  onToggle: (id: number) => void;
-  onLoadChildren: (id: number) => Promise<Category[]>;
-  onSelect: (category: Category) => void;
+  rows: CategoryTreeRow[];
+  onToggleLibrary: (library: CategoryLibrary) => void;
+  onToggleCategory: (category: Category, childrenLoaded: boolean, hasLoadedChildren: boolean) => void;
+  onSelectCategory: (category: Category) => void;
+  onLoadMoreRoots: (libraryId: number) => void;
+  onLoadMoreChildren: (parentId: number) => void;
 }) {
   const { t } = useTranslation();
-  const childCategories = (children ?? []).slice().sort((left, right) => left.name.localeCompare(right.name));
-  const childrenLoaded = children !== undefined;
-  const hasChildren = !childrenLoaded || childCategories.length > 0;
-  const expanded = expandedCategoryIds.includes(category.id);
-  const selected = selectedTree?.type === "category" && selectedTree.id === category.id;
-  const label = categoryPath(category, categories);
-  const isLoadingChildren = loadingCategoryIds.includes(category.id);
+  const [windowStart, setWindowStart] = useState(0);
+  const visibleRows = useMemo(
+    () => rows.slice(windowStart, Math.min(rows.length, windowStart + CATEGORY_TREE_WINDOW_SIZE)),
+    [rows, windowStart],
+  );
 
-  const handleClick = async () => {
-    if (hasChildren) {
-      if (expanded) {
-        onToggle(category.id);
-      } else {
-        const loadedChildren = childrenLoaded ? childCategories : await onLoadChildren(category.id);
-        if (loadedChildren.length > 0) {
-          onToggle(category.id);
-        }
-      }
+  useEffect(() => {
+    setWindowStart((current) => Math.min(current, Math.max(0, rows.length - CATEGORY_TREE_WINDOW_SIZE)));
+  }, [rows.length]);
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (rows.length <= CATEGORY_TREE_WINDOW_SIZE) {
+      return;
     }
-    onSelect(category);
+    const viewport = event.currentTarget;
+    const step = Math.floor(CATEGORY_TREE_WINDOW_SIZE / 2);
+    if (viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 16) {
+      setWindowStart((current) => Math.min(rows.length - CATEGORY_TREE_WINDOW_SIZE, current + step));
+      viewport.scrollTop = Math.floor(viewport.clientHeight / 2);
+    } else if (viewport.scrollTop <= 8) {
+      setWindowStart((current) => Math.max(0, current - step));
+      viewport.scrollTop = Math.floor(viewport.clientHeight / 2);
+    }
   };
 
   return (
-    <div>
-      <button
-        type="button"
-        aria-expanded={hasChildren ? expanded : undefined}
-        aria-label={hasChildren ? t(expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: category.name }) : category.name}
-        data-testid="category-tree-node"
-        data-node-type="category"
-        data-parent-id={parentId ?? undefined}
-        onClick={() => {
-          void handleClick();
-        }}
-        className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm transition-colors ${treeIndentClass(depth)} ${
-          selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
-        }`}
-        title={label}
-      >
-        {isLoadingChildren ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-        ) : hasChildren ? (
-          expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-          )
-        ) : (
-          <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <div
+      data-testid="category-tree-virtualized"
+      data-total-rows={rows.length}
+      data-rendered-rows={visibleRows.length}
+      className="max-h-[calc(36vh-8rem)] min-h-56 overflow-y-auto lg:max-h-[calc(100vh-15rem)]"
+      onScroll={handleScroll}
+    >
+      <div className="space-y-1" aria-rowcount={rows.length}>
+        {windowStart > 0 && (
+          <div className="px-3 py-1 text-center text-[11px] text-muted-foreground" aria-hidden="true">
+            {windowStart} / {rows.length}
+          </div>
         )}
-        <span className="truncate">{category.name}</span>
-      </button>
-      {hasChildren && expanded && (
-        <div className="mt-1 space-y-1">
-          {childCategories.map((child) => (
-            <CategoryTreeItem
-              key={child.id}
-              category={child}
-              categories={categories}
-              children={childrenByParentId.get(child.id)}
-              childrenByParentId={childrenByParentId}
-              parentId={category.id}
-              depth={depth + 1}
-              selectedTree={selectedTree}
-              expandedCategoryIds={expandedCategoryIds}
-              loadingCategoryIds={loadingCategoryIds}
-              onToggle={onToggle}
-              onLoadChildren={onLoadChildren}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      )}
+        {visibleRows.map((row) => {
+          if (row.type === "library") {
+            return (
+              <button
+                key={row.id}
+                type="button"
+                aria-expanded={row.expanded}
+                aria-label={t(row.expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: row.library.name })}
+                data-testid="category-tree-row"
+                data-node-type="library"
+                onClick={() => onToggleLibrary(row.library)}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  row.selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
+                }`}
+              >
+                {row.loading ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : row.expanded ? (
+                  <ChevronDown className="h-4 w-4 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0" />
+                )}
+                <span className="truncate">{row.library.name}</span>
+              </button>
+            );
+          }
+
+          if (row.type === "load-more-roots") {
+            return (
+              <button
+                key={row.id}
+                type="button"
+                data-testid="category-tree-row"
+                data-node-type="load-more"
+                onClick={() => onLoadMoreRoots(row.libraryId)}
+                disabled={row.loading}
+                className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent disabled:cursor-wait ${treeIndentClass(row.depth)}`}
+              >
+                {row.loading ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <span className="h-3.5 w-3.5 shrink-0" />}
+                <span>{t("categoryImport.loadMore")}</span>
+              </button>
+            );
+          }
+
+          if (row.type === "load-more-children") {
+            return (
+              <button
+                key={row.id}
+                type="button"
+                data-testid="category-tree-row"
+                data-node-type="load-more"
+                data-parent-id={row.parentId}
+                onClick={() => onLoadMoreChildren(row.parentId)}
+                disabled={row.loading}
+                className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent disabled:cursor-wait ${treeIndentClass(row.depth)}`}
+              >
+                {row.loading ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <span className="h-3.5 w-3.5 shrink-0" />}
+                <span>{t("categoryImport.loadMore")}</span>
+              </button>
+            );
+          }
+
+          const hasChildren = !row.childrenLoaded || row.hasLoadedChildren;
+          return (
+            <button
+              key={row.id}
+              type="button"
+              aria-expanded={hasChildren ? row.expanded : undefined}
+              aria-label={hasChildren ? t(row.expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: row.category.name }) : row.category.name}
+              data-testid="category-tree-node"
+              data-node-type="category"
+              data-parent-id={row.parentId ?? undefined}
+              onClick={() => onToggleCategory(row.category, row.childrenLoaded, row.hasLoadedChildren)}
+              onDoubleClick={() => onSelectCategory(row.category)}
+              className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm transition-colors ${treeIndentClass(row.depth)} ${
+                row.selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
+              }`}
+              title={row.path}
+            >
+              {row.loading ? (
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              ) : hasChildren ? (
+                row.expanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                )
+              ) : (
+                <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              )}
+              <span className="truncate">{row.category.name}</span>
+            </button>
+          );
+        })}
+        {windowStart + visibleRows.length < rows.length && (
+          <div className="px-3 py-1 text-center text-[11px] text-muted-foreground" aria-hidden="true">
+            {windowStart + visibleRows.length} / {rows.length}
+          </div>
+        )}
+      </div>
     </div>
   );
+});
+
+function flattenCategoryRows({
+  categories,
+  childrenByParentId,
+  pathById,
+  expandedCategoryIds,
+  selectedTree,
+  loadingCategoryIds,
+  childParentsWithMore,
+}: {
+  categories: Category[];
+  childrenByParentId: Map<number, Category[]>;
+  pathById: Map<number, string>;
+  expandedCategoryIds: number[];
+  selectedTree: CategoryTreeSelection;
+  loadingCategoryIds: number[];
+  childParentsWithMore: number[];
+}) {
+  const rows: CategoryTreeRow[] = [];
+  const appendCategory = (category: Category, parentId: number | null, depth: number) => {
+    const children = childrenByParentId.get(category.id);
+    const expanded = expandedCategoryIds.includes(category.id);
+    rows.push({
+      type: "category",
+      id: `category-${category.id}`,
+      category,
+      parentId,
+      depth,
+      expanded,
+      selected: selectedTree?.type === "category" && selectedTree.id === category.id,
+      loading: loadingCategoryIds.includes(category.id),
+      childrenLoaded: children !== undefined,
+      hasLoadedChildren: Boolean(children?.length),
+      path: pathById.get(category.id) ?? category.name,
+    });
+    if (!expanded || !children) {
+      return;
+    }
+    children
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .forEach((child) => appendCategory(child, category.id, depth + 1));
+    if (childParentsWithMore.includes(category.id)) {
+      rows.push({
+        type: "load-more-children",
+        id: `load-more-children-${category.id}`,
+        parentId: category.id,
+        depth: depth + 1,
+        loading: loadingCategoryIds.includes(category.id),
+      });
+    }
+  };
+
+  categories
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .forEach((category) => appendCategory(category, null, 1));
+  return rows;
 }
 
 export function CategoryList() {
@@ -356,12 +515,17 @@ export function CategoryList() {
   const [aiText, setAiText] = useState("");
   const [recognizedRows, setRecognizedRows] = useState<PreviewRow[]>([]);
   const [loadingDot, setLoadingDot] = useState(0);
+  const [loadedRootLibraryIds, setLoadedRootLibraryIds] = useState<number[]>([]);
+  const [loadingLibraryIds, setLoadingLibraryIds] = useState<number[]>([]);
+  const [rootLibrariesWithMore, setRootLibrariesWithMore] = useState<number[]>([]);
   const [loadedChildParentIds, setLoadedChildParentIds] = useState<number[]>([]);
   const [loadingCategoryIds, setLoadingCategoryIds] = useState<number[]>([]);
+  const [childParentsWithMore, setChildParentsWithMore] = useState<number[]>([]);
+  const [categoryCacheVersion, setCategoryCacheVersion] = useState(0);
 
   const query = useQuery({
     queryKey: ["categories"],
-    queryFn: () => apiClient.categoriesByParams({ level: 1 }),
+    queryFn: () => apiClient.categoriesByParams({ level: 1, limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 }),
     retry: false,
   });
 
@@ -373,6 +537,16 @@ export function CategoryList() {
 
   const categories = query.data ?? [];
   const libraries = librariesQuery.data ?? [];
+  const rootCategoriesByLibraryId = useMemo(() => {
+    const rootMap = new Map<number, Category[]>();
+    loadedRootLibraryIds.forEach((libraryId) => {
+      const cachedRoots = queryClient.getQueryData<Category[]>(categoryLibraryRootsKey(libraryId));
+      if (cachedRoots) {
+        rootMap.set(libraryId, cachedRoots);
+      }
+    });
+    return rootMap;
+  }, [categoryCacheVersion, loadedRootLibraryIds, queryClient]);
   const childrenByParentId = useMemo(() => {
     const childMap = new Map<number, Category[]>();
     loadedChildParentIds.forEach((parentId) => {
@@ -382,15 +556,19 @@ export function CategoryList() {
       }
     });
     return childMap;
-  }, [loadedChildParentIds, queryClient]);
+  }, [categoryCacheVersion, loadedChildParentIds, queryClient]);
   const knownCategories = useMemo(() => {
     const byId = new Map<number, Category>();
     categories.forEach((category) => byId.set(category.id, category));
+    rootCategoriesByLibraryId.forEach((rootCategories) => {
+      rootCategories.forEach((category) => byId.set(category.id, category));
+    });
     childrenByParentId.forEach((childCategories) => {
       childCategories.forEach((category) => byId.set(category.id, category));
     });
     return Array.from(byId.values());
-  }, [categories, childrenByParentId]);
+  }, [categories, childrenByParentId, rootCategoriesByLibraryId]);
+  const pathByCategoryId = useMemo(() => categoryPathMap(knownCategories), [knownCategories]);
   const selectedCategory =
     selectedTree?.type === "category" ? knownCategories.find((category) => category.id === selectedTree.id) ?? null : null;
   const selectedLibrary =
@@ -411,21 +589,11 @@ export function CategoryList() {
   const isRootTable = selectedTree === null;
   const tableQuery = useQuery({
     queryKey: ["categories", "table", tableCategoryParams],
-    queryFn: () => apiClient.categoriesByParams(tableCategoryParams ?? {}),
+    queryFn: () => apiClient.categoriesByParams({ ...(tableCategoryParams ?? {}), limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 }),
     enabled: !isRootTable,
     retry: false,
   });
   const tableCategories = isRootTable ? categories : tableQuery.data ?? [];
-  const categoryTreeByLibrary = useMemo(
-    () =>
-      libraries.map((library) => ({
-        library,
-        categories: knownCategories
-          .filter((category) => categoryMatchesLibrary(category, library))
-          .sort((left, right) => categoryPath(left, knownCategories).localeCompare(categoryPath(right, knownCategories))),
-      })),
-    [knownCategories, libraries],
-  );
   const invalidImportRows = importRows.filter((row) => row.errors.length > 0);
   const invalidRecognizedRows = recognizedRows.filter((row) => row.errors.length > 0);
   const filteredCategories = useMemo(() => {
@@ -440,11 +608,11 @@ export function CategoryList() {
           category.code,
           category.description,
           category.category_library,
-          categoryPath(category, knownCategories),
+          pathByCategoryId.get(category.id) ?? category.name,
         ].some((value) => value.toLowerCase().includes(term));
       })
-      .sort((left, right) => categoryPath(left, knownCategories).localeCompare(categoryPath(right, knownCategories)));
-  }, [knownCategories, searchTerm, tableCategories]);
+      .sort((left, right) => (pathByCategoryId.get(left.id) ?? left.name).localeCompare(pathByCategoryId.get(right.id) ?? right.name));
+  }, [pathByCategoryId, searchTerm, tableCategories]);
   const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CATEGORY_PAGE_SIZE));
   const paginatedCategories = filteredCategories.slice(
     (currentPage - 1) * CATEGORY_PAGE_SIZE,
@@ -498,31 +666,118 @@ export function CategoryList() {
   };
 
   const clearCategoryChildrenCache = () => {
+    queryClient.removeQueries({ queryKey: ["categories", "library-roots"] });
     queryClient.removeQueries({ queryKey: ["categories", "children"] });
+    setLoadedRootLibraryIds([]);
+    setLoadingLibraryIds([]);
+    setRootLibrariesWithMore([]);
     setLoadedChildParentIds([]);
     setLoadingCategoryIds([]);
+    setChildParentsWithMore([]);
+    setCategoryCacheVersion((version) => version + 1);
   };
 
-  const loadChildren = async (parentId: number) => {
-    const cachedChildren = queryClient.getQueryData<Category[]>(categoryChildrenKey(parentId));
-    if (cachedChildren) {
-      return cachedChildren;
-    }
-    setLoadingCategoryIds((current) => Array.from(new Set([...current, parentId])));
-    try {
-      const childCategories = await queryClient.fetchQuery({
-        queryKey: categoryChildrenKey(parentId),
-        queryFn: () => apiClient.categoriesByParams({ parent_id: parentId }),
-      });
-      setLoadedChildParentIds((current) => Array.from(new Set([...current, parentId])));
-      return childCategories;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-      return [];
-    } finally {
-      setLoadingCategoryIds((current) => current.filter((id) => id !== parentId));
-    }
+  const mergeCategoryBatch = (current: Category[] | undefined, nextBatch: Category[]) => {
+    const byId = new Map((current ?? []).map((category) => [category.id, category]));
+    nextBatch.forEach((category) => byId.set(category.id, category));
+    return Array.from(byId.values()).sort((left, right) => left.name.localeCompare(right.name));
   };
+
+  const loadLibraryRoots = useCallback(
+    async (libraryId: number, offset?: number) => {
+      const cachedRoots = queryClient.getQueryData<Category[]>(categoryLibraryRootsKey(libraryId)) ?? [];
+      const nextOffset = offset ?? cachedRoots.length;
+      if (cachedRoots.length > 0 && nextOffset === 0) {
+        return cachedRoots;
+      }
+      setLoadingLibraryIds((current) => Array.from(new Set([...current, libraryId])));
+      try {
+        const rootCategories = await apiClient.categoriesByParams({
+          category_library_id: libraryId,
+          level: 1,
+          limit: CATEGORY_TREE_BATCH_SIZE,
+          offset: nextOffset,
+        });
+        const mergedRoots = mergeCategoryBatch(nextOffset === 0 ? [] : cachedRoots, rootCategories);
+        queryClient.setQueryData(categoryLibraryRootsKey(libraryId), mergedRoots);
+        setCategoryCacheVersion((version) => version + 1);
+        setLoadedRootLibraryIds((current) => Array.from(new Set([...current, libraryId])));
+        setRootLibrariesWithMore((current) =>
+          rootCategories.length === CATEGORY_TREE_BATCH_SIZE
+            ? Array.from(new Set([...current, libraryId]))
+            : current.filter((id) => id !== libraryId),
+        );
+        return mergedRoots;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return cachedRoots;
+      } finally {
+        setLoadingLibraryIds((current) => current.filter((id) => id !== libraryId));
+      }
+    },
+    [queryClient],
+  );
+
+  const loadChildren = useCallback(
+    async (parentId: number, offset?: number) => {
+      const cachedChildren = queryClient.getQueryData<Category[]>(categoryChildrenKey(parentId)) ?? [];
+      const nextOffset = offset ?? cachedChildren.length;
+      if (cachedChildren.length > 0 && nextOffset === 0) {
+        return cachedChildren;
+      }
+      setLoadingCategoryIds((current) => Array.from(new Set([...current, parentId])));
+      try {
+        const childCategories = await apiClient.categoriesByParams({
+          parent_id: parentId,
+          limit: CATEGORY_TREE_BATCH_SIZE,
+          offset: nextOffset,
+        });
+        const mergedChildren = mergeCategoryBatch(nextOffset === 0 ? [] : cachedChildren, childCategories);
+        queryClient.setQueryData(categoryChildrenKey(parentId), mergedChildren);
+        setCategoryCacheVersion((version) => version + 1);
+        setLoadedChildParentIds((current) => Array.from(new Set([...current, parentId])));
+        setChildParentsWithMore((current) =>
+          childCategories.length === CATEGORY_TREE_BATCH_SIZE
+            ? Array.from(new Set([...current, parentId]))
+            : current.filter((id) => id !== parentId),
+        );
+        return mergedChildren;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return cachedChildren;
+      } finally {
+        setLoadingCategoryIds((current) => current.filter((id) => id !== parentId));
+      }
+    },
+    [queryClient],
+  );
+
+  const loadMoreLibraryRoots = useCallback(
+    (libraryId: number) => {
+      const cachedRoots = queryClient.getQueryData<Category[]>(categoryLibraryRootsKey(libraryId)) ?? [];
+      void loadLibraryRoots(libraryId, cachedRoots.length);
+    },
+    [loadLibraryRoots, queryClient],
+  );
+
+  const loadMoreChildren = useCallback(
+    (parentId: number) => {
+      const cachedChildren = queryClient.getQueryData<Category[]>(categoryChildrenKey(parentId)) ?? [];
+      void loadChildren(parentId, cachedChildren.length);
+    },
+    [loadChildren, queryClient],
+  );
+
+  const ensureLibraryRoots = useCallback(
+    async (libraryId: number) => {
+      const cachedRoots = queryClient.getQueryData<Category[]>(categoryLibraryRootsKey(libraryId));
+      if (cachedRoots) {
+        return cachedRoots;
+      }
+      return loadLibraryRoots(libraryId, 0);
+    },
+    [loadLibraryRoots, queryClient],
+  );
 
   const selectLibrary = (library: CategoryLibrary) => {
     setSelectedTree({ type: "library", id: library.id });
@@ -538,18 +793,39 @@ export function CategoryList() {
   };
 
   const toggleLibrary = (library: CategoryLibrary) => {
-    setExpandedLibraryIds((current) =>
-      current.includes(library.id) ? current.filter((id) => id !== library.id) : [...current, library.id],
-    );
+    const isExpanded = expandedLibraryIds.includes(library.id);
+    if (isExpanded) {
+      setExpandedLibraryIds((current) => current.filter((id) => id !== library.id));
+    } else {
+      void ensureLibraryRoots(library.id);
+      setExpandedLibraryIds((current) => Array.from(new Set([...current, library.id])));
+    }
     selectLibrary(library);
   };
 
-  const toggleCategory = (id: number) => {
-    setExpandedCategoryIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  const toggleCategory = (category: Category, childrenLoaded: boolean, hasLoadedChildren: boolean) => {
+    const expanded = expandedCategoryIds.includes(category.id);
+    selectCategory(category);
+    if (expanded) {
+      setExpandedCategoryIds((current) => current.filter((item) => item !== category.id));
+      return;
+    }
+    if (childrenLoaded) {
+      if (hasLoadedChildren) {
+        setExpandedCategoryIds((current) => Array.from(new Set([...current, category.id])));
+      }
+      return;
+    }
+    void loadChildren(category.id).then((childCategories) => {
+      if (childCategories.length > 0) {
+        setExpandedCategoryIds((current) => Array.from(new Set([...current, category.id])));
+      }
+    });
   };
 
   const expandAllTree = () => {
     setExpandedLibraryIds(libraries.map((library) => library.id));
+    void Promise.all(libraries.map((library) => ensureLibraryRoots(library.id)));
     setExpandedCategoryIds(
       Array.from(childrenByParentId.entries())
         .filter(([, childCategories]) => childCategories.length > 0)
@@ -744,10 +1020,66 @@ export function CategoryList() {
   const emptyCategoryTitle = t("state.emptyCategories");
   const emptyCategoryHint = t("categoryImport.emptyHint");
   const selectedContext = selectedCategory
-    ? t("categoryImport.selectedCategory", { path: categoryPath(selectedCategory, knownCategories) })
+    ? t("categoryImport.selectedCategory", { path: pathByCategoryId.get(selectedCategory.id) ?? selectedCategory.name })
     : selectedLibrary
       ? t("categoryImport.selectedLibrary", { name: selectedLibrary.name })
       : t("categoryImport.noSelection");
+  const treeRows = useMemo(() => {
+    const rows: CategoryTreeRow[] = [];
+    libraries.forEach((library) => {
+      const expanded = expandedLibraryIds.includes(library.id);
+      const rootCategories = rootCategoriesByLibraryId.get(library.id) ?? [];
+      rows.push({
+        type: "library",
+        id: `library-${library.id}`,
+        library,
+        expanded,
+        selected: selectedTree?.type === "library" && selectedTree.id === library.id,
+        loading: loadingLibraryIds.includes(library.id),
+        rootsLoaded: loadedRootLibraryIds.includes(library.id),
+      });
+      if (!expanded) {
+        return;
+      }
+      if (loadedRootLibraryIds.includes(library.id) && rootCategories.length === 0) {
+        return;
+      }
+      rows.push(
+        ...flattenCategoryRows({
+          categories: rootCategories,
+          childrenByParentId,
+          pathById: pathByCategoryId,
+          expandedCategoryIds,
+          selectedTree,
+          loadingCategoryIds,
+          childParentsWithMore,
+        }),
+      );
+      if (rootLibrariesWithMore.includes(library.id)) {
+        rows.push({
+          type: "load-more-roots",
+          id: `load-more-roots-${library.id}`,
+          libraryId: library.id,
+          depth: 1,
+          loading: loadingLibraryIds.includes(library.id),
+        });
+      }
+    });
+    return rows;
+  }, [
+    childParentsWithMore,
+    childrenByParentId,
+    expandedCategoryIds,
+    expandedLibraryIds,
+    libraries,
+    loadedRootLibraryIds,
+    loadingCategoryIds,
+    loadingLibraryIds,
+    pathByCategoryId,
+    rootCategoriesByLibraryId,
+    rootLibrariesWithMore,
+    selectedTree,
+  ]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-6">
@@ -796,54 +1128,14 @@ export function CategoryList() {
             void librariesQuery.refetch();
           }}
         >
-          <div className="space-y-1">
-            {categoryTreeByLibrary.map(({ library, categories: libraryCategories }) => {
-              const expanded = expandedLibraryIds.includes(library.id);
-              const selected = selectedTree?.type === "library" && selectedTree.id === library.id;
-              const rootCategories = libraryCategories.filter((category) => !category.parent_category_id);
-              return (
-                <div key={library.id}>
-                  <button
-                    type="button"
-                    aria-expanded={expanded}
-                    aria-label={t(expanded ? "categoryImport.collapseNode" : "categoryImport.expandNode", { name: library.name })}
-                    onClick={() => toggleLibrary(library)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                      selected ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-foreground hover:bg-accent"
-                    }`}
-                  >
-                    {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                    <span className="truncate">{library.name}</span>
-                  </button>
-                  {expanded && (
-                    <div className="mt-1 space-y-1">
-                      {rootCategories.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-muted-foreground">{t("categoryImport.treeLibraryEmpty")}</p>
-                      ) : (
-                        rootCategories.map((category) => (
-                          <CategoryTreeItem
-                            key={category.id}
-                            category={category}
-                            categories={knownCategories}
-                            children={childrenByParentId.get(category.id)}
-                            childrenByParentId={childrenByParentId}
-                            parentId={null}
-                            depth={0}
-                            selectedTree={selectedTree}
-                            expandedCategoryIds={expandedCategoryIds}
-                            loadingCategoryIds={loadingCategoryIds}
-                            onToggle={toggleCategory}
-                            onLoadChildren={loadChildren}
-                            onSelect={selectCategory}
-                          />
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <VirtualizedCategoryTree
+            rows={treeRows}
+            onToggleLibrary={toggleLibrary}
+            onToggleCategory={toggleCategory}
+            onSelectCategory={selectCategory}
+            onLoadMoreRoots={loadMoreLibraryRoots}
+            onLoadMoreChildren={loadMoreChildren}
+          />
         </ApiState>
       </aside>
 
@@ -967,7 +1259,7 @@ export function CategoryList() {
                             <td className="px-4 py-3 text-sm font-medium text-foreground">{category.name}</td>
                             <td className="px-4 py-3 font-mono text-sm text-foreground">{category.code}</td>
                             <td className="px-4 py-3 text-sm text-foreground">
-                              {parent ? categoryPath(parent, knownCategories) : t("categoryImport.noParent")}
+                              {parent ? pathByCategoryId.get(parent.id) ?? parent.name : t("categoryImport.noParent")}
                             </td>
                             <td className="max-w-[260px] px-4 py-3 text-sm text-foreground">
                               <span className="line-clamp-2">{category.description || t("categoryImport.noDescription")}</span>
@@ -1113,7 +1405,7 @@ export function CategoryList() {
                 )
                 .map((category) => (
                   <option key={category.id} value={category.id}>
-                    {categoryPath(category, knownCategories)}
+                    {pathByCategoryId.get(category.id) ?? category.name}
                   </option>
                 ))}
             </select>

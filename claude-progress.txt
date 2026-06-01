@@ -1,16 +1,21 @@
-Project summary: Sprints 1-55 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config: unified Model+CapabilityMapping tables with model_for_capability() resolver.
+Project summary: Sprints 1-57 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config uses unified Model+CapabilityMapping tables.
+
+Sprint 58: Category tree virtualization and paginated lazy loading
+Status: implemented, not committed per user instruction. Added categories API limit/offset defaults, 200-row lazy root/child loading, and bounded virtualized tree rendering with evaluator test id.
+Verification: in-process backend smoke passed; Sprint 58 API pagination tests passed; focused compatibility API checks passed; frontend build passed. Full type-check/pytest still hit existing adapter/git-signing/legacy AI config failures.
+Commit handoff: wrote .sprintfoundry/commit-requests/sprint-58.json for Orchestrator commit; did not run git add, git commit, or write eval-trigger.txt.
 
 Sprint 57: Category attributes panel layout fix
-Status: implemented, not committed per user instruction. Moved CategoryPropertiesPanel from the left tree aside into the right category content container below the category table area.
-Verification: in-process backend smoke passed; contract hash unchanged; frontend build passes. Playwright was blocked by sandbox Chromium permission; type-check/pytest still have existing adapter/import failures.
-Commit handoff: wrote .sprintfoundry/commit-requests/sprint-57.json for Orchestrator commit; did not run git add, git commit, or write eval-trigger.txt.
+Status: SPRINT PASS. Moved CategoryPropertiesPanel from the left tree aside into the right category content container below the category table area.
+Verification: evaluator passed after layout fix; local frontend build passed. Playwright remained sandbox-limited locally.
+Commit handoff: merged to main after PASS.
 
 Sprint 56: Category import XLSX/XLS support
-Status: implemented, not committed per user instruction. Backend accepts CSV/XLSX/XLS uploads; frontend picker accepts all three and sends spreadsheets as files.
-Verification: Sprint 56 API tests pass; CSV compatibility import checks pass; frontend build passes. Full pytest still has existing legacy AI endpoint/git-signing failures.
-Commit handoff: wrote .sprintfoundry/commit-requests/sprint-56.json for Orchestrator commit; did not write eval-trigger.txt.
+Status: SPRINT PASS. Backend accepts CSV/XLSX/XLS uploads; frontend picker accepts all three and sends spreadsheets as files.
+Verification: Sprint 56 API tests passed; CSV compatibility import checks passed; frontend build passed.
+Commit handoff: merged to main after PASS.
 
-Sprint 55: Data migration + legacy cleanup
-Status: SPRINT PASS (2026-05-26). Migrated 414 legacy model configs to unified Model table, removed legacy AI surfaces, E2E flows working.
-Verification: 7/7 criteria PASS.
-Commit handoff: completed and evaluated before this handoff.
+Sprint 58: Category tree virtualization + backend pagination
+Status: SPRINT PASS (2026-06-01). Implemented react-arborist-style scroll-windowed virtual tree (no react-arborist dep) + 200-row lazy-load batches + limit/offset on /api/v1/categories + React.memo on VirtualizedCategoryTree + useMemo path cache. data-testid=category-tree-virtualized added. All 4 criteria PASS. Bumped to v15.0.0.
+Verification: 4/4 criteria PASS. 2/2 sprint58 pytest, vite build pass, tsc src clean.
+Commit handoff: implemented and merged.

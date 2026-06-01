@@ -1,15 +1,15 @@
 {
-  "mode": "checking",
-  "current_sprint": 57,
+  "mode": "implementing",
+  "current_sprint": 58,
   "retry_count": 0,
   "last_successful_sprint": 58,
   "last_failure_reason": "",
   "needs_human": false,
-  "active_branch": "codex/sprint-57-category-attributes-layout",
+  "active_branch": "codex/sprint-58-category-tree-virtualization",
   "base_branch": "main",
-  "last_run_at": "2026-05-29T16:51:14.531074",
-  "sprint_origin": "bugfix",
-  "current_version": "14.8.0",
+  "last_run_at": "2026-06-01T17:26:08+08:00",
+  "sprint_origin": "minor_feature",
+  "current_version": "15.0.0",
   "quality_retry_count": 0,
   "merge_retry_count": 0
 }
