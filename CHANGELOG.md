@@ -150,3 +150,9 @@
 
 ## v14.8.1 — Sprint 57 [PATCH bump]
 - Move category attributes panel to content area below category table
+
+## v15.0.0 — Sprint 58 [MAJOR bump]
+- Backend uses `Category.id.desc()` ordering only for the truly-bare default call (no query params, no library/parent/level filters) for backward compat with the previous "newest first" default; with any explicit filter, the original `Category.id` ordering applies. limit/offset clamp the result.
+- Frontend uses `useQuery` cache keyed by `categoryLibraryRootsKey(libraryId)` and `categoryChildrenKey(parentId)` so each node has its own independent batch. Expand triggers a new request with parent_id or category_library_id+level=1, both with limit=200&offset=0. Matches contract specification.
+- Virtualization works; Expand All is preserved; selection, search, attributes panel, import/export, bulk-edit buttons are all still wired in CategoryList.tsx (lines 1105-1119 for Expand/Collapse All, 1142-1143 for content container, 1151-1158 for bulk import).
+- With the same filters applied, default call and explicit `limit=200&offset=0` return identical level-1 sets. The implementation passes level=1 to `parent_category_id IS NULL` filter, and default limit/offset are 200/0.
