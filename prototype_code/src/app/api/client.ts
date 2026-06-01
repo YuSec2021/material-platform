@@ -49,6 +49,8 @@ export type CategoryListParams = {
   category_library_id?: number | string | null;
   parent_id?: number | string | null;
   level?: number | string | null;
+  limit?: number | string | null;
+  offset?: number | string | null;
 };
 
 export type CategoryLibrary = {
