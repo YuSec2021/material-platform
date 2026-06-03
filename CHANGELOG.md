@@ -156,3 +156,9 @@
 - Frontend uses `useQuery` cache keyed by `categoryLibraryRootsKey(libraryId)` and `categoryChildrenKey(parentId)` so each node has its own independent batch. Expand triggers a new request with parent_id or category_library_id+level=1, both with limit=200&offset=0. Matches contract specification.
 - Virtualization works; Expand All is preserved; selection, search, attributes panel, import/export, bulk-edit buttons are all still wired in CategoryList.tsx (lines 1105-1119 for Expand/Collapse All, 1142-1143 for content container, 1151-1158 for bulk import).
 - With the same filters applied, default call and explicit `limit=200&offset=0` return identical level-1 sets. The implementation passes level=1 to `parent_category_id IS NULL` filter, and default limit/offset are 200/0.
+
+## v16.0.0 — Sprint 59 [MAJOR bump]
+- Prometheus-format `/metrics` endpoint exposed on the FastAPI backend, emitting `http_requests_total` and `http_request_duration_seconds` labeled by method/route/status_code so any Prometheus scraper can ingest the request stream.
+- SQLAlchemy `before_cursor_execute`/`after_cursor_execute` listeners record query duration per statement; queries exceeding the slow threshold (default 200 ms, configurable via `SLOW_SQL_THRESHOLD_MS`) are persisted to a new `slow_query_log` table with sanitized SQL.
+- Read-only `/api/v1/observability/slow-queries?limit=` endpoint returns recent `slow_query_log` rows (id, timestamp, duration_ms, operation, statement) as a bare array, no auth required for internal observability access.
+- SQL sanitizer in `backend/app/database.py` redacts password/token/secret/api_key/bearer literals and connection-string credentials before they reach the log, with statement length capped at 2000 chars.

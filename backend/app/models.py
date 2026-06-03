@@ -567,6 +567,16 @@ class AuditLog(Base):
     source: Mapped[str] = mapped_column(String(40), default="human", index=True)
 
 
+class SlowQueryLog(Base):
+    __tablename__ = "slow_query_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    duration_ms: Mapped[float] = mapped_column(Float, index=True)
+    operation: Mapped[str] = mapped_column(String(40), default="UNKNOWN", index=True)
+    statement: Mapped[str] = mapped_column(Text, default="")
+
+
 class WorkflowApplication(Base):
     __tablename__ = "workflow_applications"
 

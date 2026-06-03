@@ -860,6 +860,14 @@ class AuditLogListOut(BaseModel):
     pages: int
 
 
+class SlowQueryLogOut(BaseModel):
+    id: int
+    timestamp: str
+    duration_ms: float
+    operation: str
+    statement: str
+
+
 class WorkflowApplicationIn(BaseModel):
     type: str
     applicant: str = "material_manager"

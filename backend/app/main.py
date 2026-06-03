@@ -15,19 +15,28 @@ from functools import lru_cache, wraps
 from io import BytesIO, StringIO
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
+from threading import Lock
 from typing import Any, Callable
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from .database import Base, SessionLocal, engine, get_db
+from .database import (
+    Base,
+    SessionLocal,
+    engine,
+    finish_slow_query_capture,
+    get_db,
+    persist_slow_query_observations,
+    start_slow_query_capture,
+)
 from .migrations.sprint55_migrate_ai_config import run_sprint55_migration
 from .models import (
     Attribute,
@@ -61,6 +70,7 @@ from .models import (
     Role,
     RoleCodeSequence,
     RoleUser,
+    SlowQueryLog,
     SystemConfig,
     TracerSpan,
     User,
@@ -159,6 +169,7 @@ from .schemas import (
     SystemConfigIn,
     SystemIcon,
     SystemConfigOut,
+    SlowQueryLogOut,
     TraceDetailOut,
     TraceSummaryOut,
     UserIn,
@@ -181,6 +192,79 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_metrics_lock = Lock()
+_http_request_total: dict[tuple[str, str, str], int] = {}
+_http_request_duration_seconds: dict[tuple[str, str, str], dict[str, float]] = {}
+
+
+def _escape_prometheus_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _request_route_label(request: Request) -> str:
+    route = request.scope.get("route")
+    return str(getattr(route, "path", request.url.path))
+
+
+def _record_http_request_metric(method: str, route: str, status_code: int, duration_seconds: float) -> None:
+    key = (method.upper(), route, str(status_code))
+    with _metrics_lock:
+        _http_request_total[key] = _http_request_total.get(key, 0) + 1
+        duration = _http_request_duration_seconds.setdefault(key, {"count": 0.0, "sum": 0.0})
+        duration["count"] += 1.0
+        duration["sum"] += duration_seconds
+
+
+def _metric_labels(method: str, route: str, status_code: str) -> str:
+    return (
+        f'method="{_escape_prometheus_label(method)}",'
+        f'route="{_escape_prometheus_label(route)}",'
+        f'status_code="{_escape_prometheus_label(status_code)}"'
+    )
+
+
+def render_prometheus_metrics() -> str:
+    with _metrics_lock:
+        request_total = dict(_http_request_total)
+        request_durations = {key: dict(value) for key, value in _http_request_duration_seconds.items()}
+    lines = [
+        "# HELP http_requests_total Total HTTP requests handled by the FastAPI backend.",
+        "# TYPE http_requests_total counter",
+    ]
+    for (method, route, status_code), count in sorted(request_total.items()):
+        lines.append(f"http_requests_total{{{_metric_labels(method, route, status_code)}}} {count}")
+    lines.extend(
+        [
+            "# HELP http_request_duration_seconds HTTP request duration in seconds.",
+            "# TYPE http_request_duration_seconds summary",
+        ]
+    )
+    for (method, route, status_code), duration in sorted(request_durations.items()):
+        labels = _metric_labels(method, route, status_code)
+        lines.append(f"http_request_duration_seconds_count{{{labels}}} {int(duration['count'])}")
+        lines.append(f"http_request_duration_seconds_sum{{{labels}}} {duration['sum']:.9f}")
+    return "\n".join(lines) + "\n"
+
+
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next: Callable):
+    started_at = time.perf_counter()
+    token = start_slow_query_capture()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        observations = finish_slow_query_capture(token)
+        persist_slow_query_observations(observations)
+        _record_http_request_metric(
+            request.method,
+            _request_route_label(request),
+            status_code,
+            time.perf_counter() - started_at,
+        )
 
 
 @app.middleware("http")
@@ -621,6 +705,7 @@ PERMISSION_CATALOG = [
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_slow_query_schema()
     ensure_audit_log_schema()
     ensure_material_code_rule_schema()
     ensure_category_schema()
@@ -640,6 +725,11 @@ def startup() -> None:
         db.commit()
     finally:
         db.close()
+
+
+def ensure_slow_query_schema() -> None:
+    with engine.begin() as connection:
+        SlowQueryLog.__table__.create(bind=connection, checkfirst=True)
 
 
 def ensure_audit_log_schema() -> None:
@@ -1269,6 +1359,16 @@ def audit_to_out(log: AuditLog) -> AuditLogOut:
         after_value=redact_sensitive(safe_json_loads(log.after_value, {})),
         timestamp=log.timestamp.isoformat(),
         source=log.source,
+    )
+
+
+def slow_query_to_out(log: SlowQueryLog) -> SlowQueryLogOut:
+    return SlowQueryLogOut(
+        id=log.id,
+        timestamp=log.timestamp.isoformat(),
+        duration_ms=float(log.duration_ms),
+        operation=log.operation,
+        statement=log.statement,
     )
 
 
@@ -5094,6 +5194,11 @@ def health() -> dict[str, str]:
     return {"status": "ok", "version": API_VERSION}
 
 
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics() -> PlainTextResponse:
+    return PlainTextResponse(render_prometheus_metrics(), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/api/v1/health/qdrant")
 def qdrant_health(db: Session = Depends(get_db)) -> dict[str, Any]:
     payload = qdrant_health_payload()
@@ -7568,6 +7673,16 @@ def save_system_config(
     auth: AuthContext = Depends(require_api_permission("api.PUT./api/v1/system/config")),
 ) -> SystemConfigOut:
     return update_system_config(payload, db, auth)
+
+
+@app.get("/api/v1/observability/slow-queries", response_model=list[SlowQueryLogOut])
+def list_slow_queries(
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> list[SlowQueryLogOut]:
+    ensure_slow_query_schema()
+    logs = db.query(SlowQueryLog).order_by(SlowQueryLog.id.desc()).limit(limit).all()
+    return [slow_query_to_out(log) for log in logs]
 
 
 def audit_query(
