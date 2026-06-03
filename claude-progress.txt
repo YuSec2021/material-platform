@@ -1,21 +1,16 @@
-Project summary: Sprints 1-57 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. AI model config uses unified Model+CapabilityMapping tables.
+Project summary: Sprints 1-59 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Sprint 59 added backend observability (Prometheus /metrics + slow SQL log).
+
+Sprint 59: Backend observability metrics and slow SQL logging
+Status: SPRINT PASS (2026-06-04). Implemented Prometheus /metrics endpoint with request count + duration, SQLAlchemy before/after_cursor_execute listeners, slow_query_log table with SQL sanitizer, and /api/v1/observability/slow-queries read API.
+Verification: 4/4 criteria PASS; sprint59 pytest (4/4), vite build clean, tsc src clean; non-AI regression 107/107.
+Commit handoff: merged to main, version bumped to v16.0.0 (major_feature → MAJOR).
 
 Sprint 58: Category tree virtualization and paginated lazy loading
-Status: implemented, not committed per user instruction. Added categories API limit/offset defaults, 200-row lazy root/child loading, and bounded virtualized tree rendering with evaluator test id.
-Verification: in-process backend smoke passed; Sprint 58 API pagination tests passed; focused compatibility API checks passed; frontend build passed. Full type-check/pytest still hit existing adapter/git-signing/legacy AI config failures.
-Commit handoff: wrote .sprintfoundry/commit-requests/sprint-58.json for Orchestrator commit; did not run git add, git commit, or write eval-trigger.txt.
+Status: SPRINT PASS (2026-06-01). Implemented virtualized category tree, 200-row lazy-load batches, /api/v1/categories limit/offset, React.memo, and path cache.
+Verification: 4/4 criteria PASS; sprint58 pytest, Vite build, and tsc src clean.
+Commit handoff: implemented and merged.
 
 Sprint 57: Category attributes panel layout fix
-Status: SPRINT PASS. Moved CategoryPropertiesPanel from the left tree aside into the right category content container below the category table area.
+Status: SPRINT PASS. Moved CategoryPropertiesPanel into the right category content container below the category table area.
 Verification: evaluator passed after layout fix; local frontend build passed. Playwright remained sandbox-limited locally.
 Commit handoff: merged to main after PASS.
-
-Sprint 56: Category import XLSX/XLS support
-Status: SPRINT PASS. Backend accepts CSV/XLSX/XLS uploads; frontend picker accepts all three and sends spreadsheets as files.
-Verification: Sprint 56 API tests passed; CSV compatibility import checks passed; frontend build passed.
-Commit handoff: merged to main after PASS.
-
-Sprint 58: Category tree virtualization + backend pagination
-Status: SPRINT PASS (2026-06-01). Implemented react-arborist-style scroll-windowed virtual tree (no react-arborist dep) + 200-row lazy-load batches + limit/offset on /api/v1/categories + React.memo on VirtualizedCategoryTree + useMemo path cache. data-testid=category-tree-virtualized added. All 4 criteria PASS. Bumped to v15.0.0.
-Verification: 4/4 criteria PASS. 2/2 sprint58 pytest, vite build pass, tsc src clean.
-Commit handoff: implemented and merged.

@@ -9,5 +9,7 @@
 
 | 58 | 类目树虚拟化与后端分页懒加载 | PASS | v15.0.0 | 2026-06-01 | minor_feature |
 
-## Latest version: v15.0.0
-## Max sprint ID: 58
+| 59 | 后端基础设施观测性：Prometheus 指标 + 慢 SQL 日志 | PASS | v16.0.0 | 2026-06-04 | major_feature |
+
+## Latest version: v16.0.0
+## Max sprint ID: 59
