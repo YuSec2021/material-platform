@@ -13,5 +13,7 @@
 
 | 60 | 前端 web-vitals 性能上报到后端 | PASS | v16.1.0 | 2026-06-04 | minor_feature |
 
-## Latest version: v16.1.0
-## Max sprint ID: 60
+| 61 | AI 链路观测性：token 用量、cost、prompt 版本 | PASS | v16.2.0 | 2026-06-04 | minor_feature |
+
+## Latest version: v16.2.0
+## Max sprint ID: 61

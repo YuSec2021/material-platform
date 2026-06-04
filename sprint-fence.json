@@ -1,6 +1,6 @@
 {
-  "sprint": 60,
-  "base_commit": "d4b3796",
-  "active_branch": "codex/sprint-60-frontend-web-vitals",
+  "sprint": 61,
+  "base_commit": "3c465dc",
+  "active_branch": "codex/sprint-61-ai-observability",
   "base_branch": "main"
 }
