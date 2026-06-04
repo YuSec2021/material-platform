@@ -1,4 +1,9 @@
-Project summary: Sprints 1-59 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Sprint 59 added backend observability (Prometheus /metrics + slow SQL log).
+Project summary: Sprints 1-60 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Sprints 59-60 added observability (Prometheus /metrics + slow SQL log + web-vitals telemetry).
+
+Sprint 60: Frontend web-vitals performance telemetry to backend
+Status: SPRINT PASS (2026-06-04). Implemented web-vitals@3.5.2 frontend listeners, POST /api/v1/telemetry/web-vitals with Pydantic Literal allowlist, telemetry_web_vitals table, and GET /api/v1/telemetry/web-vitals?client_metric_id=... read endpoint.
+Verification: 4/4 criteria PASS; sprint60 pytest (2/2), vite build clean, tsc src clean; non-AI regression 109/109.
+Commit handoff: merged to main, version bumped to v16.1.0 (minor_feature → MINOR).
 
 Sprint 59: Backend observability metrics and slow SQL logging
 Status: SPRINT PASS (2026-06-04). Implemented Prometheus /metrics endpoint with request count + duration, SQLAlchemy before/after_cursor_execute listeners, slow_query_log table with SQL sanitizer, and /api/v1/observability/slow-queries read API.
