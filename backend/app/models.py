@@ -577,6 +577,22 @@ class SlowQueryLog(Base):
     statement: Mapped[str] = mapped_column(Text, default="")
 
 
+class TelemetryWebVital(Base):
+    __tablename__ = "telemetry_web_vitals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    metric: Mapped[str] = mapped_column(String(16), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    rating: Mapped[str] = mapped_column(String(40), default="")
+    client_metric_id: Mapped[str] = mapped_column(String(160), index=True)
+    navigation_type: Mapped[str] = mapped_column(String(80), default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+    path: Mapped[str] = mapped_column(String(500), default="", index=True)
+    user_agent: Mapped[str] = mapped_column(Text, default="")
+    timestamp: Mapped[str] = mapped_column(String(80), default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class WorkflowApplication(Base):
     __tablename__ = "workflow_applications"
 

@@ -11,5 +11,7 @@
 
 | 59 | 后端基础设施观测性：Prometheus 指标 + 慢 SQL 日志 | PASS | v16.0.0 | 2026-06-04 | major_feature |
 
-## Latest version: v16.0.0
-## Max sprint ID: 59
+| 60 | 前端 web-vitals 性能上报到后端 | PASS | v16.1.0 | 2026-06-04 | minor_feature |
+
+## Latest version: v16.1.0
+## Max sprint ID: 60

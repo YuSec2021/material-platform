@@ -162,3 +162,10 @@
 - SQLAlchemy `before_cursor_execute`/`after_cursor_execute` listeners record query duration per statement; queries exceeding the slow threshold (default 200 ms, configurable via `SLOW_SQL_THRESHOLD_MS`) are persisted to a new `slow_query_log` table with sanitized SQL.
 - Read-only `/api/v1/observability/slow-queries?limit=` endpoint returns recent `slow_query_log` rows (id, timestamp, duration_ms, operation, statement) as a bare array, no auth required for internal observability access.
 - SQL sanitizer in `backend/app/database.py` redacts password/token/secret/api_key/bearer literals and connection-string credentials before they reach the log, with statement length capped at 2000 chars.
+
+## v16.1.0 — Sprint 60 [MINOR bump]
+- Frontend `web-vitals@3.5.2` dependency added; `onLCP`/`onCLS`/`onINP`/`onFID`/`onTTFB` listeners in `src/main.tsx` forward real-user-metrics payloads to the backend.
+- Backend `POST /api/v1/telemetry/web-vitals` accepts `{metric, value, rating, client_metric_id, navigation_type, url, path, user_agent, timestamp}` and returns 201 with the persisted record (echoed fields + server id).
+- Pydantic `Literal["LCP","CLS","INP","FID","TTFB"]` allowlist on the `metric` field: invalid metrics return 422 with field-level error and are not persisted.
+- New `telemetry_web_vitals` SQLAlchemy table (indexed on metric, client_metric_id, path, timestamp) survives backend restart.
+- `GET /api/v1/telemetry/web-vitals?client_metric_id=...` returns matching records for evaluator verification and operator lookup.
