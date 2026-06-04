@@ -792,6 +792,53 @@ class CapabilityMappingOut(BaseModel):
 class GatewayInvokeIn(BaseModel):
     prompt: str = "Sprint 10 gateway test"
     messages: list[dict[str, Any]] = Field(default_factory=list)
+    template_key: str | None = None
+    template_variables: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiCapabilityPriceIn(BaseModel):
+    prompt_price_per_1k_cny: float = Field(ge=0)
+    completion_price_per_1k_cny: float = Field(ge=0)
+    currency: str = "CNY"
+    enabled: bool = True
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized != "CNY":
+            raise ValueError("currency must be CNY")
+        return normalized
+
+
+class AiCapabilityPriceRead(BaseModel):
+    id: int
+    capability: str
+    prompt_price_per_1k_cny: float
+    completion_price_per_1k_cny: float
+    currency: str
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class AiPromptTemplateIn(BaseModel):
+    template_key: str
+    capability: str
+    prompt_version: str
+    content: str
+    enabled: bool = True
+
+
+class AiPromptTemplateRead(BaseModel):
+    id: int
+    template_key: str
+    capability: str
+    prompt_version: str
+    content: str
+    enabled: bool
+    created_at: str
+    updated_at: str
 
 
 class TraceSummaryOut(BaseModel):

@@ -42,6 +42,8 @@ from .models import (
     Attribute,
     AttributeChange,
     AIAgentConfig,
+    AiCapabilityPrice,
+    AiPromptTemplate,
     AuditLog,
     Brand,
     CapabilityAgentMapping,
@@ -81,6 +83,13 @@ from .models import (
 from .schemas import (
     AiMaterialAddConfirmIn,
     AiMaterialAddPreviewIn,
+    AiCapabilityPriceIn,
+    AiCapabilityPriceRead,
+    AiPromptTemplateIn,
+    AiPromptTemplateRead,
+    AgentConfigIn,
+    AgentConfigOut,
+    AgentConfigTestOut,
     AuditLogListOut,
     AuditLogOut,
     AuthLoginIn,
@@ -150,6 +159,8 @@ from .schemas import (
     RecodePreviewIn,
     PermissionEntry,
     PasswordResetOut,
+    ProviderConfigIn,
+    ProviderConfigOut,
     EvaluateRequest,
     EvaluateResponse,
     EvaluateResult,
@@ -1570,6 +1581,135 @@ def gateway_connection_status(status: str | None) -> str:
     return "untested"
 
 
+def ai_capability_price_to_read(price: AiCapabilityPrice) -> AiCapabilityPriceRead:
+    return AiCapabilityPriceRead(
+        id=price.id,
+        capability=price.capability,
+        prompt_price_per_1k_cny=price.prompt_price_per_1k_cny,
+        completion_price_per_1k_cny=price.completion_price_per_1k_cny,
+        currency=price.currency,
+        enabled=price.enabled,
+        created_at=price.created_at.isoformat(),
+        updated_at=price.updated_at.isoformat(),
+    )
+
+
+def ai_prompt_template_to_read(template: AiPromptTemplate) -> AiPromptTemplateRead:
+    return AiPromptTemplateRead(
+        id=template.id,
+        template_key=template.template_key,
+        capability=template.capability,
+        prompt_version=template.prompt_version,
+        content=template.content,
+        enabled=template.enabled,
+        created_at=template.created_at.isoformat(),
+        updated_at=template.updated_at.isoformat(),
+    )
+
+
+def ai_capability_price_snapshot(price: AiCapabilityPrice) -> dict[str, Any]:
+    return ai_capability_price_to_read(price).model_dump()
+
+
+def ai_prompt_template_snapshot(template: AiPromptTemplate) -> dict[str, Any]:
+    return ai_prompt_template_to_read(template).model_dump()
+
+
+def active_capability_price_trace_metadata(db: Session, capability: str) -> dict[str, Any]:
+    price = (
+        db.query(AiCapabilityPrice)
+        .filter(AiCapabilityPrice.capability == capability, AiCapabilityPrice.enabled.is_(True))
+        .order_by(AiCapabilityPrice.updated_at.desc(), AiCapabilityPrice.id.desc())
+        .first()
+    )
+    if not price:
+        return {}
+    return {
+        "price_source": "ai_capability_prices",
+        "price_id": price.id,
+        "price_capability": price.capability,
+        "price_currency": price.currency,
+        "prompt_price_per_1k_cny": price.prompt_price_per_1k_cny,
+        "completion_price_per_1k_cny": price.completion_price_per_1k_cny,
+    }
+
+
+def extract_openai_usage(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+
+    def int_token(name: str) -> int | None:
+        value = usage.get(name)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, str) and value.strip().isdigit():
+            return max(0, int(value.strip()))
+        return None
+
+    prompt_tokens = int_token("prompt_tokens")
+    completion_tokens = int_token("completion_tokens")
+    total_tokens = int_token("total_tokens")
+    if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+        return {}
+    if prompt_tokens is None:
+        prompt_tokens = 0
+    if completion_tokens is None:
+        completion_tokens = 0
+    if total_tokens is None:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def calculate_trace_cost_cny(usage: dict[str, int], metadata: dict[str, Any]) -> float | None:
+    if not usage or metadata.get("price_currency") != "CNY":
+        return None
+    prompt_price = metadata.get("prompt_price_per_1k_cny")
+    completion_price = metadata.get("completion_price_per_1k_cny")
+    if prompt_price is None or completion_price is None:
+        return None
+    cost = (usage["prompt_tokens"] / 1000 * float(prompt_price)) + (
+        usage["completion_tokens"] / 1000 * float(completion_price)
+    )
+    return round(cost, 6)
+
+
+def model_result_trace_metadata(result: Any, base_metadata: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else extract_openai_usage(result.get("raw"))
+    if not usage:
+        return {}
+    metadata: dict[str, Any] = {
+        "prompt_tokens": usage["prompt_tokens"],
+        "completion_tokens": usage["completion_tokens"],
+        "total_tokens": usage["total_tokens"],
+    }
+    cost_cny = calculate_trace_cost_cny(usage, base_metadata)
+    if cost_cny is not None:
+        metadata["cost_cny"] = cost_cny
+    return metadata
+
+
+def render_prompt_template(content: str, variables: dict[str, Any]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        value = variables.get(key, "")
+        return "" if value is None else str(value)
+
+    return re.sub(r"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}", replace, content)
+
+
 def ensure_model_gateway_schema(db: Session) -> None:
     Base.metadata.create_all(bind=engine)
     # Migration sprint55_run_once already ran during sprint 55 deployment.
@@ -1985,6 +2125,10 @@ def model_for_capability(db: Session, capability: str, prefer_fallback: bool = F
         db.commit()
         raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
 
+    legacy_resolution = legacy_resolution_for_capability(db, capability, prefer_fallback)
+    if legacy_resolution:
+        return legacy_resolution
+
     raise CapabilityResolutionError(capability, f"No usable model is configured for capability {capability}")
 
 
@@ -2165,7 +2309,7 @@ def trace(operation_name: str, span_type: str = "chain") -> Callable:
             )
             try:
                 result = func(*args, **kwargs)
-                collector.finish_span(span_id, "ok")
+                collector.finish_span(span_id, "ok", metadata=model_result_trace_metadata(result, kwargs.get("metadata") or {}))
                 return result
             except Exception as exc:
                 collector.finish_span(span_id, "error", str(exc))
@@ -2248,6 +2392,7 @@ def call_model_config(
         "provider": model_config.provider,
         "model": model_config.model_name,
         "latency_ms": elapsed_ms,
+        "usage": extract_openai_usage(body),
         "raw": body,
     }
 
@@ -2276,13 +2421,17 @@ def invoke_gateway_capability(
     capability: str,
     prompt: str,
     messages: list[dict[str, Any]] | None = None,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     collector = SpanCollector(f"gateway.{capability}", capability)
     attempted: list[dict[str, Any]] = []
+    invocation_metadata = trace_metadata or {}
+    price_metadata = active_capability_price_trace_metadata(db, capability)
+    common_trace_metadata = {**invocation_metadata, **price_metadata}
     try:
         resolution = model_for_capability(db, capability)
         primary = resolution.model
-        mark_root_trace_model(collector, primary, primary.model_name, resolution_trace_metadata(resolution))
+        mark_root_trace_model(collector, primary, primary.model_name, {**resolution_trace_metadata(resolution), **common_trace_metadata})
         if resolution.source == "fallback" and resolution.primary_connection_error:
             attempted.append(
                 {
@@ -2299,13 +2448,17 @@ def invoke_gateway_capability(
                 messages=messages or [],
                 capability=capability,
                 collector=collector,
-                metadata={"role": resolution.source, **resolution_trace_metadata(resolution)},
+                metadata={"role": resolution.source, **resolution_trace_metadata(resolution), **common_trace_metadata},
             )
             attempted.append({"model_id": primary.id, "model": primary.model_name, "status": "ok"})
             collector.finish_span(
                 collector.root_span_id,
                 "ok",
-                metadata={"fallback_used": resolution.source == "fallback", **resolution_trace_metadata(resolution)},
+                metadata={
+                    "fallback_used": resolution.source == "fallback",
+                    **resolution_trace_metadata(resolution),
+                    **common_trace_metadata,
+                },
             )
             return {
                 "capability": capability,
@@ -2315,6 +2468,7 @@ def invoke_gateway_capability(
                 "model_id": primary.id,
                 "resolution_source": "capability_mapping",
                 "content": result["content"],
+                "prompt": prompt,
                 "raw": result.get("raw", {}),
                 "fallback_used": resolution.source == "fallback",
                 "fallback_reason": resolution.primary_connection_error,
@@ -2350,13 +2504,18 @@ def invoke_gateway_capability(
                 messages=messages or [],
                 capability=capability,
                 collector=collector,
-                metadata={"role": "fallback", **resolution_trace_metadata(fallback_resolution)},
+                metadata={"role": "fallback", **resolution_trace_metadata(fallback_resolution), **common_trace_metadata},
             )
             attempted.append({"model_id": fallback.id, "model": fallback.model_name, "status": "ok"})
             collector.finish_span(
                 collector.root_span_id,
                 "ok",
-                metadata={"fallback_used": True, "fallback_reason": str(primary_error), **resolution_trace_metadata(fallback_resolution)},
+                metadata={
+                    "fallback_used": True,
+                    "fallback_reason": str(primary_error),
+                    **resolution_trace_metadata(fallback_resolution),
+                    **common_trace_metadata,
+                },
             )
             return {
                 "capability": capability,
@@ -2366,6 +2525,7 @@ def invoke_gateway_capability(
                 "model_id": fallback.id,
                 "resolution_source": fallback_resolution.source,
                 "content": result["content"],
+                "prompt": prompt,
                 "raw": result.get("raw", {}),
                 "fallback_used": True,
                 "fallback_reason": str(primary_error),
@@ -8973,6 +9133,269 @@ def run_model_gateway_migration(
     return run_sprint55_migration(db)
 
 
+@app.get("/api/v1/ai/providers", response_model=list[ProviderConfigOut])
+def list_ai_providers(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[ProviderConfigOut]:
+    current_auth(request, db)
+    ensure_provider_configs(db)
+    providers = db.query(ModelConfig).order_by(ModelConfig.enabled.desc(), ModelConfig.id.desc()).all()
+    return [provider_to_out(provider, db) for provider in providers]
+
+
+@app.post("/api/v1/ai/providers", response_model=ProviderConfigOut)
+def create_ai_provider(
+    payload: ProviderConfigIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ProviderConfigOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_provider_configs(db)
+    provider = ModelConfig()
+    db.add(provider)
+    try:
+        apply_model_payload(db, provider, payload)
+    except Exception:
+        db.rollback()
+        raise
+    add_audit_log(db, auth, "ai_provider", "create", {}, provider_to_out(provider, db).model_dump(), "human")
+    db.commit()
+    db.refresh(provider)
+    return provider_to_out(provider, db)
+
+
+@app.post("/api/v1/ai/providers/test")
+def test_ai_provider(payload: ProviderConfigIn) -> dict[str, Any]:
+    values = model_values_from_payload(payload)
+    provider = ModelConfig(**{key: value for key, value in values.items() if key != "fallback_model_id"})
+    if payload.api_key and not payload.api_key.startswith("**"):
+        provider.encrypted_api_key = encrypt_api_key(payload.api_key)
+    result = test_model_connection(provider)
+    return {
+        "ok": bool(result["ok"]),
+        "status": "ok" if result["ok"] else "error",
+        "message": str(result["message"]),
+        "provider": provider.provider,
+        "model": provider.model_name,
+    }
+
+
+@app.get("/api/v1/ai/providers/{provider_id}", response_model=ProviderConfigOut)
+def get_ai_provider(
+    provider_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ProviderConfigOut:
+    current_auth(request, db)
+    provider = db.get(ModelConfig, provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="AI provider not found")
+    return provider_to_out(provider, db)
+
+
+@app.get("/api/v1/ai/agent-configs", response_model=list[AgentConfigOut])
+def list_ai_agent_configs(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AgentConfigOut]:
+    current_auth(request, db)
+    configs = db.query(AIAgentConfig).order_by(AIAgentConfig.enabled.desc(), AIAgentConfig.id.desc()).all()
+    return [agent_config_to_out(config) for config in configs]
+
+
+@app.post("/api/v1/ai/agent-configs", response_model=AgentConfigOut)
+def create_ai_agent_config(
+    payload: AgentConfigIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    config = AIAgentConfig(connection_status="untested")
+    db.add(config)
+    try:
+        apply_agent_payload(config, payload)
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
+    add_audit_log(db, auth, "ai_agent_config", "create", {}, agent_config_to_out(config).model_dump(), "human")
+    db.commit()
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.put("/api/v1/ai/agent-configs/{config_id}", response_model=AgentConfigOut)
+def update_ai_agent_config(
+    config_id: int,
+    payload: AgentConfigIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Agent config not found")
+    before = agent_config_to_out(config).model_dump()
+    apply_agent_payload(config, payload)
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="config_key must be unique") from exc
+    add_audit_log(db, auth, "ai_agent_config", "update", before, agent_config_to_out(config).model_dump(), "human")
+    db.commit()
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.patch("/api/v1/ai/agent-configs/{config_id}/toggle", response_model=AgentConfigOut)
+def toggle_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Agent config not found")
+    before = agent_config_to_out(config).model_dump()
+    config.enabled = not config.enabled
+    config.updated_at = now()
+    add_audit_log(db, auth, "ai_agent_config", "toggle", before, agent_config_to_out(config).model_dump(), "human")
+    db.commit()
+    db.refresh(config)
+    return agent_config_to_out(config)
+
+
+@app.get("/api/v1/ai/agent-configs/{config_id}/test", response_model=AgentConfigTestOut)
+def test_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AgentConfigTestOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Agent config not found")
+    result = test_agent_config_connection(config)
+    db.commit()
+    return AgentConfigTestOut(
+        ok=bool(result["ok"]),
+        status=config.connection_status,
+        message=str(result["message"]),
+        provider=config.provider,
+        model=config.model_name,
+        last_test_at=config.last_test_at.isoformat() if config.last_test_at else None,
+    )
+
+
+@app.delete("/api/v1/ai/agent-configs/{config_id}")
+def delete_ai_agent_config(
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    config = db.get(AIAgentConfig, config_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Agent config not found")
+    before = agent_config_to_out(config).model_dump()
+    for mapping in db.query(CapabilityAgentMapping).filter(
+        or_(
+            CapabilityAgentMapping.agent_config_id == config.id,
+            CapabilityAgentMapping.fallback_agent_config_id == config.id,
+        )
+    ).all():
+        db.delete(mapping)
+    db.delete(config)
+    add_audit_log(db, auth, "ai_agent_config", "delete", before, {}, "human")
+    db.commit()
+    return {"deleted": True, "id": config_id}
+
+
+@app.put("/api/v1/ai/capability-mappings/{capability}", response_model=CapabilityMappingOut)
+def upsert_legacy_ai_capability_mapping(
+    capability: str,
+    payload: CapabilityMappingIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CapabilityMappingOut:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_provider_configs(db)
+    normalized_capability = compact_space(payload.capability or capability)
+    if normalized_capability not in AI_CAPABILITIES:
+        raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    if payload.agent_config_id or payload.fallback_agent_config_id:
+        if payload.agent_config_id and payload.fallback_agent_config_id and payload.agent_config_id == payload.fallback_agent_config_id:
+            raise HTTPException(status_code=422, detail="Fallback agent must be different from primary agent")
+        primary_agent = db.get(AIAgentConfig, payload.agent_config_id) if payload.agent_config_id else None
+        fallback_agent = db.get(AIAgentConfig, payload.fallback_agent_config_id) if payload.fallback_agent_config_id else None
+        if payload.agent_config_id and not primary_agent:
+            raise HTTPException(status_code=404, detail="Primary agent config not found")
+        if payload.fallback_agent_config_id and not fallback_agent:
+            raise HTTPException(status_code=404, detail="Fallback agent config not found")
+        mapping = db.query(CapabilityAgentMapping).filter(CapabilityAgentMapping.capability == normalized_capability).first()
+        before = agent_mapping_to_out(mapping).model_dump() if mapping else {}
+        if not mapping:
+            mapping = CapabilityAgentMapping(capability=normalized_capability)
+            db.add(mapping)
+        mapping.agent_config_id = payload.agent_config_id
+        mapping.fallback_agent_config_id = payload.fallback_agent_config_id
+        mapping.enabled = payload.enabled
+        mapping.updated_at = now()
+        db.flush()
+        sync_gateway_mapping_from_legacy_agents(db, normalized_capability, primary_agent, fallback_agent, payload.enabled)
+        add_audit_log(db, auth, "ai_capability_mapping", "upsert", before, agent_mapping_to_out(mapping).model_dump(), "human")
+        db.commit()
+        db.refresh(mapping)
+        return agent_mapping_to_out(mapping)
+    if payload.primary_model_id and payload.fallback_model_id and payload.primary_model_id == payload.fallback_model_id:
+        raise HTTPException(status_code=422, detail="Fallback model must be different from primary model")
+    primary = db.get(ModelConfig, payload.primary_model_id) if payload.primary_model_id else None
+    fallback = db.get(ModelConfig, payload.fallback_model_id) if payload.fallback_model_id else None
+    if payload.primary_model_id and not primary:
+        raise HTTPException(status_code=404, detail="Primary model not found")
+    if payload.fallback_model_id and not fallback:
+        raise HTTPException(status_code=404, detail="Fallback model not found")
+    mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == normalized_capability).first()
+    before = mapping_to_out(mapping).model_dump() if mapping else {}
+    if not mapping:
+        mapping = CapabilityModelMapping(capability=normalized_capability)
+        db.add(mapping)
+    mapping.primary_model_id = payload.primary_model_id
+    mapping.fallback_model_id = payload.fallback_model_id
+    mapping.enabled = payload.enabled
+    mapping.updated_at = now()
+    db.flush()
+    sync_gateway_mapping_from_legacy_models(db, normalized_capability, primary, fallback, payload.enabled)
+    add_audit_log(db, auth, "ai_capability_mapping", "upsert", before, mapping_to_out(mapping).model_dump(), "human")
+    db.commit()
+    db.refresh(mapping)
+    return mapping_to_out(mapping)
+
+
+@app.get("/api/v1/ai/capability-mappings/{capability}", response_model=CapabilityMappingOut)
+def get_legacy_ai_capability_mapping(
+    capability: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CapabilityMappingOut:
+    current_auth(request, db)
+    ensure_provider_configs(db)
+    mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == compact_space(capability)).first()
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Capability mapping not found")
+    return mapping_to_out(mapping)
+
+
 @app.get("/api/v1/models", response_model=list[ModelRead])
 def list_models(
     page: int = Query(1, ge=1),
@@ -9248,6 +9671,112 @@ def delete_gateway_capability_mapping(
     return {"deleted": True, "id": mapping_id}
 
 
+@app.put("/api/v1/ai/capability-prices/{capability}", response_model=AiCapabilityPriceRead)
+def upsert_ai_capability_price(
+    capability: str,
+    payload: AiCapabilityPriceIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AiCapabilityPriceRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    normalized_capability = compact_space(capability)
+    if not normalized_capability:
+        raise HTTPException(status_code=422, detail="capability is required")
+    before: dict[str, Any] = {}
+    price = db.query(AiCapabilityPrice).filter(AiCapabilityPrice.capability == normalized_capability).first()
+    if price:
+        before = ai_capability_price_snapshot(price)
+    else:
+        price = AiCapabilityPrice(capability=normalized_capability)
+        db.add(price)
+    price.prompt_price_per_1k_cny = payload.prompt_price_per_1k_cny
+    price.completion_price_per_1k_cny = payload.completion_price_per_1k_cny
+    price.currency = payload.currency
+    price.enabled = payload.enabled
+    price.updated_at = now()
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="capability price must be unique") from exc
+    add_audit_log(db, auth, "ai_capability_price", "upsert", before, ai_capability_price_snapshot(price), "human")
+    db.commit()
+    db.refresh(price)
+    return ai_capability_price_to_read(price)
+
+
+@app.get("/api/v1/ai/capability-prices/{capability}", response_model=AiCapabilityPriceRead)
+def get_ai_capability_price(
+    capability: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AiCapabilityPriceRead:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    normalized_capability = compact_space(capability)
+    price = db.query(AiCapabilityPrice).filter(AiCapabilityPrice.capability == normalized_capability).first()
+    if not price:
+        raise HTTPException(status_code=404, detail="Capability price not found")
+    return ai_capability_price_to_read(price)
+
+
+@app.post("/api/v1/ai/prompt-templates", response_model=AiPromptTemplateRead, status_code=201)
+def upsert_ai_prompt_template(
+    payload: AiPromptTemplateIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AiPromptTemplateRead:
+    auth = current_auth(request, db)
+    require_super_admin(auth)
+    ensure_model_gateway_schema(db)
+    template_key = compact_space(payload.template_key)
+    capability = compact_space(payload.capability)
+    prompt_version = compact_space(payload.prompt_version)
+    if not template_key:
+        raise HTTPException(status_code=422, detail="template_key is required")
+    if capability not in AI_CAPABILITIES:
+        raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    if not prompt_version:
+        raise HTTPException(status_code=422, detail="prompt_version is required")
+    before: dict[str, Any] = {}
+    template = db.query(AiPromptTemplate).filter(AiPromptTemplate.template_key == template_key).first()
+    if template:
+        before = ai_prompt_template_snapshot(template)
+    else:
+        template = AiPromptTemplate(template_key=template_key)
+        db.add(template)
+    template.capability = capability
+    template.prompt_version = prompt_version
+    template.content = payload.content
+    template.enabled = payload.enabled
+    template.updated_at = now()
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="template_key must be unique") from exc
+    add_audit_log(db, auth, "ai_prompt_template", "upsert", before, ai_prompt_template_snapshot(template), "human")
+    db.commit()
+    db.refresh(template)
+    return ai_prompt_template_to_read(template)
+
+
+@app.get("/api/v1/ai/prompt-templates/{template_key}", response_model=AiPromptTemplateRead)
+def get_ai_prompt_template(
+    template_key: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AiPromptTemplateRead:
+    current_auth(request, db)
+    ensure_model_gateway_schema(db)
+    template = db.query(AiPromptTemplate).filter(AiPromptTemplate.template_key == compact_space(template_key)).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Prompt template not found")
+    return ai_prompt_template_to_read(template)
+
+
 @app.post("/api/v1/ai/capabilities/{capability}/invoke")
 def invoke_ai_capability(
     capability: str,
@@ -9257,8 +9786,30 @@ def invoke_ai_capability(
 ) -> dict[str, Any]:
     if capability not in AI_CAPABILITIES:
         raise HTTPException(status_code=422, detail="Unsupported AI capability")
+    prompt = payload.prompt
+    messages = payload.messages
+    trace_metadata: dict[str, Any] = {}
+    if payload.template_key:
+        ensure_model_gateway_schema(db)
+        template = (
+            db.query(AiPromptTemplate)
+            .filter(AiPromptTemplate.template_key == compact_space(payload.template_key), AiPromptTemplate.enabled.is_(True))
+            .first()
+        )
+        if not template:
+            raise HTTPException(status_code=404, detail="Prompt template not found")
+        if template.capability != capability:
+            raise HTTPException(status_code=422, detail="Prompt template capability does not match invocation capability")
+        prompt = render_prompt_template(template.content, payload.template_variables)
+        if not messages:
+            messages = [{"role": "user", "content": prompt}]
+        trace_metadata = {
+            "template_key": template.template_key,
+            "prompt_version": template.prompt_version,
+            "rendered_prompt": prompt,
+        }
     try:
-        return invoke_gateway_capability(db, capability, payload.prompt, payload.messages)
+        return invoke_gateway_capability(db, capability, prompt, messages, trace_metadata)
     except CapabilityResolutionError as exc:
         raise capability_resolution_http_error(exc) from exc
 
@@ -9314,25 +9865,44 @@ def get_trace_detail(
     spans = db.query(TracerSpan).filter(TracerSpan.trace_id == trace_id).order_by(TracerSpan.start_time).all()
     if not spans:
         raise HTTPException(status_code=404, detail="Trace not found")
+    detail_spans: list[dict[str, Any]] = []
+    for span in spans:
+        metadata = json.loads(span.metadata_json or "{}")
+        span_payload = {
+            "span_id": span.span_id,
+            "parent_span_id": span.parent_span_id,
+            "operation_name": span.operation_name,
+            "span_type": span.span_type,
+            "capability": span.capability,
+            "provider": span.provider,
+            "model": span.model,
+            "status": span.status,
+            "start_time": span.start_time.isoformat(),
+            "duration_ms": span.duration_ms,
+            "metadata": metadata,
+            "error": span.error,
+        }
+        for key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cost_cny",
+            "price_source",
+            "price_id",
+            "price_capability",
+            "price_currency",
+            "prompt_price_per_1k_cny",
+            "completion_price_per_1k_cny",
+            "template_key",
+            "prompt_version",
+            "rendered_prompt",
+        ):
+            if key in metadata:
+                span_payload[key] = metadata[key]
+        detail_spans.append(span_payload)
     return TraceDetailOut(
         trace_id=trace_id,
-        spans=[
-            {
-                "span_id": span.span_id,
-                "parent_span_id": span.parent_span_id,
-                "operation_name": span.operation_name,
-                "span_type": span.span_type,
-                "capability": span.capability,
-                "provider": span.provider,
-                "model": span.model,
-                "status": span.status,
-                "start_time": span.start_time.isoformat(),
-                "duration_ms": span.duration_ms,
-                "metadata": json.loads(span.metadata_json or "{}"),
-                "error": span.error,
-            }
-            for span in spans
-        ],
+        spans=detail_spans,
     )
 
 

@@ -524,6 +524,37 @@ class CapabilityMapping(Base):
     )
 
 
+class AiCapabilityPrice(Base):
+    __tablename__ = "ai_capability_prices"
+    __table_args__ = (UniqueConstraint("capability", name="uq_ai_capability_prices_capability"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    capability: Mapped[str] = mapped_column(String(80), index=True)
+    prompt_price_per_1k_cny: Mapped[float] = mapped_column(Float, default=0.0)
+    completion_price_per_1k_cny: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(12), default="CNY")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AiPromptTemplate(Base):
+    __tablename__ = "ai_prompt_templates"
+    __table_args__ = (
+        UniqueConstraint("template_key", name="uq_ai_prompt_templates_template_key"),
+        Index("ix_ai_prompt_templates_capability_enabled", "capability", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    template_key: Mapped[str] = mapped_column(String(120), index=True)
+    capability: Mapped[str] = mapped_column(String(80), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(80), default="", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TracerSpan(Base):
     __tablename__ = "tracer_spans"
 
