@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -866,6 +866,26 @@ class SlowQueryLogOut(BaseModel):
     duration_ms: float
     operation: str
     statement: str
+
+
+WebVitalMetricName = Literal["LCP", "CLS", "INP", "FID", "TTFB"]
+
+
+class WebVitalsTelemetryIn(BaseModel):
+    metric: WebVitalMetricName
+    value: float
+    rating: str
+    client_metric_id: str
+    navigation_type: str
+    url: str
+    path: str
+    user_agent: str
+    timestamp: str
+
+
+class WebVitalsTelemetryOut(WebVitalsTelemetryIn):
+    id: int
+    created_at: str
 
 
 class WorkflowApplicationIn(BaseModel):

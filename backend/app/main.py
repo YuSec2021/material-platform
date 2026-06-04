@@ -72,6 +72,7 @@ from .models import (
     RoleUser,
     SlowQueryLog,
     SystemConfig,
+    TelemetryWebVital,
     TracerSpan,
     User,
     WorkflowApplication,
@@ -176,6 +177,8 @@ from .schemas import (
     UserOut,
     UserSummaryOut,
     UserUpdate,
+    WebVitalsTelemetryIn,
+    WebVitalsTelemetryOut,
     WorkflowActionIn,
     WorkflowApplicationIn,
     WorkflowApplicationOut,
@@ -706,6 +709,7 @@ PERMISSION_CATALOG = [
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_slow_query_schema()
+    ensure_web_vitals_schema()
     ensure_audit_log_schema()
     ensure_material_code_rule_schema()
     ensure_category_schema()
@@ -730,6 +734,11 @@ def startup() -> None:
 def ensure_slow_query_schema() -> None:
     with engine.begin() as connection:
         SlowQueryLog.__table__.create(bind=connection, checkfirst=True)
+
+
+def ensure_web_vitals_schema() -> None:
+    with engine.begin() as connection:
+        TelemetryWebVital.__table__.create(bind=connection, checkfirst=True)
 
 
 def ensure_audit_log_schema() -> None:
@@ -1369,6 +1378,22 @@ def slow_query_to_out(log: SlowQueryLog) -> SlowQueryLogOut:
         duration_ms=float(log.duration_ms),
         operation=log.operation,
         statement=log.statement,
+    )
+
+
+def web_vitals_to_out(record: TelemetryWebVital) -> WebVitalsTelemetryOut:
+    return WebVitalsTelemetryOut(
+        id=record.id,
+        metric=record.metric,
+        value=float(record.value),
+        rating=record.rating,
+        client_metric_id=record.client_metric_id,
+        navigation_type=record.navigation_type,
+        url=record.url,
+        path=record.path,
+        user_agent=record.user_agent,
+        timestamp=record.timestamp,
+        created_at=record.created_at.isoformat(),
     )
 
 
@@ -7683,6 +7708,44 @@ def list_slow_queries(
     ensure_slow_query_schema()
     logs = db.query(SlowQueryLog).order_by(SlowQueryLog.id.desc()).limit(limit).all()
     return [slow_query_to_out(log) for log in logs]
+
+
+@app.post("/api/v1/telemetry/web-vitals", response_model=WebVitalsTelemetryOut, status_code=201)
+def create_web_vitals_telemetry(
+    payload: WebVitalsTelemetryIn,
+    db: Session = Depends(get_db),
+) -> WebVitalsTelemetryOut:
+    ensure_web_vitals_schema()
+    record = TelemetryWebVital(
+        metric=payload.metric,
+        value=float(payload.value),
+        rating=payload.rating,
+        client_metric_id=payload.client_metric_id,
+        navigation_type=payload.navigation_type,
+        url=payload.url,
+        path=payload.path,
+        user_agent=payload.user_agent,
+        timestamp=payload.timestamp,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return web_vitals_to_out(record)
+
+
+@app.get("/api/v1/telemetry/web-vitals", response_model=list[WebVitalsTelemetryOut])
+def list_web_vitals_telemetry(
+    client_metric_id: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+) -> list[WebVitalsTelemetryOut]:
+    ensure_web_vitals_schema()
+    records = (
+        db.query(TelemetryWebVital)
+        .filter(TelemetryWebVital.client_metric_id == client_metric_id)
+        .order_by(TelemetryWebVital.id.asc())
+        .all()
+    )
+    return [web_vitals_to_out(record) for record in records]
 
 
 def audit_query(
