@@ -175,3 +175,10 @@
 - `PUT/GET /api/v1/ai/capability-prices/{capability}` and `POST/GET /api/v1/ai/prompt-templates` (+ `/api/v1/ai/prompt-templates/{key}`) for ops CRUD via the public API.
 - `call_model_config` parses OpenAI-compatible `usage.prompt_tokens/completion_tokens/total_tokens` and persists them on the `TracerSpan` metadata for the `llm.provider.chat` operation, alongside `cost_cny` calculated from the active `AiCapabilityPrice` and `price_capability`/`price_id` provenance fields.
 - Capability invoke accepts `template_key` + `template_variables`; templates render with simple `{{var}}` substitution and expose `template_key` + `prompt_version` on every span.
+
+## v16.3.0 — Sprint 63 [MINOR bump]
+- Frontend served on 24333, backend on 24334, both reachable immediately after first init.
+- Vite proxy on `/api` correctly forwards to backend on 24334; relative path works through the dev server.
+- init.sh's kill_pid_file and kill_on_port helpers clean up prior processes before starting new ones; exactly one listener per new port after a second start. Playwright spec independently executed two restarts and re-checked listener counts.
+- init.sh's `kill_project_on_port 8000` and `kill_project_on_port 5173` correctly terminate project-owned processes on legacy ports.
+- No regressions in type checking, lint, or build. The new port-configuration spec is the single source of truth for the migration and exercises every contracted surface.

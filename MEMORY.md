@@ -15,5 +15,8 @@
 
 | 61 | AI 链路观测性：token 用量、cost、prompt 版本 | PASS | v16.2.0 | 2026-06-04 | minor_feature |
 
-## Latest version: v16.2.0
-## Max sprint ID: 61
+| 63 | 统一本地前后端服务端口并支持可靠重启 | PASS | v16.4.0 | 2026-07-17 | minor_feature |
+
+
+## Latest version: v16.4.0
+## Max sprint ID: 63
