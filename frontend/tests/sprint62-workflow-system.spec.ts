@@ -31,6 +31,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/telemetry/web-vitals", (route) => route.fulfill({ status: 204 }));
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 });
 
 test("user destructive actions use cancellable accessible dialogs", async ({ page }) => {

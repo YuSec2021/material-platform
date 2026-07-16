@@ -22,7 +22,13 @@ export function ApiState({ isLoading, isError, isEmpty, loadingLabel, errorLabel
 
   if (isLoading) {
     return (
-      <Card aria-busy="true" aria-live="polite" aria-label={loadingLabel ?? t("app.loading")}>
+      <Card
+        role="progressbar"
+        aria-busy="true"
+        aria-live="polite"
+        aria-valuetext={loadingLabel ?? t("app.loading")}
+        aria-label={loadingLabel ?? t("app.loading")}
+      >
         <CardHeader className="flex-row items-center justify-between">
           <Skeleton className="h-5 w-44" />
           <Skeleton className="h-8 w-24" />

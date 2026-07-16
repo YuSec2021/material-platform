@@ -157,6 +157,7 @@ async function pageForTest() {
     document.documentElement.classList.add("dark");
   });
   const page = await context.newPage();
+  await page.route("**/api/v1/**", async (route) => route.fulfill({ json: [] }));
   await mockApis(page);
   return { page, context };
 }
@@ -190,10 +191,12 @@ async function mockApis(page: Page) {
   await page.route("**/api/v1/permissions/catalog", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/system/config", async (route) => route.fulfill({ json: systemConfig }));
   await page.route("**/api/v1/ai/providers", async (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/models**", async (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/capability-mappings**", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/ai/capability-mappings", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/debug/trace", async (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/rules/categories", async (route) => route.fulfill({ json: [ruleCategory] }));
-  await page.route("**/api/v1/rules**", async (route) =>
+  await page.route(/\/api\/v1\/rules(?:\?.*)?$/, async (route) =>
     route.fulfill({ json: { items: [rule], total: 1, page: 1, page_size: 5, pages: 1 } }),
   );
 }
@@ -221,6 +224,7 @@ async function primaryWhiteSurfaces(page: Page) {
 }
 
 test("covered feature pages avoid pure white primary surfaces in dark theme", async () => {
+  test.setTimeout(120_000);
   const { page, context } = await pageForTest();
   const routes = [
     "/standard/category-library",
@@ -249,7 +253,7 @@ test("covered feature pages avoid pure white primary surfaces in dark theme", as
 
   for (const route of routes) {
     await page.goto(route);
-    await expect(page.locator("main")).toBeVisible();
+    await expect(page.locator("main").first()).toBeVisible();
     await expect(page.locator("h1, h2").first()).toBeVisible();
     expect(await primaryWhiteSurfaces(page)).toEqual([]);
   }

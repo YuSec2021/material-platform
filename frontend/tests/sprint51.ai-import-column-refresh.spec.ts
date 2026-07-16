@@ -73,7 +73,7 @@ test("AI import preview column headers refresh after each recognition", async ()
   });
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Category Management/ })).toBeVisible();
 
   // Open AI import dialog
   const aiBtn = page.getByRole("button", { name: /AI一键导入/i });

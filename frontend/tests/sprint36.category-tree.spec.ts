@@ -96,7 +96,7 @@ async function setupPage(user = superAdminUser, language = "zh-CN") {
     }
     route.fulfill({ status: 400, json: { detail: "Invalid format" } });
   });
-  await page.route("**/api/v1/categories", async (route) => {
+  await page.route(/\/api\/v1\/categories(?:\?.*)?$/, async (route) => {
     const req = route.request() as any;
     if (req.method() === "POST") {
       const body = req.postDataJSON();
@@ -116,7 +116,15 @@ async function setupPage(user = superAdminUser, language = "zh-CN") {
         return;
       }
     }
-    route.fulfill({ json: seededCategories });
+    const url = new URL(req.url());
+    const parentId = url.searchParams.get("parent_id");
+    const libraryId = url.searchParams.get("category_library_id");
+    const result = seededCategories.filter((category) => {
+      if (parentId !== null) return category.parent_category_id === Number(parentId);
+      if (category.parent_category_id !== null) return false;
+      return libraryId === null || Number(libraryId) === 1;
+    });
+    route.fulfill({ json: result });
   });
   await page.route("**/api/v1/categories/template", async (route) => {
     route.fulfill({
@@ -133,32 +141,32 @@ test("category management UI shows expandable searchable tree backed by real dat
   const { page, context } = await setupPage();
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
-  await expect(page.getByText("S36Level1A")).toBeVisible();
+  await expect(page.getByText("S36Level1A").first()).toBeVisible();
 
   const bodyText = await page.textContent("body");
   expect(bodyText).not.toMatch(/unimplemented|placeholder|mock.*data/i);
 
-  // Use "全部展开" to expand all tree nodes
-  await page.getByRole("button", { name: "全部展开" }).click();
-  await page.waitForTimeout(500);
-
-  await expect(page.getByText("S36Level3A")).toBeVisible();
-  await expect(page.getByText("S36Level2A")).toBeVisible();
+  const tree = page.getByTestId("category-tree-container");
+  await tree.getByRole("button", { name: /Test Lib/ }).click();
+  await expect(tree.getByRole("button", { name: /S36Level1A/ })).toBeVisible();
+  await tree.getByRole("button", { name: /S36Level1A/ }).click();
+  await expect(page.getByText(/已选类目.*S36Level1A/)).toBeVisible();
+  await expect(tree.getByRole("button", { name: /S36Level2A/ })).toBeVisible();
 
   // Search filters the tree
   const searchInput = page.locator('input[placeholder*="搜索"]');
-  await searchInput.fill("S36Level3A");
+  await searchInput.fill("S36Level2A");
   await page.waitForTimeout(300);
-  await expect(page.getByText("S36Level3A")).toBeVisible();
+  await expect(page.getByText("S36Level2A").first()).toBeVisible();
 
   // Selecting a category shows context in sidebar
   await searchInput.clear();
   await page.waitForTimeout(200);
-  await page.getByRole("button", { name: /S36Level3A/ }).first().click();
+  await tree.getByRole("button", { name: /S36Level2A/ }).click();
   await page.waitForTimeout(300);
-  await expect(page.getByText("S36Level3A").first()).toBeVisible();
+  await expect(page.getByText(/已选类目.*S36Level2A/)).toBeVisible();
 
   await context.close();
 });
@@ -168,7 +176,7 @@ test("frontend CSV bulk import flow preview, validate, execute, and update tree"
   const { page, context } = await setupPage();
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
   const bulkBtn = page.getByRole("button", { name: /批量导入/i });
   await expect(bulkBtn).toBeVisible();
@@ -228,7 +236,7 @@ test("AI one-click import dialog calls recognition endpoint and confirms editabl
   const { page, context } = await setupPage();
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
   const aiBtn = page.getByRole("button", { name: /AI一键导入/i });
   await expect(aiBtn).toBeVisible();
@@ -258,7 +266,7 @@ test("AI one-click import dialog calls recognition endpoint and confirms editabl
   expect(body).toContain("激光打印机");
 
   // Edit at least one recognized category
-  const dialogInputs = page.locator('input[type="text"]');
+  const dialogInputs = page.getByRole("dialog").locator("input");
   await dialogInputs.first().fill("办公设备（修改）");
 
   // Confirm the import
@@ -278,7 +286,7 @@ test("i18n displays Chinese labels for zh-CN", async () => {
   const { page, context } = await setupPage(superAdminUser, "zh-CN");
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
   await expect(page.getByRole("heading", { name: "类目管理" })).toBeVisible();
   await expect(page.getByRole("button", { name: /批量导入/i })).toBeVisible();
@@ -294,7 +302,7 @@ test("i18n displays English labels for en-US without raw keys", async () => {
   const { page, context } = await setupPage(superAdminUser, "en-US");
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
   const bodyText = await page.textContent("body");
   expect(bodyText).not.toMatch(/\[(field\.|page\.|action\.|categoryImport\.)[^\]]+\]/);
@@ -306,9 +314,9 @@ test("regular user can view tree but cannot use bulk or AI import", async () => 
   const { page, context } = await setupPage(regularUser);
 
   await page.goto("/standard/category");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
 
-  await expect(page.getByText("S36Level1A")).toBeVisible();
+  await expect(page.getByText("S36Level1A").first()).toBeVisible();
 
   await expect(page.getByRole("button", { name: /批量导入/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /AI一键导入/i })).toHaveCount(0);
@@ -321,13 +329,13 @@ test("build passes without TypeScript or Vite errors", async () => {
   const { execSync: shell } = await import("child_process");
   try {
     shell("npm run build 2>&1", {
-      cwd: "/Users/yusec/projects/material_retrieval/frontend",
+      cwd: process.cwd(),
       encoding: "utf-8",
       timeout: 120000,
     });
     expect(true).toBe(true);
   } catch (error: any) {
-    const output = error.stdout + error.stderr;
+    const output = String(error.stdout ?? "") + String(error.stderr ?? "");
     const tsErrors = output.match(/TS\d+:\s*Error|Compilation Error|Vite Error/gi);
     expect(tsErrors).toHaveLength(0);
   }

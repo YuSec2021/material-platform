@@ -122,7 +122,7 @@ async function mockMaterialLibraryApis(page: Page) {
   await page.route("**/api/v1/material-libraries/101/code-rules/current", async (route) => {
     await route.fulfill({ json: currentRule });
   });
-  await page.route("**/api/v1/material-libraries/101/code-rules/versions**", async (route) => {
+  await page.route(/\/api\/v1\/material-libraries\/101\/code-rules\/versions(?:\?.*)?$/, async (route) => {
     const request = route.request() as any;
     if (request.method() === "POST") {
       const body = request.postDataJSON() as {
@@ -149,6 +149,9 @@ async function mockMaterialLibraryApis(page: Page) {
     }
     await route.fulfill({ json: { items: versions, total: versions.length, page: 1, page_size: 10 } });
   });
+  await page.route("**/api/v1/material-libraries/101/code-rules/versions/*/recode-preview", async (route) => {
+    await route.fulfill({ json: { batch_id: 2901, status: "draft", total: 0, changed: 0, unchanged: 0, rows: [] } });
+  });
   await page.route("**/api/v1/material-libraries/101", async (route) => {
     await route.fulfill({ json: { ...library, current_rule_version_id: currentRule.id } });
   });
@@ -170,9 +173,9 @@ test("super_admin opens detail tabs and sees the active code rule", async () => 
   const rulePanel = page.getByRole("tabpanel", { name: "编码规则" });
   await expect(page.getByText("V1 Sprint 29 V1")).toBeVisible();
   await expect(rulePanel.getByText("启用")).toBeVisible();
-  await expect(page.getByText("固定文本")).toBeVisible();
-  await expect(page.getByText("流水号")).toBeVisible();
-  await expect(page.getByText(/流水号长度.*3/)).toBeVisible();
+  await expect(page.getByText("固定文本", { exact: true })).toBeVisible();
+  await expect(page.getByText("流水号", { exact: true })).toBeVisible();
+  await expect(page.getByText("流水号长度: 3", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "编辑规则" })).toBeVisible();
   await expect(page.getByRole("button", { name: "查看历史版本" })).toBeVisible();
   await expect(page.getByRole("button", { name: "导出编码映射" })).toBeVisible();
@@ -215,7 +218,7 @@ test("edit rule validates change reason, previews, activates, and creates recode
   await expect(draftRow).toBeVisible();
   const draftBadge = draftRow.getByText("草稿");
   await expect(draftBadge).toBeVisible();
-  await expect(draftBadge).toHaveClass(/bg-gray-50/);
+  await expect(draftBadge).toHaveClass(/bg-muted\/40/);
   await draftRow.getByRole("button", { name: "V3" }).click();
   await expect(page.getByText("V3 片段明细")).toBeVisible();
   await expect(page.getByText(/固定文本: DRAFT29/)).toBeVisible();
@@ -238,7 +241,7 @@ test("regular users are read-only and edit form keeps localized state", async ()
   await admin.page.getByRole("button", { name: "编辑规则" }).click();
   await admin.page.getByRole("textbox", { name: "固定文本" }).fill("LOC29");
   await admin.page.getByLabel("变更原因").fill("Locale preservation");
-  await admin.page.getByRole("button", { name: "语言" }).evaluate((element) => (element as HTMLElement).click());
+  await admin.page.locator("button").filter({ hasText: "English" }).first().evaluate((element) => (element as HTMLElement).click());
   await expect(admin.page.getByRole("heading", { name: "Code Rule Edit" })).toBeVisible();
   expect(await control(admin.page.getByLabel("Change Reason")).inputValue()).toEqual("Locale preservation");
   expect(await control(admin.page.getByRole("textbox", { name: "Fixed Text" })).inputValue()).toEqual("LOC29");

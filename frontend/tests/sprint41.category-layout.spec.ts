@@ -46,18 +46,28 @@ async function mockBackend(page: Page) {
   await page.route("**/api/v1/auth/me", async (route) => route.fulfill({ json: authUser }));
   await page.route("**/api/v1/users/me**", async (route) => route.fulfill({ json: authUser }));
   await page.route("**/api/v1/category-libraries", async (route) => route.fulfill({ json: categoryLibraries }));
-  await page.route("**/api/v1/categories", async (route) => {
+  await page.route(/\/api\/v1\/categories(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ json: { ...categories[0], id: 3, code: "CAT003", name: "Sprint 41 Category" } });
       return;
     }
-    await route.fulfill({ json: categories });
+    const url = new URL(route.request().url());
+    const parentId = url.searchParams.get("parent_id");
+    const libraryId = url.searchParams.get("category_library_id");
+    await route.fulfill({
+      json: categories.filter((category) =>
+        parentId !== null
+          ? category.parent_category_id === Number(parentId)
+          : category.parent_category_id === null && (libraryId === null || category.category_library_id === Number(libraryId)),
+      ),
+    });
   });
 }
 
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 }
 
 test("category management renders material-style table layout and modal", async ({ page }) => {
@@ -68,14 +78,11 @@ test("category management renders material-style table layout and modal", async 
   await expect(page.getByRole("heading", { name: /类目管理|Categories/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /新增类目|New Category/ })).toBeVisible();
   await expect(page.getByPlaceholder(/搜索类目名称|Search category name/)).toBeVisible();
-  await expect(page.getByText(/全部类目库|All Category Libraries/)).toBeVisible();
-  await expect(page.getByText(/全部层级|All Levels/)).toBeVisible();
-
-  await expect(page.getByText(/类目名称|Category Name/)).toBeVisible();
-  await expect(page.getByText(/编码|Code/)).toBeVisible();
-  await expect(page.getByText(/上级类目|Parent Category/)).toBeVisible();
-  await expect(page.getByText(/类目库|Category Library/)).toBeVisible();
-  await expect(page.getByText("Office Equipment")).toBeVisible();
+  await expect(page.getByText(/请选择树中的类目|Select a category from the tree/)).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /类目名称|Category Name/ })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /编码|Code/ })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /上级类目|Parent Category/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Office Equipment", exact: true })).toBeVisible();
   await expect(page.getByText(/第 1 \/ 1 页|Page 1 \/ 1/)).toBeVisible();
 
   await page.getByPlaceholder(/搜索类目名称|Search category name/).fill("zz-no-category-sprint41");

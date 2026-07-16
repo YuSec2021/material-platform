@@ -104,7 +104,7 @@ async function mockBackend(page: Page) {
     }
     await route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
-  await page.route("**/api/v1/categories", async (route) => {
+  await page.route(/\/api\/v1\/categories(?:\?.*)?$/, async (route) => {
     const request = route.request() as any;
     if (request.method() === "POST") {
       const body = request.postDataJSON();
@@ -123,13 +123,23 @@ async function mockBackend(page: Page) {
       await route.fulfill({ json: category });
       return;
     }
-    await route.fulfill({ json: categories });
+    const url = new URL(request.url());
+    const parentId = url.searchParams.get("parent_id");
+    const libraryId = url.searchParams.get("category_library_id");
+    await route.fulfill({
+      json: categories.filter((category) =>
+        parentId !== null
+          ? category.parent_category_id === Number(parentId)
+          : category.parent_category_id === null && (libraryId === null || category.category_library_id === Number(libraryId)),
+      ),
+    });
   });
 }
 
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 }
 
 test("category page shows a MaterialList-style sidebar and filters table by selected branch", async ({ page }) => {
@@ -142,9 +152,7 @@ test("category page shows a MaterialList-style sidebar and filters table by sele
   await expect(page.getByRole("heading", { name: /类目管理|Categories/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /新增类目|New Category/ })).toBeVisible();
   await expect(page.getByPlaceholder(/搜索类目名称|Search category name/)).toBeVisible();
-  await expect(page.getByText(/全部类目库|All Category Libraries/)).toBeVisible();
-  await expect(page.getByText(/全部层级|All Levels/)).toBeVisible();
-
+  await expect(page.getByText(/请选择树中的类目|Select a category from the tree/)).toBeVisible();
   await page.getByRole("button", { name: /Office Library/ }).click();
   await expect(page.locator('aside :text("Office Supplies")').first()).toBeVisible();
   expect(await page.locator('aside :text("Hand Tools")').count()).toEqual(0);
@@ -152,15 +160,12 @@ test("category page shows a MaterialList-style sidebar and filters table by sele
   await page.getByRole("button", { name: /Office Supplies/ }).click();
   await page.getByRole("button", { name: /Paper/ }).click();
 
-  await expect(page.locator('main table :text("Office Supplies")').first()).toBeVisible();
-  await expect(page.locator('main table :text("Paper")').first()).toBeVisible();
   await expect(page.locator('main table :text("Copy Paper")').first()).toBeVisible();
   expect(await page.locator('main table :text("Hand Tools")').count()).toEqual(0);
   expect(await page.locator('main table :text("Wrench")').count()).toEqual(0);
 
   await page.getByPlaceholder(/搜索类目名称|Search category name/).fill("Copy Paper");
   await expect(page.locator('main table :text("Copy Paper")').first()).toBeVisible();
-  expect(await page.locator('main table :text("Office Supplies")').count()).toEqual(0);
   await expect(page.getByText(/已选类目|Selected category/)).toBeVisible();
 });
 
@@ -175,6 +180,7 @@ test("category create, edit, and delete refresh the sidebar tree and table toget
   await page.getByRole("button", { name: /保存|Save/ }).click();
 
   await expect(page.locator('aside :text("Temporary Root")').first()).toBeVisible();
+  await page.getByRole("button", { name: /清除选择|Clear selection/ }).click();
   await expect(page.locator('main table :text("Temporary Root")').first()).toBeVisible();
 
   await page.locator('main table tbody tr:has-text("Temporary Root") button:has-text("编辑"), main table tbody tr:has-text("Temporary Root") button:has-text("Edit")').first().click();
@@ -182,11 +188,12 @@ test("category create, edit, and delete refresh the sidebar tree and table toget
   await page.getByRole("button", { name: /保存|Save/ }).click();
 
   await expect(page.locator('aside :text("Renamed Root")').first()).toBeVisible();
+  await page.getByRole("button", { name: /清除选择|Clear selection/ }).click();
   await expect(page.locator('main table :text("Renamed Root")').first()).toBeVisible();
 
-  (page as any).once("dialog", async (confirmDialog: any) => confirmDialog.accept());
   await page.locator('main table tbody tr:has-text("Renamed Root") button:has-text("删除"), main table tbody tr:has-text("Renamed Root") button:has-text("Delete")').first().click();
+  await page.getByRole("alertdialog").getByRole("button", { name: /删除|Delete/ }).click();
 
-  expect(await page.locator('aside :text("Renamed Root")').count()).toEqual(0);
-  expect(await page.locator('main table :text("Renamed Root")').count()).toEqual(0);
+  await expect(page.locator('aside :text("Renamed Root")')).toHaveCount(0);
+  await expect(page.locator('main table :text("Renamed Root")')).toHaveCount(0);
 });

@@ -67,12 +67,13 @@ async function installModelGatewayMocks(page: Page, user: typeof superAdmin | ty
 
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: user }));
   await page.route("**/api/v1/auth/login", (route) => route.fulfill({ json: user }));
+  await page.route("**/api/v1/capability-mappings**", (route) => route.fulfill({ json: [] }));
 
   await page.route("**/api/v1/models**", async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
-    const idMatch = url.pathname.match(/\/api\/v1\/models\/(\d+)(?:\/test)?$/);
+    const idMatch = url.pathname.match(/\/api\/v1\/models\/(\d+)(?:\/(?:test|toggle))?$/);
     const id = idMatch ? Number(idMatch[1]) : null;
 
     if (method === "GET" && url.pathname.endsWith("/test") && id !== null) {
@@ -179,20 +180,20 @@ test("super admin can create, edit, toggle, test, and delete a model card", asyn
 
   await page.getByRole("button", { name: "新增模型" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByDisplayValue("https://api.deepseek.com")).toBeVisible();
+  await expect(page.getByLabel("基础地址")).toHaveValue("https://api.deepseek.com");
   await page.getByLabel("显示名称").fill("Sprint 53 Eval Model");
-  await page.getByLabel("API Key").fill("sk-test");
+  await page.getByLabel("API Key", { exact: true }).fill("sk-test");
   await page.getByLabel("超时秒数 1-120").fill("35");
   await page.getByLabel("Max Tokens 1-32000").fill("4096");
   await page.getByRole("button", { name: "保存模型" }).click();
 
-  await expect(page.getByText("模型已保存")).toBeVisible();
+  await expect(page.getByText("模型已保存").first()).toBeVisible();
   await expect(page.getByText("Sprint 53 Eval Model")).toBeVisible();
   await expect(page.getByText("deepseek-chat").first()).toBeVisible();
 
-  const card = page.locator("div").filter({ hasText: "Sprint 53 Eval Model" }).filter({ hasText: "35 秒" }).first();
+  const card = page.locator('[data-slot="card"]').filter({ hasText: "Sprint 53 Eval Model" }).filter({ hasText: "35 秒" });
   await card.getByRole("button", { name: "编辑" }).click();
-  await expect(page.getByDisplayValue("********")).toBeVisible();
+  await expect(page.getByLabel("API Key", { exact: true })).toHaveValue("********");
   await page.getByLabel("显示名称").fill("Sprint 53 Edited Model");
   await page.getByLabel("超时秒数 1-120").fill("45");
   await page.getByRole("button", { name: "保存模型" }).click();
@@ -200,26 +201,28 @@ test("super admin can create, edit, toggle, test, and delete a model card", asyn
   await expect(page.getByText("45 秒")).toBeVisible();
 
   await page.getByLabel("切换 Sprint 53 Edited Model 的启用状态").click();
-  await expect(page.getByText("启用状态已更新")).toBeVisible();
+  await expect(page.getByText("启用状态已更新").first()).toBeVisible();
   await expect(page.getByText("停用").first()).toBeVisible();
 
   await page.getByRole("button", { name: "测试连接" }).first().click();
-  await expect(page.getByText(/连接测试已完成/)).toBeVisible();
+  await expect(page.getByText(/连接测试已完成/).first()).toBeVisible();
   await expect(page.getByText("正常").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "删除" }).nth(1).click();
+  const editedCard = page.locator('[data-slot="card"]').filter({ hasText: "Sprint 53 Edited Model" });
+  await editedCard.getByRole("button", { name: "删除" }).click();
   await expect(page.getByText("确定删除模型 Sprint 53 Edited Model（deepseek-chat）吗？")).toBeVisible();
   await page.getByRole("button", { name: "取消" }).click();
   await expect(page.getByText("Sprint 53 Edited Model")).toBeVisible();
 
-  await page.getByRole("button", { name: "删除" }).nth(1).click();
-  await page.getByRole("button", { name: "删除" }).last().click();
-  await expect(page.getByText("模型已删除")).toBeVisible();
+  await editedCard.getByRole("button", { name: "删除" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "删除" }).click();
+  await expect(page.getByText("模型已删除").first()).toBeVisible();
   await expect(page.getByText("Sprint 53 Edited Model")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "删除" }).first().click();
-  await page.getByRole("button", { name: "删除" }).last().click();
-  await expect(page.getByText(/模型删除被阻止/)).toBeVisible();
+  const referencedCard = page.locator('[data-slot="card"]').filter({ hasText: "Referenced DeepSeek" });
+  await referencedCard.getByRole("button", { name: "删除" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "删除" }).click();
+  await expect(page.getByText(/模型删除被阻止/).first()).toBeVisible();
   await expect(page.getByText("Referenced DeepSeek")).toBeVisible();
 
   await context.close();
@@ -237,7 +240,7 @@ test("regular user sees localized read-only model cards", async () => {
 
   await page.goto("/ai/models");
   await expect(page.getByRole("heading", { name: "Model Gateway" })).toBeVisible();
-  await expect(page.getByText("This account is read-only")).toBeVisible();
+  await expect(page.getByText("This account is read-only").first()).toBeVisible();
   await expect(page.getByText("Referenced DeepSeek")).toBeVisible();
   await expect(page.getByText("Untested").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "New Model" })).toHaveCount(0);

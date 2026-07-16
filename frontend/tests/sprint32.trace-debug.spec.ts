@@ -124,7 +124,7 @@ test("trace debug page uses two panels, date filtering, and collapsible span tre
   let buttonTexts = await traceButtonTexts();
   expect(buttonTexts[0]).toContain("trace-sprint32-newer");
   expect(buttonTexts[1]).toContain("trace-sprint32-older");
-  await expect(page.getByText("trace-sprint32-newer")).toBeVisible();
+  await expect(detailPanel.getByText("trace-sprint32-newer")).toBeVisible();
   await expect(page.getByText("newer root operation")).toBeVisible();
   await expect(page.getByText("newer llm call")).toBeVisible();
 
@@ -136,9 +136,9 @@ test("trace debug page uses two panels, date filtering, and collapsible span tre
   await page.getByLabel(/Start date/).fill("2026-05-17");
   await page.getByLabel(/End date/).fill("2026-05-17");
   await page.getByRole("button", { name: /应用/ }).click();
-  await expect(page.getByText("trace-sprint32-older")).toBeVisible();
+  await expect(detailPanel.getByText("trace-sprint32-older")).toBeVisible();
   expect(await page.getByText("trace-sprint32-newer").count()).toEqual(0);
-  await expect(page.getByText("trace-sprint32-older")).toBeVisible();
+  await expect(detailPanel.getByText("trace-sprint32-older")).toBeVisible();
 
   await page.getByRole("button", { name: /清除/ }).click();
   buttonTexts = await traceButtonTexts();

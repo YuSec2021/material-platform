@@ -43,36 +43,10 @@ async function login(page: Page) {
   });
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
-  await (page as any).waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 }
 
-test("login, navigation, i18n switching, and responsive shell", async () => {
-  const { page, context } = await pageForTest();
-  await login(page);
-  await expect(page.getByRole("heading", { name: /AI物料中台管理系统/ })).toBeVisible();
-
-  await page.getByRole("button", { name: /Language|语言/ }).click();
-  await expect(page.getByRole("heading", { name: /AI Material Management System/ })).toBeVisible();
-  await page.goto("/materials");
-  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("button", { name: /Open navigation|打开导航/ })).toBeVisible();
-  await page.getByRole("button", { name: /Open navigation|打开导航/ }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await context.close();
-});
-
-test("materials list exposes skeleton, empty, error, and deterministic AI completion states", async () => {
-  const { page, context } = await pageForTest();
-  await login(page);
-  let releaseMaterials: (() => void) | undefined;
-  await page.route("**/api/v1/materials**", async (route) => {
-    await new Promise<void>((resolve) => {
-      releaseMaterials = resolve;
-    });
-    await route.fulfill({ json: [] });
-  });
+async function mockMaterialReferences(page: Page) {
   await page.route("**/api/v1/material-libraries", async (route) => {
     await route.fulfill({ json: [{ id: 1, name: "Default Library", code: "LIB-001", description: "", enabled: true }] });
   });
@@ -88,21 +62,63 @@ test("materials list exposes skeleton, empty, error, and deterministic AI comple
       },
     });
   });
+}
+
+test("login, navigation, i18n switching, and responsive shell", async () => {
+  const { page, context } = await pageForTest();
+  await login(page);
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /Language|语言/ }).click();
+  expect(await page.locator("html").getAttribute("lang")).toEqual("en-US");
+  await page.goto("/materials");
+  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: /Open navigation|打开导航/ })).toBeVisible();
+  await page.getByRole("button", { name: /Open navigation|打开导航/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await context.close();
+});
+
+test("materials list exposes skeleton, empty, error, and deterministic AI completion states", async () => {
+  let { page, context } = await pageForTest();
+  await login(page);
+  let releaseMaterials: (() => void) | undefined;
+  let markMaterialsRequested: (() => void) | undefined;
+  const materialsRequested = new Promise<void>((resolve) => {
+    markMaterialsRequested = resolve;
+  });
+  await page.route("**/api/v1/materials**", async (route) => {
+    markMaterialsRequested?.();
+    await new Promise<void>((resolve) => {
+      releaseMaterials = resolve;
+    });
+    await route.fulfill({ json: [] });
+  });
+  await mockMaterialReferences(page);
 
   await page.goto("/materials");
+  await materialsRequested;
   await expect(page.getByRole("progressbar").first()).toBeVisible();
   releaseMaterials?.();
   await expect(page.getByText(/No material data|后端暂无物料数据/)).toBeVisible();
+  await context.close();
 
-  await page.unroute("**/api/v1/materials**");
+  ({ page, context } = await pageForTest());
+  await login(page);
   await page.route("**/api/v1/materials**", async (route) => route.fulfill({ status: 500, json: { detail: "boom" } }));
-  await page.reload();
+  await mockMaterialReferences(page);
+  await page.goto("/materials");
   await expect(page.getByRole("alert")).toBeVisible();
   await expect(page.getByRole("button", { name: /Retry|重试/ })).toBeVisible();
+  await context.close();
 
-  await page.unroute("**/api/v1/materials**");
+  ({ page, context } = await pageForTest());
+  await login(page);
   await page.route("**/api/v1/materials**", async (route) => route.fulfill({ json: [] }));
-  await page.reload();
+  await mockMaterialReferences(page);
+  await page.goto("/materials");
   await page.getByRole("button", { name: /AI向量匹配|Match/ }).click();
   await page.getByPlaceholder(/输入物料名称|material name/i).fill("switch");
   await page.getByRole("button", { name: /^匹配$|^Match$/ }).click();
@@ -121,11 +137,19 @@ test("material CRUD busy state and toast feedback are visible", async () => {
     }
     await route.fulfill({ json: [] });
   });
+  await page.route("**/api/v1/roles", async (route) => {
+    await route.fulfill({ json: [{ id: 1, name: "Administrator", code: "ADMIN", enabled: true }] });
+  });
+  await page.route("**/api/v1/category-libraries", async (route) => {
+    await route.fulfill({ json: [{ id: 1, name: "Default Category Library", code: "CAT-001", enabled: true }] });
+  });
 
   await page.goto("/material/library");
   await expect(page.getByText(/No material library data|后端暂无物料库数据/)).toBeVisible();
   await page.getByRole("button", { name: /New Library|新建物料库/ }).click();
   await page.getByLabel(/Name|名称/).fill("E2E Library");
+  await page.getByLabel(/Administrator/).check();
+  await page.getByLabel(/Default Category Library/).check();
   await page.getByRole("button", { name: /Save|保存/ }).click();
   await expect(page.getByText(/Saved successfully|保存成功/)).toBeVisible();
   await context.close();

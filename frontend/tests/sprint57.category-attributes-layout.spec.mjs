@@ -147,6 +147,7 @@ async function openCategoryPage(page) {
   await mockBackend(page);
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
   await page.goto("/standard/category");
   await page.getByRole("button", { name: /Sprint 57 Library/ }).click();
 }
@@ -176,7 +177,10 @@ test("category tree remains dedicated to hierarchy navigation", async ({ page })
   const treeSelector = '[data-testid="category-tree-container"]';
   expect(await page.locator(`${treeSelector} [data-testid="category-attributes-panel"]`).count()).toEqual(0);
 
-  const expandableNode = page.locator(`${treeSelector} [data-testid="category-tree-node"][aria-expanded="false"]`).first();
+  const expandableNode = page
+    .locator(`${treeSelector} [data-testid="category-tree-node"]`)
+    .filter({ hasText: "Layout Root" })
+    .first();
   await expandableNode.click();
   expect(await expandableNode.getAttribute("aria-expanded")).toEqual("true");
   await expandableNode.click();

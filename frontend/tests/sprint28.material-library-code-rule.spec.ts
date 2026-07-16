@@ -69,7 +69,7 @@ async function login(page: Page) {
   });
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
-  await (page as any).waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 }
 
 test("material library create flow builds and saves an automatic code rule", async () => {
@@ -97,6 +97,12 @@ test("material library create flow builds and saves an automatic code rule", asy
       return;
     }
     await route.fulfill({ json: libraries });
+  });
+  await page.route("**/api/v1/roles", async (route) => {
+    await route.fulfill({ json: [{ id: 1, name: "Administrator", code: "ADMIN", enabled: true }] });
+  });
+  await page.route("**/api/v1/category-libraries", async (route) => {
+    await route.fulfill({ json: [{ id: 1, name: "Default Category Library", code: "CAT-001", enabled: true }] });
   });
 
   await page.goto("/material/library");
@@ -137,8 +143,9 @@ test("material library create flow builds and saves an automatic code rule", asy
   await control(page.getByLabel("流水号范围")).selectOption("global");
   await expect(page.getByText(/MAT-.+-R-\d{4}-0001/)).toBeVisible();
 
-  await control(page.locator('button[aria-label="上移片段"]')).nth(4).click();
-  const fourthSegmentType = await control(page.locator("article select")).nth(3).evaluate((element: Element) => {
+  const serialSegment = page.locator("article").filter({ has: page.getByLabel("流水号长度") });
+  await serialSegment.locator('button[aria-label="上移片段"]').click();
+  const fourthSegmentType = await page.getByRole("dialog").locator("article").nth(3).locator("select").first().evaluate((element: Element) => {
     return (element as HTMLSelectElement).value;
   });
   if (fourthSegmentType !== "serial") {
@@ -151,7 +158,8 @@ test("material library create flow builds and saves an automatic code rule", asy
     throw new Error("Attribute name was lost after reorder");
   }
 
-  await control(page.locator('button[aria-label="删除片段"]')).nth(2).click();
+  const attributeSegment = page.locator("article").filter({ has: page.getByLabel("属性名称") });
+  await attributeSegment.locator('button[aria-label="删除片段"]').click();
   if ((await page.getByLabel("属性名称").count()) !== 0) {
     throw new Error("Attribute segment should be removed");
   }
@@ -162,6 +170,8 @@ test("material library create flow builds and saves an automatic code rule", asy
     throw new Error("Serial length was lost after remove");
   }
 
+  await page.getByLabel("Administrator").check();
+  await page.getByLabel("Default Category Library").check();
   await page.getByRole("button", { name: "保存" }).click();
   const capturedPayload = capture.payload;
   if (!capturedPayload?.auto_code_enabled) {
@@ -180,8 +190,9 @@ test("material library create flow builds and saves an automatic code rule", asy
   expect(segments[2]?.scope).toEqual("global");
   expect(segments[3]?.format).toEqual("YYMM");
 
+  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Sprint 28 Auto Library")).toBeVisible();
-  await expect(page.getByText("自动编码")).toBeVisible();
+  await expect(page.getByText("自动编码").first()).toBeVisible();
   await expect(page.getByText("V1")).toBeVisible();
   await context.close();
 });
@@ -205,7 +216,7 @@ test("live preview and validation reject missing unique segments, long codes, an
   await control(page.getByLabel("日期格式")).selectOption("YYMM");
   await expect(page.getByText(/MAT_\d{4}/)).toBeVisible();
   await page.getByRole("button", { name: "保存" }).click();
-  const firstAlert = await control(page.getByRole("alert")).textContent();
+  const firstAlert = await control(page.getByRole("alert").filter({ hasText: "至少需要一个唯一生成片段" })).textContent();
   if (!firstAlert?.includes("至少需要一个唯一生成片段")) {
     throw new Error(`Expected unique segment validation, received ${firstAlert}`);
   }
@@ -216,7 +227,7 @@ test("live preview and validation reject missing unique segments, long codes, an
   await page.getByRole("button", { name: "流水号" }).click();
   await page.getByLabel("流水号长度").fill("10");
   await page.getByRole("button", { name: "保存" }).click();
-  const secondAlert = await control(page.getByRole("alert")).textContent();
+  const secondAlert = await control(page.getByRole("alert").filter({ hasText: "生成编码长度不能超过 64 个字符" })).textContent();
   if (!secondAlert?.includes("生成编码长度不能超过 64 个字符")) {
     throw new Error(`Expected max-length validation, received ${secondAlert}`);
   }
@@ -260,7 +271,7 @@ test("material library code rule create flow switches languages without losing f
   await page.getByLabel("流水号长度").fill("3");
   await page.getByLabel("起始值").fill("1");
 
-  await page.getByRole("button", { name: "语言" }).evaluate((element) => (element as HTMLElement).click());
+  await page.locator("button").filter({ hasText: "English" }).first().evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByText("Code Rule Configuration")).toBeVisible();
   await expect(page.getByText("Segment Type").first()).toBeVisible();
   await expect(page.getByLabel("Separator")).toBeVisible();
@@ -273,7 +284,7 @@ test("material library code rule create flow switches languages without losing f
   await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
 
-  if ((await control(page.getByLabel("Name")).inputValue()) !== "Sprint 28 Localized Library") {
+  if ((await control(page.getByLabel("Name", { exact: true })).inputValue()) !== "Sprint 28 Localized Library") {
     throw new Error("Library name was not preserved after switching to English");
   }
   if ((await control(page.getByRole("textbox", { name: "Fixed Text" })).inputValue()) !== "LOC") {
@@ -295,7 +306,7 @@ test("material library code rule create flow switches languages without losing f
     page.getByText("At least one unique-generating segment is required: category path or serial number."),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Language" }).evaluate((element) => (element as HTMLElement).click());
+  await page.locator("button").filter({ hasText: "中文" }).first().evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByText("至少需要一个唯一生成片段：类目路径编码或流水号。")).toBeVisible();
   await context.close();
 });

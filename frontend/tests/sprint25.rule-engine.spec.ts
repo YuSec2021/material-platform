@@ -116,7 +116,7 @@ async function mockRuleApis(page: Page) {
     const body = (route.request() as any).postDataJSON() as { enabled: boolean };
     await route.fulfill({ json: { ...rules[0], enabled: body.enabled } });
   });
-  await page.route("**/api/v1/rules", async (route) => {
+  await page.route(/\/api\/v1\/rules(?:\?.*)?$/, async (route) => {
     const request = route.request() as any;
     if (request.method() === "POST") {
       const body = request.postDataJSON() as Record<string, unknown>;
@@ -143,12 +143,12 @@ test("super_admin can navigate categories and see rule management controls", asy
 
   await expect(page.getByText("规则引擎")).toBeVisible();
   await page.getByText("规则分类").click();
-  await expect(page.getByText("单位标准化")).toBeVisible();
+  await expect(page.getByText("单位标准化", { exact: true })).toBeVisible();
   await expect(page.getByText("unit_normalization")).toBeVisible();
 
-  await page.getByText("单位标准化").click();
+  await page.getByText("单位标准化", { exact: true }).click();
   await expect(page.getByRole("columnheader", { name: "模式 / 取值预览" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "新建规则" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "新建规则" })).toBeVisible();
   await expect(page.getByRole("switch", { name: /Normalize KG/ })).toBeVisible();
 
   await context.close();
@@ -159,7 +159,7 @@ test("regular users can view rules but do not get write controls", async () => {
   await page.goto("/rules");
 
   await expect(page.getByText("Normalize KG")).toBeVisible();
-  expect(await page.getByRole("button", { name: "新建规则" }).count()).toEqual(0);
+  expect(await page.getByRole("link", { name: "新建规则" }).count()).toEqual(0);
   expect(await page.getByRole("link", { name: "编辑" }).count()).toEqual(0);
   expect(await page.getByRole("switch").count()).toEqual(0);
 

@@ -43,7 +43,7 @@ async function login(page: Page) {
   });
   await page.goto("/login");
   await page.getByRole("button", { name: /登录|Log in/ }).click();
-  await (page as any).waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 }
 
 function alphaFromBackground(backgroundColor: string) {

@@ -830,9 +830,10 @@ export function CategoryList() {
       }
       return;
     }
+    setExpandedCategoryIds((current) => Array.from(new Set([...current, category.id])));
     void loadChildren(category.id).then((childCategories) => {
-      if (childCategories.length > 0) {
-        setExpandedCategoryIds((current) => Array.from(new Set([...current, category.id])));
+      if (childCategories.length === 0) {
+        setExpandedCategoryIds((current) => current.filter((item) => item !== category.id));
       }
     });
   };
@@ -856,6 +857,7 @@ export function CategoryList() {
     mutationFn: (payload: CategoryPayload) =>
       editingCategory ? apiClient.updateCategory(editingCategory.id, payload) : apiClient.createCategory(payload),
     onSuccess: async (savedCategory) => {
+      const savedLibraryId = categoryLibraryId(savedCategory, libraries);
       setIsFormOpen(false);
       setEditingCategory(null);
       setForm(emptyForm);
@@ -863,6 +865,10 @@ export function CategoryList() {
       selectCategory(savedCategory);
       toast.success(t("toast.saveSuccess"));
       await queryClient.invalidateQueries({ queryKey: ["categories"] });
+      if (savedLibraryId) {
+        setExpandedLibraryIds((current) => Array.from(new Set([...current, savedLibraryId])));
+        await loadLibraryRoots(savedLibraryId, 0);
+      }
     },
     onError: (error) => toast.error(`${t("toast.saveFailed")}: ${error.message}`),
   });

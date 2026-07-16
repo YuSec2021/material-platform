@@ -261,7 +261,7 @@ test("super_admin can open AI management pages and create masked provider record
 
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "测试连接" }).first().click();
-  await expect(page.getByText(/连接测试已完成|Connection test succeeded/)).toBeVisible();
+  await expect(page.getByText(/连接测试已完成|Connection test succeeded/).first()).toBeVisible();
 
   await page.goto("/ai/capability-mappings");
   await expect(page.getByRole("heading", { name: "AI能力映射" })).toBeVisible();
@@ -303,6 +303,7 @@ test("AI management routes are localized and blocked for non-super_admin users",
   await regular.page.goto("/");
   expect(await (regular.page.getByText("AI管理") as any).count()).toEqual(0);
   await regular.page.goto("/ai/providers");
+  await expect(regular.page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
   expect((regular.page as any).url()).toEqual("http://localhost:5173/");
   expect(await (regular.page.getByRole("heading", { name: "模型提供商管理" }) as any).count()).toEqual(0);
   await regular.context.close();
