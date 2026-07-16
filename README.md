@@ -141,9 +141,9 @@ bash init.sh
 
 脚本会检查 Python、Node、Docker、Git，安装依赖，初始化数据库表，并启动：
 
-- 后端 API：`http://localhost:8000`
-- API 文档：`http://localhost:8000/docs`
-- React/Vite 管理台：`http://localhost:5173`
+- 后端 API：`http://localhost:24334`
+- API 文档：`http://localhost:24334/docs`
+- React/Vite 管理台：`http://localhost:24333`
 
 如果 Docker daemon 未运行，脚本会跳过 PostgreSQL 和 Qdrant 容器，本地默认使用 SQLite。
 
@@ -151,7 +151,7 @@ bash init.sh
 
 ```bash
 cd frontend
-npm run dev -- --port 5173
+npm run dev -- --port 24333
 ```
 
 停止本地进程：
@@ -171,8 +171,8 @@ Compose 服务：
 
 - `postgres`：`localhost:5432`
 - `qdrant`：`localhost:6333` / `localhost:6334`
-- `backend`：`http://localhost:8000`
-- `frontend`：`http://localhost:5173`
+- `backend`：`http://localhost:24334`
+- `frontend`：`http://localhost:24333`
 - `nginx`：`http://localhost`
 
 Nginx 路由：
@@ -193,7 +193,7 @@ docker compose down -v
 后端冒烟：
 
 ```bash
-curl -fsS http://localhost:8000/docs >/dev/null
+curl -fsS http://localhost:24334/docs >/dev/null
 ```
 
 主前端构建：
@@ -223,10 +223,10 @@ pytest -q
 | `QDRANT_URL` | Qdrant 地址；Compose 中为 `http://qdrant:6333`。 |
 | `LLM_GATEWAY_AES_KEY` | 模型 API Key 加密使用的 AES key 种子。 |
 | `AI_DEBUG` | 设置为 `true` 时允许访问 AI trace 调试能力。 |
-| `BACKEND_PORT` | `init.sh` 启动后端的端口，默认 `8000`。 |
-| `FRONTEND_PORT` | `init.sh` 启动前端的端口，默认 `5173`。 |
-| `E2E_BASE_URL` | Playwright 前端地址，默认 `http://localhost:5173`。 |
-| `E2E_API_URL` | Playwright 后端地址，默认 `http://localhost:8000`。 |
+| `BACKEND_PORT` | `init.sh` 启动后端的端口，默认 `24334`。 |
+| `FRONTEND_PORT` | `init.sh` 启动前端的端口，默认 `24333`。 |
+| `E2E_BASE_URL` | Playwright 前端地址，默认 `http://localhost:24333`。 |
+| `E2E_API_URL` | Playwright 后端地址，默认 `http://localhost:24334`。 |
 
 ## 当前说明
 

@@ -52,7 +52,7 @@ test.afterAll(async () => {
 
 async function pageForTest() {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable in this sandbox: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:5173" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
   const page = await context.newPage();
   return { page, context };
 }

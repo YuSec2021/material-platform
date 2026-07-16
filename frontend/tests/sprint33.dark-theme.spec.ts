@@ -8,10 +8,20 @@ const superAdminUser = {
   id: 1,
   username: "super_admin",
   display_name: "Super Admin",
+  hcm_id: "",
+  unit: "Platform",
+  department: "Administration",
+  team: "Operations",
+  email: "super_admin@example.com",
+  account_ownership: "local",
+  account_owner: "Platform",
+  status: "active",
   is_super_admin: true,
   permissions: [],
   material_library_scope_ids: null,
   roles: [{ id: 1, name: "Administrator", code: "ADMIN", enabled: true }],
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
 };
 
 const category = {
@@ -150,7 +160,7 @@ test.afterAll(async () => {
 
 async function pageForTest() {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable in this sandbox: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:5173", viewport: { width: 1440, height: 900 } });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24333", viewport: { width: 1440, height: 900 } });
   await (context as any).addInitScript(() => {
     window.localStorage.setItem("ai-material-auth-session", JSON.stringify({ username: "super_admin", role: "super_admin" }));
     window.localStorage.setItem("theme", "dark");

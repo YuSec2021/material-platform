@@ -63,7 +63,7 @@ test("operator can persist a harmless system reason option through the UI", asyn
 });
 
 test("OpenAPI keeps completed module routes available", async () => {
-  const api = await request.newContext({ baseURL: process.env.E2E_API_URL || "http://localhost:8000" });
+  const api = await request.newContext({ baseURL: process.env.E2E_API_URL || "http://localhost:24334" });
   const response = await api.get("/openapi.json");
   expect(response.ok()).toBeTruthy();
   const openapi = await response.json();

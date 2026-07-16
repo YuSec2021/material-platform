@@ -11,7 +11,7 @@ module.exports = defineConfig({
     ["html", { outputFolder: "playwright-report", open: "never" }]
   ],
   use: {
-    baseURL: process.env.E2E_BASE_URL || "http://localhost:5173",
+    baseURL: process.env.E2E_BASE_URL || "http://localhost:24333",
     trace: "retain-on-failure",
     screenshot: "only-on-failure"
   },
