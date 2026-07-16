@@ -17,5 +17,7 @@
 
 | 62 | 前端全站 shadcn/ui 组件体系统一 | PASS | v16.3.0 | 2026-07-16 | minor_feature |
 
-## Latest version: v16.3.0
-## Max sprint ID: 62
+| 63 | 统一本地前后端服务端口并支持可靠重启 | PASS | v16.4.0 | 2026-07-17 | minor_feature |
+
+## Latest version: v16.4.0
+## Max sprint ID: 63
