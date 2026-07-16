@@ -1257,6 +1257,24 @@
       ],
       "status": "planned",
       "origin": "major_feature"
+    },
+    {
+      "id": 63,
+      "title": "统一本地前后端服务端口并支持可靠重启",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:24333",
+        "command": "bash init.sh && cd frontend && npx playwright test tests/e2e/port-configuration.spec.ts"
+      },
+      "features": [
+        "运行 bash init.sh 后，前端应用监听 http://localhost:24333，浏览器可以正常加载应用入口并完成基础页面访问。",
+        "运行 bash init.sh 后，后端 API 监听 http://localhost:24334，GET http://localhost:24334/health 返回成功状态和可识别的健康响应。",
+        "前端继续通过浏览器侧相对 /api 路径访问后端，开发服务器代理或等效运行时配置统一指向 http://localhost:24334；通过 http://localhost:24333 发起一项真实 API 请求可获得后端响应。",
+        "init.sh 负责停止或替换本项目先前启动的前后端进程，并在新端口上可靠重启服务；连续执行两次仍只有一套可用实例，且两次启动后健康检查均通过。",
+        "重启完成后，本项目不再以 http://localhost:5173 或 http://localhost:8000 作为应用监听地址；旧端口不得返回本项目的前端页面或后端健康响应，也不得遗留本项目的旧服务进程。"
+      ],
+      "status": "planned",
+      "origin": "minor_feature"
     }
   ]
 }

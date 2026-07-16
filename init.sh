@@ -59,6 +59,32 @@ kill_on_port() {
   fi
 }
 
+stop_pid_file() {
+  local pid_file="$1"
+  local pid
+  [[ -f "$pid_file" ]] || return 0
+  pid=$(tr -d '[:space:]' < "$pid_file")
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    info "Stopping previous project process PID $pid..."
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+}
+
+kill_project_on_port() {
+  local port="$1"
+  local pid cwd command
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    command=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    if [[ "$cwd" == "$PROJECT_DIR"* || "$command" == *"$PROJECT_DIR"* ]]; then
+      info "Stopping project process PID $pid on legacy port $port..."
+      kill "$pid" 2>/dev/null || true
+    fi
+  done < <(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+}
+
 # -----------------------------------------------------------------------------
 # Step 0: Environment sanity check
 # -----------------------------------------------------------------------------
@@ -288,7 +314,12 @@ fi
 # -----------------------------------------------------------------------------
 info "=== Step 5: Starting backend server ==="
 
-BACKEND_PORT=${BACKEND_PORT:-8000}
+BACKEND_PORT=${BACKEND_PORT:-24334}
+mkdir -p "$PROJECT_DIR/logs"
+stop_pid_file "$PROJECT_DIR/logs/backend.pid"
+stop_pid_file "$PROJECT_DIR/logs/frontend.pid"
+kill_project_on_port 8000
+kill_project_on_port 5173
 kill_on_port "$BACKEND_PORT"
 
 if [[ -d "$BACKEND_DIR" ]] && [[ -f "$BACKEND_DIR/main.py" || -f "$BACKEND_DIR/app/main.py" ]]; then
@@ -385,7 +416,7 @@ fi
 # -----------------------------------------------------------------------------
 info "=== Step 6: Starting frontend dev server ==="
 
-FRONTEND_PORT=${FRONTEND_PORT:-5173}
+FRONTEND_PORT=${FRONTEND_PORT:-24333}
 kill_on_port "$FRONTEND_PORT"
 
 if [[ -d "$FRONTEND_DIR" ]] && [[ -f "$FRONTEND_DIR/package.json" ]]; then
@@ -393,10 +424,26 @@ if [[ -d "$FRONTEND_DIR" ]] && [[ -f "$FRONTEND_DIR/package.json" ]]; then
 
   mkdir -p "$PROJECT_DIR/logs"
 
-  cd "$FRONTEND_DIR"
-  nohup npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT" \
-    > "$PROJECT_DIR/logs/frontend.log" 2>&1 &
-  FRONTEND_PID=$!
+  FRONTEND_PID=$(python - "$FRONTEND_DIR" "$FRONTEND_PORT" "$PROJECT_DIR/logs/frontend.log" <<'PY'
+import os
+import subprocess
+import sys
+
+frontend_dir, port, log_path = sys.argv[1:]
+log_file = open(log_path, "ab", buffering=0)
+process = subprocess.Popen(
+    ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", port],
+    cwd=frontend_dir,
+    env=os.environ.copy(),
+    stdin=subprocess.DEVNULL,
+    stdout=log_file,
+    stderr=subprocess.STDOUT,
+    start_new_session=True,
+    close_fds=True,
+)
+print(process.pid)
+PY
+)
   echo "$FRONTEND_PID" > "$PROJECT_DIR/logs/frontend.pid"
   info "Frontend started with PID $FRONTEND_PID"
 

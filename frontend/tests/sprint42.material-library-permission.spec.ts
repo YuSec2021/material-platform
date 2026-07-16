@@ -1,9 +1,9 @@
 import playwright, { type Page } from "@playwright/test";
 
 const { expect, test } = playwright;
-test.use({ baseURL: 'http://localhost:5173' });
+test.use({ baseURL: 'http://localhost:24333' });
 
-const API_BASE_URL = process.env.BACKEND_URL ?? "http://localhost:8000/api/v1";
+const API_BASE_URL = process.env.BACKEND_URL ?? "http://localhost:24334/api/v1";
 const SUPER_ADMIN_HEADERS = {
   "Content-Type": "application/json",
   "X-User-Role": "super_admin",

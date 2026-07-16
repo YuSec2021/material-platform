@@ -27,12 +27,12 @@ pytest -q --tb=short
 
 # 2. Dev server is reachable (confirms init.sh actually started the stack)
 curl -sf http://localhost:3000 > /dev/null \
-  || curl -sf http://localhost:8000 > /dev/null \
+  || curl -sf http://localhost:24334 > /dev/null \
   || { echo "Dev server not reachable — check init.sh"; exit 1; }
 ```
 
 If the project has no frontend server, replace step 2 with an appropriate
-health-check for the actual stack (e.g. `curl -sf http://localhost:8000/health`)
+health-check for the actual stack (e.g. `curl -sf http://localhost:24334/health`)
 and document the URL in `planner-spec.json` under `dev_server_url`.
 
 Before implementation, re-read only the current sprint artifacts you need:

@@ -56,7 +56,7 @@ test.afterAll(async () => {
 
 async function setupPage(user = superAdminUser, language = "zh-CN") {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:5173" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
 
   await (context as any).addInitScript(
     ({ currentUser, lng }: { currentUser: typeof superAdminUser; lng: string }) => {
