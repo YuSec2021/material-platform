@@ -15,5 +15,7 @@
 
 | 61 | AI 链路观测性：token 用量、cost、prompt 版本 | PASS | v16.2.0 | 2026-06-04 | minor_feature |
 
-## Latest version: v16.2.0
-## Max sprint ID: 61
+| 62 | 前端全站 shadcn/ui 组件体系统一 | PASS | v16.3.0 | 2026-07-16 | minor_feature |
+
+## Latest version: v16.3.0
+## Max sprint ID: 62

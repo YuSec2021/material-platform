@@ -175,3 +175,6 @@
 - `PUT/GET /api/v1/ai/capability-prices/{capability}` and `POST/GET /api/v1/ai/prompt-templates` (+ `/api/v1/ai/prompt-templates/{key}`) for ops CRUD via the public API.
 - `call_model_config` parses OpenAI-compatible `usage.prompt_tokens/completion_tokens/total_tokens` and persists them on the `TracerSpan` metadata for the `llm.provider.chat` operation, alongside `cost_cny` calculated from the active `AiCapabilityPrice` and `price_capability`/`price_id` provenance fields.
 - Capability invoke accepts `template_key` + `template_variables`; templates render with simple `{{var}}` substitution and expose `template_key` + `prompt_version` on every span.
+
+## v16.3.0 — Sprint 62 [MINOR bump]
+- Both PUT and GET round-trip cleanly; PUT/GET echoed every contracted
