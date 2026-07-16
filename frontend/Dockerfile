@@ -1,13 +1,17 @@
-FROM node:22-alpine
+FROM node:22-alpine AS build
 
-WORKDIR /app
+WORKDIR /app/frontend
 
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY frontend/package.json frontend/package-lock.json ./
+COPY tools /app/tools
+RUN npm ci
 
-COPY index.html app.js styles.css server.js ./
+COPY frontend/ ./
+RUN npm run build
 
-ENV FRONTEND_PORT=5173
+FROM nginx:1.27-alpine
+
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/frontend/dist /usr/share/nginx/html
+
 EXPOSE 5173
-
-CMD ["node", "server.js"]

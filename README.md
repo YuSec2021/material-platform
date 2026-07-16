@@ -17,11 +17,10 @@ AI物料中台是一套面向企业物料标准化、物料库治理、申请审
 
 ```mermaid
 flowchart LR
-    User["浏览器用户"] --> ReactUI["React/Vite 管理台<br/>prototype_code"]
+    User["浏览器用户"] --> ReactUI["React/Vite 管理台<br/>frontend"]
     User --> Nginx["Nginx 私有化入口<br/>nginx.conf"]
-    Nginx --> StaticUI["Node 静态前端<br/>frontend"]
+    Nginx --> ReactUI
     ReactUI --> API["FastAPI API<br/>backend/app/main.py"]
-    StaticUI --> API
     API --> DB[("SQLite 本地默认<br/>PostgreSQL Compose")]
     API --> Qdrant[("Qdrant 向量库")]
     API --> LLM["统一模型网关<br/>DashScope / Azure / OpenAI / vLLM / Ollama / DeepSeek / Moonshot / Custom"]
@@ -36,10 +35,9 @@ flowchart LR
 | `backend/app/models.py` | SQLAlchemy 2.0 数据模型，覆盖标准域、物料域、流程域、权限域、AI 配置、审计和规则引擎。 |
 | `backend/app/schemas.py` | Pydantic v2 请求/响应模型。 |
 | `backend/app/migrations/` | 数据迁移与 AI 配置迁移脚本。 |
-| `prototype_code/` | 当前主要业务管理台，React 18 + TypeScript + Vite。 |
-| `frontend/` | Docker Compose 私有化链路使用的轻量 Node 静态前端。 |
+| `frontend/` | 唯一业务管理台，React 18 + TypeScript + Vite，同时用于本地开发和 Docker Compose 私有化部署。 |
 | `tests/` | 后端 API 测试与根级 Playwright 冒烟测试。 |
-| `prototype_code/tests/` | 前端专项 Playwright 测试。 |
+| `frontend/tests/` | 前端专项 Playwright 测试。 |
 | `docker-compose.yml` | PostgreSQL、Qdrant、后端、前端、Nginx 私有化编排。 |
 | `nginx.conf` | 统一 HTTP 入口，代理 `/api`、`/docs`、`/health` 和前端路由。 |
 | `prd/` | PRD、TDD 和架构图资料。 |
@@ -131,7 +129,7 @@ flowchart LR
 - 容器编排：Docker Compose。
 - 统一入口：Nginx。
 - 后端镜像：`python:3.12-slim`。
-- 前端镜像：`node:22-alpine`。
+- 前端镜像：`node:22-alpine` 构建，`nginx:1.27-alpine` 运行。
 
 ## 本地启动
 
@@ -152,7 +150,7 @@ bash init.sh
 单独启动主前端：
 
 ```bash
-cd prototype_code
+cd frontend
 npm run dev -- --port 5173
 ```
 
@@ -201,7 +199,7 @@ curl -fsS http://localhost:8000/docs >/dev/null
 主前端构建：
 
 ```bash
-cd prototype_code
+cd frontend
 npm run build
 ```
 
@@ -232,4 +230,4 @@ pytest -q
 
 ## 当前说明
 
-当前主要业务实现位于 `backend/app/` 和 `prototype_code/`。`frontend/` 是 Compose 私有化入口使用的轻量静态前端，后续若要继续完善完整管理台体验，应优先在 `prototype_code/` 迭代。
+当前主要业务实现位于 `backend/app/` 和 `frontend/`。前端仅保留这一套 React/Vite 管理台，本地开发与 Docker Compose 部署共用同一份源码。

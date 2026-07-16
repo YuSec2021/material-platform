@@ -289,7 +289,6 @@ async def operational_audit_middleware(request: Request, call_next: Callable):
     if mutating and not excluded and response.status_code < 400:
         db = SessionLocal()
         try:
-            ensure_audit_log_schema()
             try:
                 auth = current_auth(request, db)
             except Exception:
@@ -1417,7 +1416,6 @@ def add_audit_log(
     after_value: dict[str, Any] | None,
     source: str = "human",
 ) -> None:
-    ensure_audit_log_schema()
     db.add(
         AuditLog(
             user=auth.username if auth else "system",
@@ -2668,7 +2666,6 @@ LIBRARY_ADMIN_PERMISSIONS = {
 def permission_catalog_entries(db: Session | None = None) -> list[PermissionEntry]:
     entries = [PermissionEntry(**item) for item in PERMISSION_CATALOG]
     if db is not None:
-        ensure_seed_material_context(db)
         libraries = db.query(MaterialLibrary).order_by(MaterialLibrary.id).all()
         entries.extend(
             PermissionEntry(
@@ -2762,10 +2759,10 @@ def current_auth(request: Request, db: Session) -> AuthContext:
     role_header = request.headers.get("X-User-Role", "").strip()
     if role_header == "super_admin":
         return super_admin_auth(db)
-    if role_header:
-        return regular_user_auth()
     user_id = request.headers.get("X-User-Id", "").strip()
     username = request.headers.get("X-Username", "").strip()
+    if role_header and not user_id and not username:
+        return regular_user_auth()
     if not user_id and not username:
         return super_admin_auth(db)
     user = db.get(User, int(user_id)) if user_id.isdigit() else None

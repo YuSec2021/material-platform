@@ -1,91 +1,62 @@
-## Sprint 61: AI 链路观测性：token 用量、cost、prompt 版本
+## Sprint 62: 前端全站 shadcn/ui 组件体系统一
 
-### Features
-- call_model_config 解析 OpenAI 兼容 usage.prompt_tokens/completion_tokens 入 TracerSpan
-- AiCapabilityPrice 表维护单价，算 cost_cny
-- prompt 模板加 prompt_version 字段
-
-### Success criteria (black-box-verifiable)
-- [ ] Capability token prices can be maintained through the public API and read back without source-code inspection.
-  Evaluator steps:
-  1. Start the system with `AI_DEBUG=true bash init.sh`.
-  2. Run `curl -i -sS -X PUT http://localhost:8000/api/v1/ai/capability-prices/category_match -H 'Content-Type: application/json' -d '{"prompt_price_per_1k_cny":0.01,"completion_price_per_1k_cny":0.02,"currency":"CNY","enabled":true}'`.
-  3. Assert the response has HTTP status `200 OK` or `201 Created` and JSON containing `capability` equal to `category_match`, `prompt_price_per_1k_cny` equal to `0.01`, `completion_price_per_1k_cny` equal to `0.02`, `currency` equal to `CNY`, and `enabled` equal to `true`.
-  4. Run `curl -sS http://localhost:8000/api/v1/ai/capability-prices/category_match`.
-  5. Assert the GET response returns the same persisted price fields plus a persistent identifier or timestamp field.
-
-- [ ] An OpenAI-compatible model response records prompt and completion token usage on the trace span returned by the debug trace API.
-  Evaluator steps:
-  1. Start the system with `AI_DEBUG=true bash init.sh`.
-  2. Start a local OpenAI-compatible stub with `python3 - <<'PY' >/tmp/sprint61-openai-stub.log 2>&1 & echo $! >/tmp/sprint61-openai-stub.pid
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = {
-            "id": "chatcmpl-sprint61",
-            "object": "chat.completion",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": "observed"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 123, "completion_tokens": 45, "total_tokens": 168},
-        }
-        encoded = json.dumps(body).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-HTTPServer(("127.0.0.1", 18061), Handler).serve_forever()
-PY`.
-  3. Create a model pointing to the stub by running `MODEL_ID=$(curl -sS -X POST http://localhost:8000/api/v1/models -H 'Content-Type: application/json' -d '{"display_name":"Sprint61 Usage Model","provider":"openai","model_name":"sprint61-usage-model","base_url":"http://127.0.0.1:18061/v1","api_key":"test-key","timeout":5,"temperature":0,"max_tokens":128,"enabled":true}' | jq -r '.id')`.
-  4. Create or update the capability mapping so `category_match` uses that model by running `curl -sS -X POST http://localhost:8000/api/v1/capability-mappings -H 'Content-Type: application/json' -d "{\"capability\":\"category_match\",\"primary_model_id\":${MODEL_ID},\"enabled\":true}" || true`, then if the POST reports a duplicate mapping, use `curl -sS http://localhost:8000/api/v1/capability-mappings` to find the `category_match` mapping id and run `curl -sS -X PUT http://localhost:8000/api/v1/capability-mappings/{mapping_id} -H 'Content-Type: application/json' -d "{\"primary_model_id\":${MODEL_ID},\"enabled\":true}"`.
-  5. Invoke the capability with `TRACE_ID=$(curl -sS -X POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke -H 'Content-Type: application/json' -d '{"prompt":"Sprint 61 usage capture check","messages":[{"role":"user","content":"Sprint 61 usage capture check"}]}' | jq -r '.trace_id')`.
-  6. Run `curl -sS http://localhost:8000/api/v1/debug/trace/${TRACE_ID}`.
-  7. Assert the response contains an `llm.provider.chat` span whose externally visible JSON includes `prompt_tokens` equal to `123`, `completion_tokens` equal to `45`, and `total_tokens` equal to `168` in the span metadata or explicit span fields.
-
-- [ ] The trace detail API exposes `cost_cny` calculated from persisted capability prices and captured token usage.
-  Evaluator steps:
-  1. Start the system with `AI_DEBUG=true bash init.sh`.
-  2. Run `curl -sS -X PUT http://localhost:8000/api/v1/ai/capability-prices/category_match -H 'Content-Type: application/json' -d '{"prompt_price_per_1k_cny":0.01,"completion_price_per_1k_cny":0.02,"currency":"CNY","enabled":true}'`.
-  3. Use the same local OpenAI-compatible stub shape from the previous criterion, returning `usage.prompt_tokens=123`, `usage.completion_tokens=45`, and `usage.total_tokens=168` at `http://127.0.0.1:18061/v1/chat/completions`.
-  4. Invoke `category_match` through `curl -sS -X POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke -H 'Content-Type: application/json' -d '{"prompt":"Sprint 61 cost check","messages":[{"role":"user","content":"Sprint 61 cost check"}]}'` and capture the returned `trace_id`.
-  5. Run `curl -sS http://localhost:8000/api/v1/debug/trace/{trace_id}` using the captured trace id.
-  6. Assert the LLM span includes `cost_cny` equal to `0.00213` or `0.002130`, calculated as `(123 / 1000 * 0.01) + (45 / 1000 * 0.02)`, and includes enough price metadata to identify the `category_match` price source.
-
-- [ ] Prompt templates persist `prompt_version`, and invocations using a template expose that prompt version in trace detail.
-  Evaluator steps:
-  1. Start the system with `AI_DEBUG=true bash init.sh`.
-  2. Run `curl -i -sS -X POST http://localhost:8000/api/v1/ai/prompt-templates -H 'Content-Type: application/json' -d '{"template_key":"sprint61-category-match","capability":"category_match","prompt_version":"v2026.06.04-contract","content":"Classify material: {{material_name}}","enabled":true}'`.
-  3. Assert the response has HTTP status `201 Created` or `200 OK` and JSON containing `template_key` equal to `sprint61-category-match`, `capability` equal to `category_match`, `prompt_version` equal to `v2026.06.04-contract`, and `enabled` equal to `true`.
-  4. Run `curl -sS http://localhost:8000/api/v1/ai/prompt-templates/sprint61-category-match` and assert the same `prompt_version` and `content` are returned.
-  5. Configure `category_match` to use an enabled local model, then invoke the template with `TRACE_ID=$(curl -sS -X POST http://localhost:8000/api/v1/ai/capabilities/category_match/invoke -H 'Content-Type: application/json' -d '{"template_key":"sprint61-category-match","template_variables":{"material_name":"高压电缆"}}' | jq -r '.trace_id')`.
-  6. Assert the invoke response content or trace metadata shows the rendered prompt value `Classify material: 高压电缆`.
-  7. Run `curl -sS http://localhost:8000/api/v1/debug/trace/${TRACE_ID}` and assert at least one span exposes `template_key` equal to `sprint61-category-match` and `prompt_version` equal to `v2026.06.04-contract`.
-
-### Scope
-
-In:
-- Persist prompt/completion/total token counts from OpenAI-compatible `usage` payloads when `call_model_config` returns successfully.
-- Persist and expose AI capability token prices, keyed by capability, with prompt and completion prices in CNY per 1,000 tokens.
-- Calculate and expose `cost_cny` on trace detail using captured token counts and the active `AiCapabilityPrice` record for the invoked capability.
-- Add prompt template persistence with `template_key`, `capability`, `prompt_version`, `content`, and `enabled`.
-- Allow capability invocation to use a stored prompt template and include `template_key` and `prompt_version` in trace detail.
-- Keep all Sprint 61 verification possible through HTTP API calls against `http://localhost:8000`.
-
-Out:
-- Frontend dashboards, charts, or navigation changes for AI observability.
-- Authentication or tenant-scoping changes beyond existing API behavior.
-- Historical backfill for traces created before Sprint 61.
-- Non-CNY pricing, exchange-rate conversion, or per-provider billing exports.
-- Streaming token accounting.
-- Changes to the Evaluator-owned `eval-result-*` files or any `SPRINT PASS` / `SPRINT FAIL` verdict.
-
----
 CONTRACT APPROVED
 
-Sprint: 61
-Approved criteria: 4
-Notes:
-- C1: AI_DEBUG=true is redundant (codebase default is "true") but harmless. New endpoint PUT/GET /api/v1/ai/capability-prices/{capability} is an acceptable Sprint 61 deliverable.
-- C2: The Python http.server stub is necessary because the existing `mock` provider short-circuits via `local_model_completion` and does not emit `usage` data, so the stub is the only way to exercise the OpenAI usage parsing path. "Metadata or explicit span fields" is acceptable since TracerSpan.metadata_json stores an arbitrary dict. Step 4 leaves mapping-id extraction to the evaluator — use `jq -r '.[] | select(.capability=="category_match") | .id'` on the GET response.
-- C3: Accepting both `0.00213` and `0.002130` covers Python float representation. No rounding rule is required.
-- C4: New endpoints POST/GET /api/v1/ai/prompt-templates are acceptable Sprint 61 deliverables. Step 7 requires template_key and prompt_version visible on at least one span in the trace detail JSON.
+### Features
+- Establish a shadcn-managed Tailwind CSS 4 and Radix design system with `components.json`, new-york styling, CSS variables, Lucide icons, stable aliases, and preserved brand themes.
+- Migrate shared UI compatibility layers, application layout, login, and dashboard to shadcn primitives while preserving existing public props, routes, APIs, and business behavior.
+- Migrate the standard-management work package without changing category virtualization, lazy loading, import, CRUD, or category-attribute behavior.
+- Migrate the material-management work package without changing permissions, lifecycle, AI material flows, coding rules, recode execution/rollback, import, or export behavior.
+- Migrate application-workflow and system-management pages without changing approval transitions, RBAC, file uploads, or configuration behavior.
+- Migrate AI management, rule engine, and development trace pages without changing model, capability mapping, token chart, rule evaluation, or trace behavior.
+- Replace browser-native confirmation flows and hard-coded state colors with accessible shadcn interactions and semantic light/dark theme tokens.
+- Add focused regression coverage and keep build, application type-check, lint, Docker frontend image build, and representative Playwright workflows green without weakening tests.
+
+### Success criteria (black-box-verifiable)
+- [ ] The application shell and shared interaction patterns render consistently in light and dark themes, and dialogs provide accessible keyboard behavior.
+  Evaluator steps:
+  1. Start the system with `bash init.sh`, open `http://localhost:5173/login`, sign in as `super_admin`, and assert navigation reaches `http://localhost:5173/`.
+  2. Toggle the theme from the header and assert the document switches between light and dark presentation while the sidebar, header, dashboard cards, text, borders, and status indicators remain visibly readable.
+  3. Open the About dialog from `http://localhost:5173/`, assert an element with role `dialog` is visible, press Tab to verify focus stays within the dialog, press Escape, and assert focus returns to the About trigger.
+  4. At a 390x844 viewport, open the mobile navigation sheet, follow a navigation item, and assert the selected page renders without horizontal page overflow.
+
+- [ ] Standard-management pages retain their existing CRUD, category-tree, import, and category-attribute behavior through consistent accessible controls.
+  Evaluator steps:
+  1. Open `http://localhost:5173/standard/category`, expand and collapse a category node, select two different categories, and assert the category content and single attributes panel follow the current selection.
+  2. On `http://localhost:5173/standard/category`, open an add/edit dialog, assert labeled form controls and Cancel/Save buttons are keyboard reachable, then close it with Escape without changing data.
+  3. Open `http://localhost:5173/standard/brand`, create or edit a uniquely named brand, assert a success notification and updated table row, then invoke delete and assert an accessible confirmation dialog appears before deletion.
+  4. Open the category import flow at `http://localhost:5173/standard/category`, provide an unsupported file, and assert a visible error appears without creating categories.
+
+- [ ] Material-management pages retain material-library permissions, material lifecycle, AI flows, code rules, and recode confirmation order.
+  Evaluator steps:
+  1. Open `http://localhost:5173/material/library`, create or edit a uniquely named material library, select its administrators and category libraries, save, and assert the visible row reflects the selections.
+  2. Open a material-library detail view from `http://localhost:5173/material/library`, switch across its tabs, open the coding-rule editor and recode preview, and assert each surface uses a visible dialog or tab panel without losing the selected library.
+  3. From `http://localhost:5173/materials`, open the material create/edit flow and the AI material flow, assert labeled fields and validation messages remain usable, and cancel without changing data.
+  4. Invoke a destructive or recode action and assert a confirmation dialog appears before execution and that cancel leaves the material state unchanged.
+
+- [ ] Application-workflow and system-management pages preserve approval state transitions and RBAC while using consistent form and confirmation interactions.
+  Evaluator steps:
+  1. Open `http://localhost:5173/application/category`, create or open an application, and assert its status, form content, timeline, and available actions match its current workflow state.
+  2. Invoke an approval, rejection, deletion, disable, or password-reset action from an applicable workflow or system page and assert a role `dialog` confirmation is shown instead of a browser-native confirmation prompt; cancel and assert no state changes.
+  3. Open `http://localhost:5173/system/users`, `http://localhost:5173/system/roles`, and `http://localhost:5173/system/permissions`, and assert the visible tables/forms remain operable with labeled controls and permission switches.
+  4. Sign in as a non-super-admin user and assert super-admin-only navigation and mutation controls remain unavailable.
+
+- [ ] AI management, rule engine, and development trace surfaces retain their existing data, forms, charts, and restricted behavior.
+  Evaluator steps:
+  1. As `super_admin`, open `http://localhost:5173/ai/models`, open a model create/edit dialog, verify provider, model, endpoint, secret, enabled, and advanced controls remain labeled and usable, then cancel without saving.
+  2. Open `http://localhost:5173/ai/capability-mappings`, edit a mapping, verify primary and fallback model selections prevent an invalid duplicate selection, cancel, and assert the displayed mapping is unchanged.
+  3. Open `http://localhost:5173/ai/token-usage` and assert cards, tables, chart labels, and status indicators remain readable in both light and dark themes.
+  4. Start the system with `AI_DEBUG=true bash init.sh`, sign in as `super_admin`, open `http://localhost:5173/rules`, enter a unique nonexistent term in the rule search field, and assert the table shows no matching result; then open `http://localhost:5173/debug/trace`, set both date fields to `2099-01-01`, apply the filter, and assert the visible trace count is `0 traces` and the empty-state text is shown.
+
+- [ ] Reusable controls expose consistent semantic states and no browser-native confirmation blocks representative business workflows.
+  Evaluator steps:
+  1. Across `http://localhost:5173/standard/brand`, `http://localhost:5173/material/library`, `http://localhost:5173/application/category`, `http://localhost:5173/system/users`, and `http://localhost:5173/ai/models`, assert each primary create action is exposed as an enabled button with an accessible name, each destructive action is exposed as a destructive button or menu item with an accessible name, unavailable actions expose the native `disabled` or `aria-disabled=true` state, pending actions expose `aria-busy=true`, and success/warning/error results expose visible text in a status, badge, alert, or notification element.
+  2. Register a browser dialog listener, invoke representative delete/disable/destructive actions on those pages, and assert no native `confirm` dialog event occurs while an in-page role `dialog` confirmation is rendered.
+  3. Use keyboard-only Tab, Shift+Tab, Enter, Space, and Escape on representative dialogs, selects, switches, and buttons, and assert focus remains visible and the expected interaction completes.
+
+- [ ] The unified frontend passes its external build, CLI, container, and browser regression gates.
+  Evaluator steps:
+  1. From the repository root run `cd frontend && npm run build`, `npm run type-check`, and `npm run lint`; assert every command exits with code 0.
+  2. From the repository root run `docker compose config --quiet` and `docker compose build frontend`; assert both exit with code 0.
+  3. Run the focused Sprint 62 Playwright suite against `http://localhost:5173` and assert the application-shell, standard, material, workflow/system, AI/rules, theme, keyboard, and confirmation scenarios all pass.
+  4. From the repository root run `cd frontend && npm run bundle:check`; assert it reads the committed pre-Sprint-62 baseline from `bundle-size-baseline.json`, prints the baseline and current total minified JavaScript byte counts, exits with code 0, and enforces a maximum increase of exactly 5 percent.

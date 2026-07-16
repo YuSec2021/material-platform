@@ -83,7 +83,7 @@
     }
   },
   "tech_stack": {
-    "frontend": "React 18 + TypeScript 5 + Ant Design 5 + Vite 5 + Zustand 4 + TanStack Query 5 + React Router 6",
+    "frontend": "React 18.3 + TypeScript 5.9 + Vite 6 + Tailwind CSS 4 + shadcn/ui (Radix) + Zustand 5 + TanStack Query 5 + React Router 7",
     "backend": "FastAPI 0.128+ (Python 3.11+, asyncio原生) + Pydantic v2 + SQLAlchemy 2.0",
     "db": "PostgreSQL 15+ (业务schema + tracer独立schema) + Qdrant向量数据库 (混合检索: Dense+Sparse BM25)",
     "llm": "统一模型网关 - DashScope(Qwen3-Max) / Azure OpenAI / 本地vLLM / Ollama, OpenAI兼容格式",
@@ -507,7 +507,7 @@
         "Update app.system copy to 专属于企业的AI物料中台",
         "Add a top-bar 关于 button next to the user avatar in MainLayout",
         "Show an About modal or alert dialog with name 智料通, version v4.2.0, and description 专属于企业的AI物料中台",
-        "Restrict implementation to prototype_code/src/ with no backend API changes"
+        "Restrict implementation to frontend/src/ with no backend API changes"
       ]
     },
     {
@@ -517,7 +517,7 @@
         "Adjust shared Dialog/Sheet/Modal overlay styling so modal backgrounds are semi-transparent instead of fully black",
         "Preserve visual page context behind create/edit dialogs while dimming the background",
         "Apply the overlay behavior consistently to all frontend create/edit dialogs such as 新增品牌 and 新建物料库",
-        "Restrict implementation to prototype_code/src/ style or component files with no backend API changes"
+        "Restrict implementation to frontend/src/ style or component files with no backend API changes"
       ]
     },
     {
@@ -530,7 +530,7 @@
         "Implement /ai/token-usage as a simple statistics dashboard aggregating call count, capability distribution, and model distribution from existing /api/v1/debug/trace data",
         "Restrict AI management navigation and routes to super_admin users, redirecting non-super_admin users to the home page",
         "Follow existing shadcn-ui layout and zh-CN/en-US i18n patterns, with status badges for ok, error, and untested connection states",
-        "Restrict implementation to frontend code under prototype_code/src/ with no backend API changes"
+        "Restrict implementation to frontend code under frontend/src/ with no backend API changes"
       ]
     },
     {
@@ -1187,6 +1187,76 @@
       ],
       "status": "planned",
       "origin": "bugfix"
+    },
+    {
+      "id": 58,
+      "title": "类目树虚拟化与后端分页懒加载",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "npx playwright test"
+      },
+      "features": [
+        "Replace the recursive category tree rendering on /standard/category with react-arborist virtualized tree rendering so large category libraries only render visible nodes while preserving selection, search, attributes panel, import/export, and batch editing behavior.",
+        "Extend GET /api/v1/categories with limit and offset query parameters, defaulting to limit=200 and offset=0, while preserving existing parent_id, category_library_id, and level filters and leaving CategoryOut unchanged.",
+        "When a category tree node is expanded, lazily load child categories in batches of 200 and incrementally merge them into the frontend category cache instead of recomputing the full knownCategories map.",
+        "Keep the Expand All button available by updating expanded state while relying on virtualization to keep the DOM limited to viewport-visible tree rows.",
+        "Memoize category tree row rendering and selected category path lookup so large trees avoid repeated O(N) recalculation during expand, collapse, scroll, and selection interactions."
+      ],
+      "status": "planned",
+      "origin": "minor_feature"
+    },
+    {
+      "id": 59,
+      "title": "后端基础设施观测性：Prometheus 指标 + 慢 SQL 日志",
+      "features": [
+        "挂 prometheus-fastapi-instrumentator 中间件",
+        "暴露 /metrics 端点",
+        "SQLAlchemy event hook 写 slow_query_log 表（>200ms）"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": 60,
+      "title": "前端 web-vitals 性能上报到后端",
+      "features": [
+        "引入 web-vitals 包，监听 LCP/CLS/INP/FID/TTFB",
+        "POST /api/v1/telemetry/web-vitals 上报",
+        "后端 telemetry_web_vitals 表持久化"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": 61,
+      "title": "AI 链路观测性：token 用量、cost、prompt 版本",
+      "features": [
+        "call_model_config 解析 OpenAI 兼容 usage.prompt_tokens/completion_tokens 入 TracerSpan",
+        "AiCapabilityPrice 表维护单价，算 cost_cny",
+        "prompt 模板加 prompt_version 字段"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": 62,
+      "title": "前端全站 shadcn/ui 组件体系统一",
+      "verification": {
+        "mode": "browser",
+        "base_url": "http://localhost:5173",
+        "command": "cd frontend && npm run test:e2e"
+      },
+      "features": [
+        "建立 components.json，将现有 Tailwind CSS 4、Radix、new-york 风格、CSS Variables、Lucide 图标和路径别名纳入 shadcn CLI 管理，保留现有品牌主题",
+        "改造公共组件兼容层与应用框架：Modal/Dialog、DataTable/Table/Pagination、StatusBadge/Badge、ApiState、AlertDialog、主布局、登录页和仪表盘；保持现有公共 Props、路由、API 与业务数据结构兼容",
+        "工作包一（设计系统与公共组件）：统一语义色、明暗主题、键盘操作、焦点管理及公共组件交互规范",
+        "工作包二（标准管理）：统一类目库、类目树及属性面板、品名、属性、品牌页面的筛选、表格、表单、弹窗、导入和批量操作，不改变类目树虚拟化与懒加载行为",
+        "工作包三（物料管理）：统一物料、物料库、详情、编码规则、重编码预览/执行/回滚和 AI 物料弹窗，不改变权限、确认顺序或数据结构",
+        "工作包四（申请流程与系统管理）：统一申请列表/详情/审批、用户、角色、权限、系统配置、原因选项和审批模式，移除原生确认框并保持 RBAC 行为",
+        "工作包五（AI、规则引擎与开发调试）：统一模型网关、能力映射、Token 统计、规则分类/列表/编辑器及 Trace/组件 smoke 页面，保留 API Key 遮罩、fallback、图表和开发入口行为",
+        "将业务控件和固定状态颜色迁移为 shadcn 组件与语义化主题令牌，确保浅色/深色主题可读且危险、警告、成功状态含义一致",
+        "补齐无障碍与质量门禁：Dialog/Select/Form 键盘与焦点行为、生产构建、TypeScript、ESLint、Docker 镜像和覆盖关键业务域的 Playwright E2E 全部通过"
+      ],
+      "status": "planned",
+      "origin": "major_feature"
     }
   ]
 }
