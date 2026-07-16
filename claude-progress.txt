@@ -1,26 +1,16 @@
-Project summary: Sprints 1-61 PASS. Frontend is React/Vite/shadcn-ui in prototype_code/; backend is FastAPI + SQLAlchemy. Sprints 59-61 added observability (Prometheus /metrics + slow SQL log + web-vitals telemetry + AI token/cost/prompt-version).
+Project summary: Sprints 1-61 PASS. The sole frontend is React/Vite/shadcn-ui in frontend/; backend is FastAPI + SQLAlchemy. Sprints 59-61 added observability (Prometheus /metrics + slow SQL log + web-vitals telemetry + AI token/cost/prompt-version).
 
 Sprint 61: AI observability — token usage, cost, prompt version
-Status: SPRINT PASS (2026-06-04). Implemented ai_capability_prices + ai_prompt_templates tables, PUT/GET /api/v1/ai/capability-prices/{capability}, POST/GET /api/v1/ai/prompt-templates, OpenAI-compatible usage parsing into TracerSpan metadata, cost_cny computation, and template-based prompt rendering with prompt_version.
-Verification: 4/4 criteria PASS; sprint61 pytest (1/1), vite build clean, tsc src clean; non-AI regression 110/110.
-Commit handoff: merged to main, version bumped to v16.2.0 (minor_feature → MINOR).
+Status: SPRINT PASS (2026-06-04). Added capability pricing, prompt templates/versioning, OpenAI-compatible usage parsing, and cost calculation.
+Verification: 4/4 criteria PASS; sprint61 pytest, Vite build, tsc, and non-AI regression passed.
+Commit handoff: merged to main, version bumped to v16.2.0.
 
-Sprint 60: Frontend web-vitals performance telemetry to backend
-Status: SPRINT PASS (2026-06-04). Implemented web-vitals@3.5.2 frontend listeners, POST /api/v1/telemetry/web-vitals with Pydantic Literal allowlist, telemetry_web_vitals table, and GET /api/v1/telemetry/web-vitals?client_metric_id=... read endpoint.
-Verification: 4/4 criteria PASS; sprint60 pytest (2/2), vite build clean, tsc src clean; non-AI regression 109/109.
-Commit handoff: merged to main, version bumped to v16.1.0 (minor_feature → MINOR).
+Sprint 60: Frontend web-vitals performance telemetry
+Status: SPRINT PASS (2026-06-04). Added web-vitals listeners, telemetry ingestion/read APIs, and persistence.
+Verification: 4/4 criteria PASS; sprint60 pytest, Vite build, tsc, and non-AI regression passed.
+Commit handoff: merged to main, version bumped to v16.1.0.
 
 Sprint 59: Backend observability metrics and slow SQL logging
-Status: SPRINT PASS (2026-06-04). Implemented Prometheus /metrics endpoint with request count + duration, SQLAlchemy before/after_cursor_execute listeners, slow_query_log table with SQL sanitizer, and /api/v1/observability/slow-queries read API.
-Verification: 4/4 criteria PASS; sprint59 pytest (4/4), vite build clean, tsc src clean; non-AI regression 107/107.
-Commit handoff: merged to main, version bumped to v16.0.0 (major_feature → MAJOR).
-
-Sprint 58: Category tree virtualization and paginated lazy loading
-Status: SPRINT PASS (2026-06-01). Implemented virtualized category tree, 200-row lazy-load batches, /api/v1/categories limit/offset, React.memo, and path cache.
-Verification: 4/4 criteria PASS; sprint58 pytest, Vite build, and tsc src clean.
-Commit handoff: implemented and merged.
-
-Sprint 57: Category attributes panel layout fix
-Status: SPRINT PASS. Moved CategoryPropertiesPanel into the right category content container below the category table area.
-Verification: evaluator passed after layout fix; local frontend build passed. Playwright remained sandbox-limited locally.
-Commit handoff: merged to main after PASS.
+Status: SPRINT PASS (2026-06-04). Added Prometheus metrics, slow-query logging, storage, and read API.
+Verification: 4/4 criteria PASS; sprint59 pytest, Vite build, tsc, and non-AI regression passed.
+Commit handoff: merged to main, version bumped to v16.0.0.

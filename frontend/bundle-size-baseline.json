@@ -1,0 +1,9 @@
+{
+  "description": "Pre-Sprint 62 production bundle baseline (Vite 6.3.5)",
+  "maximumIncreasePercent": 5,
+  "assets": {
+    "javascript": 1319563,
+    "css": 112670,
+    "total": 1432233
+  }
+}
