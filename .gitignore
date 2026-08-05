@@ -1,4 +1,6 @@
 .DS_Store
+.env
+.idea/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -8,3 +10,14 @@ backend/material_retrieval.db
 logs/
 frontend/node_modules/
 frontend/dist/
+outputs/
+playwright-report/
+test-results/
+frontend/test-results/
+.sprintfoundry/
+migration-plan-*.json
+eval-result-*.md
+eval-sprint*
+debug-sprint*
+quality-gate-*.md
+run-state*.json
