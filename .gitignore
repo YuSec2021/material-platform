@@ -14,10 +14,4 @@ outputs/
 playwright-report/
 test-results/
 frontend/test-results/
-.sprintfoundry/
 migration-plan-*.json
-eval-result-*.md
-eval-sprint*
-debug-sprint*
-quality-gate-*.md
-run-state*.json
