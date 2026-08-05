@@ -160,7 +160,7 @@ test.afterAll(async () => {
 
 async function pageForTest() {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable in this sandbox: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333", viewport: { width: 1440, height: 900 } });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434", viewport: { width: 1440, height: 900 } });
   await (context as any).addInitScript(() => {
     window.localStorage.setItem("ai-material-auth-session", JSON.stringify({ username: "super_admin", role: "super_admin" }));
     window.localStorage.setItem("theme", "dark");

@@ -10,7 +10,8 @@ set -euo pipefail
 # Prerequisites checked:
 #   - Python 3.11+
 #   - Node.js 18+ and npm
-#   - Docker and Docker Compose (for PostgreSQL + Qdrant)
+#   - Access to the PostgreSQL instance managed by aios-infra
+#   - Docker and Docker Compose (for Qdrant when it is not already running)
 #   - Git
 #
 # Exits non-zero on any failure. Each step is isolated and reported.
@@ -26,6 +27,25 @@ info()  { echo "[INFO]  $*" >&2; }
 warn()  { echo "[WARN]  $*" >&2; }
 err()   { echo "[ERROR] $*" >&2; }
 fail()  { echo "[ERROR] $*" >&2; exit 1; }
+
+read_env_value() {
+  local key="$1"
+  local env_file="$PROJECT_DIR/.env"
+  [[ -f "$env_file" ]] || return 0
+  awk -v key="$key" '
+    index($0, key "=") == 1 {
+      value = substr($0, length(key) + 2)
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      if ((substr(value, 1, 1) == "\"" && substr(value, length(value), 1) == "\"") ||
+          (substr(value, 1, 1) == "\047" && substr(value, length(value), 1) == "\047")) {
+        value = substr(value, 2, length(value) - 2)
+      }
+      print value
+      exit
+    }
+  ' "$env_file"
+}
 
 need_cmd() {
   if ! command -v "$1" &>/dev/null; then
@@ -89,6 +109,25 @@ kill_project_on_port() {
 # Step 0: Environment sanity check
 # -----------------------------------------------------------------------------
 info "=== Step 0: Checking environment ==="
+
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  DATABASE_URL="$(read_env_value DATABASE_URL)"
+fi
+[[ -n "$DATABASE_URL" ]] || fail "DATABASE_URL is required in the environment or .env."
+case "$DATABASE_URL" in
+  postgresql://*)
+    DATABASE_URL="postgresql+psycopg://${DATABASE_URL#postgresql://}"
+    ;;
+  postgres://*)
+    DATABASE_URL="postgresql+psycopg://${DATABASE_URL#postgres://}"
+    ;;
+  postgresql+psycopg://*)
+    ;;
+  *)
+    fail "DATABASE_URL must point to PostgreSQL using the psycopg driver."
+    ;;
+esac
+export DATABASE_URL
 
 if command -v python3.12 &>/dev/null; then
   PYTHON_BIN="$(command -v python3.12)"
@@ -202,87 +241,65 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 3: Docker services (PostgreSQL + Qdrant)
+# Step 3: External PostgreSQL and local vector service
 # -----------------------------------------------------------------------------
-info "=== Step 3: Starting Docker services ==="
+info "=== Step 3: Checking infrastructure services ==="
 
 DOCKER_COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 COMPOSE_PROJECT_NAME="ai-material-platform"
 
-# Port overrides (customizable via env). Defaults match the in-container ports
-# exposed on the host by docker-compose.yml.
-POSTGRES_PORT=${POSTGRES_PORT:-5432}
+# Qdrant port overrides (customizable via env). PostgreSQL connection details
+# come exclusively from DATABASE_URL and are owned by aios-infra.
 QDRANT_HTTP_PORT=${QDRANT_HTTP_PORT:-6333}
 QDRANT_GRPC_PORT=${QDRANT_GRPC_PORT:-6334}
 
 # Export so docker-compose ${VAR} substitution picks them up
-export POSTGRES_PORT QDRANT_HTTP_PORT QDRANT_GRPC_PORT
+export QDRANT_HTTP_PORT QDRANT_GRPC_PORT
 
-if [[ -f "$DOCKER_COMPOSE_FILE" ]]; then
-  # Check if Docker daemon is running
-  if ! docker info &>/dev/null; then
-    warn "Docker daemon is not running. Skipping PostgreSQL and Qdrant containers."
-    warn "Local development will use SQLite unless DATABASE_URL points to an external database."
-  else
-    info "Using docker-compose file: $DOCKER_COMPOSE_FILE"
-
-    # If a Postgres or Qdrant container is already serving the requested ports
-    # under any compose project, reuse it instead of starting a new one (avoids
-    # Bind-for-0.0.0.0:NNNN port-is-already-allocated errors when another
-    # compose project is already managing those services). We check the host
-    # port directly via nc — this catches both single-port mappings
-    # ("0.0.0.0:5432->5432/tcp") and port-range mappings ("0.0.0.0:6333-6334->...").
-    POSTGRES_RUNNING=""
-    QDRANT_RUNNING=""
-    if is_port_in_use "$POSTGRES_PORT"; then
-      POSTGRES_RUNNING="yes"
-    fi
-    if is_port_in_use "$QDRANT_HTTP_PORT"; then
-      QDRANT_RUNNING="yes"
-    fi
-
-    if [[ -n "$POSTGRES_RUNNING" && -n "$QDRANT_RUNNING" ]]; then
-      info "PostgreSQL and Qdrant already running on requested ports; reusing existing containers."
-    else
-      # Stop existing containers for idempotency (only for our own project)
-      (cd "$PROJECT_DIR" && docker-compose -p "$COMPOSE_PROJECT_NAME" down 2>/dev/null || true)
-
-      info "Starting PostgreSQL (host port $POSTGRES_PORT) and Qdrant (HTTP $QDRANT_HTTP_PORT / gRPC $QDRANT_GRPC_PORT) containers..."
-      cd "$PROJECT_DIR"
-      docker-compose -p "$COMPOSE_PROJECT_NAME" up -d postgres qdrant
-    fi
-
-    info "Waiting for PostgreSQL to be ready..."
-    # Discover whichever container is actually serving $POSTGRES_PORT
-    # (could be ours under $COMPOSE_PROJECT_NAME, or a pre-existing one).
-    PG_CONTAINER="$(docker ps --filter "publish=${POSTGRES_PORT}" --format '{{.Names}}' | head -1 || true)"
-    max_wait=30
-    count=0
-    while ! docker exec "${PG_CONTAINER:-${COMPOSE_PROJECT_NAME}-postgres-1}" pg_isready -U material -d material_retrieval &>/dev/null 2>&1; do
-      sleep 1
-      count=$((count + 1))
-      if [[ $count -ge $max_wait ]]; then
-        fail "PostgreSQL failed to start within ${max_wait}s"
-      fi
-    done
-    info "PostgreSQL is ready."
-
-    info "Waiting for Qdrant to be ready..."
-    count=0
-    while ! curl -sf "http://localhost:${QDRANT_HTTP_PORT}/healthz" &>/dev/null && ! curl -sf "http://localhost:${QDRANT_HTTP_PORT}/health" &>/dev/null; do
-      sleep 1
-      count=$((count + 1))
-      if [[ $count -ge $max_wait ]]; then
-        warn "Qdrant health check failed (may still be starting). Proceeding..."
-        break
-      fi
-    done
-    info "Qdrant check complete."
-  fi
-else
-  warn "No docker-compose.yml found. Skipping Docker services."
-  warn "To run without Docker, ensure PostgreSQL (5432) and Qdrant (6333) are available externally."
+# Load selected values as plain data from the local .env file. Do not source
+# the file because environment files must not execute shell code.
+if [[ -z "${MILVUS_URI:-}" && -f "$PROJECT_DIR/.env" ]]; then
+  MILVUS_URI="$(read_env_value MILVUS_URI)"
 fi
+export MILVUS_URI
+
+info "Checking aios-infra PostgreSQL connection..."
+if ! (cd "$BACKEND_DIR" && PYTHONPATH="$BACKEND_DIR" python - <<'PY'
+from sqlalchemy import text
+
+from app.database import engine
+
+with engine.connect() as connection:
+    connection.execute(text("SELECT 1"))
+PY
+); then
+  fail "The aios-infra PostgreSQL instance configured by DATABASE_URL is unavailable. Start or repair it from aios-infra; this project will not provision a replacement."
+fi
+info "Using the existing PostgreSQL instance managed by aios-infra."
+
+if is_port_in_use "$QDRANT_HTTP_PORT"; then
+  info "Qdrant is already running on port $QDRANT_HTTP_PORT; reusing it."
+elif [[ ! -f "$DOCKER_COMPOSE_FILE" ]]; then
+  warn "No docker-compose.yml found and Qdrant is unavailable on port $QDRANT_HTTP_PORT."
+elif ! docker info &>/dev/null; then
+  fail "Docker daemon is not running and Qdrant is unavailable. PostgreSQL remains managed by aios-infra."
+else
+  info "Starting this project's Qdrant service only."
+  (cd "$PROJECT_DIR" && docker-compose -p "$COMPOSE_PROJECT_NAME" up -d qdrant)
+fi
+
+info "Waiting for Qdrant to be ready..."
+max_wait=30
+count=0
+while ! curl -sf "http://localhost:${QDRANT_HTTP_PORT}/healthz" &>/dev/null && ! curl -sf "http://localhost:${QDRANT_HTTP_PORT}/health" &>/dev/null; do
+  sleep 1
+  count=$((count + 1))
+  if [[ $count -ge $max_wait ]]; then
+    warn "Qdrant health check failed (may still be starting). Proceeding..."
+    break
+  fi
+done
+info "Qdrant check complete."
 
 # -----------------------------------------------------------------------------
 # Step 4: Database migrations
@@ -314,7 +331,7 @@ fi
 # -----------------------------------------------------------------------------
 info "=== Step 5: Starting backend server ==="
 
-BACKEND_PORT=${BACKEND_PORT:-24334}
+BACKEND_PORT=${BACKEND_PORT:-24435}
 mkdir -p "$PROJECT_DIR/logs"
 stop_pid_file "$PROJECT_DIR/logs/backend.pid"
 stop_pid_file "$PROJECT_DIR/logs/frontend.pid"
@@ -337,33 +354,17 @@ if [[ -d "$BACKEND_DIR" ]] && [[ -f "$BACKEND_DIR/main.py" || -f "$BACKEND_DIR/a
   fi
 
   if [[ -n "$BACKEND_MAIN" ]]; then
-    BACKEND_PID=$(PYTHONPATH="$BACKEND_DIR" "$VENV_DIR/bin/python" - "$VENV_DIR/bin/python" "$BACKEND_DIR" "$BACKEND_PORT" "$PROJECT_DIR/logs/backend.log" "$POSTGRES_PORT" "$QDRANT_HTTP_PORT" <<'PY'
+    BACKEND_PID=$(PYTHONPATH="$BACKEND_DIR" "$VENV_DIR/bin/python" - "$VENV_DIR/bin/python" "$BACKEND_DIR" "$BACKEND_PORT" "$PROJECT_DIR/logs/backend.log" "$QDRANT_HTTP_PORT" <<'PY'
 import os
 import subprocess
 import sys
 
-python_bin, backend_dir, port, log_path, postgres_port, qdrant_http_port = sys.argv[1:]
+python_bin, backend_dir, port, log_path, qdrant_http_port = sys.argv[1:]
 env = os.environ.copy()
 env["PYTHONPATH"] = backend_dir
 
-# DATABASE_URL / QDRANT_URL are opt-in: only inject when the user explicitly
-# sets USE_POSTGRES=1 / USE_QDRANT=1. By default the backend uses the SQLite
-# database shipped in the deployment package (backend/material_retrieval.db),
-# which is what the production data lives in. Pointing the backend at the
-# local Postgres container by default would silently drop the user onto an
-# empty database and make every API call 404.
-if not env.get("DATABASE_URL") and env.get("USE_POSTGRES") == "1":
-    import socket
-    try:
-        with socket.create_connection(("localhost", int(postgres_port)), timeout=1):
-            postgres_up = True
-    except Exception:
-        postgres_up = False
-    if postgres_up:
-        env["DATABASE_URL"] = (
-            f"postgresql+psycopg://material:material_password@localhost:"
-            f"{postgres_port}/material_retrieval"
-        )
+if not env.get("DATABASE_URL"):
+    raise RuntimeError("DATABASE_URL is required")
 
 if not env.get("QDRANT_URL") and env.get("USE_QDRANT") == "1":
     import socket
@@ -416,7 +417,7 @@ fi
 # -----------------------------------------------------------------------------
 info "=== Step 6: Starting frontend dev server ==="
 
-FRONTEND_PORT=${FRONTEND_PORT:-24333}
+FRONTEND_PORT=${FRONTEND_PORT:-24434}
 kill_on_port "$FRONTEND_PORT"
 
 if [[ -d "$FRONTEND_DIR" ]] && [[ -f "$FRONTEND_DIR/package.json" ]]; then
@@ -485,6 +486,8 @@ info "  Process PIDs:"
 info ""
 info "  Docker containers:"
 docker ps --filter "name=${COMPOSE_PROJECT_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
+info "  PostgreSQL: managed externally by aios-infra (DATABASE_URL)"
 info ""
-info "  To stop: docker-compose -p $COMPOSE_PROJECT_NAME down"
+info "  To stop project-owned containers: docker-compose -p $COMPOSE_PROJECT_NAME down"
+info "  This does not manage the aios-infra PostgreSQL instance."
 info "============================================================"

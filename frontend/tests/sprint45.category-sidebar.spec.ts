@@ -126,11 +126,14 @@ async function mockBackend(page: Page) {
     const url = new URL(request.url());
     const parentId = url.searchParams.get("parent_id");
     const libraryId = url.searchParams.get("category_library_id");
+    const level = url.searchParams.get("level");
     await route.fulfill({
       json: categories.filter((category) =>
         parentId !== null
           ? category.parent_category_id === Number(parentId)
-          : category.parent_category_id === null && (libraryId === null || category.category_library_id === Number(libraryId)),
+          : libraryId !== null && level === null
+            ? category.category_library_id === Number(libraryId)
+            : category.parent_category_id === null && (libraryId === null || category.category_library_id === Number(libraryId)),
       ),
     });
   });
@@ -167,6 +170,100 @@ test("category page shows a MaterialList-style sidebar and filters table by sele
   await page.getByPlaceholder(/搜索类目名称|Search category name/).fill("Copy Paper");
   await expect(page.locator('main table :text("Copy Paper")').first()).toBeVisible();
   await expect(page.getByText(/已选类目|Selected category/)).toBeVisible();
+});
+
+test("expand all loads and displays category descendants that were not cached", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockBackend(page);
+  await login(page);
+  await page.goto("/standard/category");
+
+  await page.getByRole("button", { name: /全部展开|Expand all/ }).click();
+
+  await expect(page.locator('aside :text("Copy Paper")').first()).toBeVisible();
+  await expect(page.locator('aside :text("Wrench")').first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /收起 Office Supplies|Collapse Office Supplies/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /收起 Paper|Collapse Paper/ })).toBeVisible();
+});
+
+test("category properties support spreadsheet preview and confirmed bulk import", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockBackend(page);
+  let confirmPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/categories/*/properties", async (route) => {
+    await route.fulfill({ json: { category_id: 1, own: [], inherited: [], attributes: [], properties: [] } });
+  });
+  await page.route("**/api/v1/category-attributes/import/preview**", async (route) => {
+    await route.fulfill({
+      json: {
+        category_library_id: 1,
+        conflict_strategy: "skip",
+        total_count: 1,
+        valid_count: 1,
+        create_count: 1,
+        update_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        items: [
+          {
+            row_number: 2,
+            category_id: 1,
+            category_code: "OFFICE",
+            category_name: "Office Supplies",
+            category_path: "Office Supplies",
+            attribute: {
+              name: "paper_size",
+              attr_type: "enum",
+              display_name_zh: "纸张尺寸",
+              display_name_en: "Paper Size",
+              options: ["A4", "A3"],
+              required: false,
+              allow_empty: true,
+              default_value: "A4",
+              sort_order: 10,
+            },
+            existing_attribute_id: null,
+            action: "create",
+            selectable: true,
+            errors: [],
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/api/v1/category-attributes/import/confirm", async (route) => {
+    confirmPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      json: {
+        category_library_id: 1,
+        created_count: 1,
+        updated_count: 0,
+        skipped_count: 0,
+        created_ids: [101],
+        updated_ids: [],
+        skipped: [],
+      },
+    });
+  });
+  await login(page);
+  await page.goto("/standard/category");
+  await page.getByRole("button", { name: /Office Library/ }).click();
+  await page.getByRole("button", { name: /Office Supplies/ }).click();
+
+  await page.getByTestId("category-attributes-panel").getByRole("button", { name: /批量导入|Bulk Import/ }).click();
+  await expect(page.getByRole("button", { name: /下载模板|Download Template/ })).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "category-attributes.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("类目编码,属性名称,属性类型\nOFFICE,paper_size,enum", "utf-8"),
+  });
+  await page.getByRole("button", { name: /预览导入|Preview Import/ }).click();
+
+  await expect(page.getByTestId("category-attribute-import-preview")).toContainText("paper_size");
+  await page.getByRole("button", { name: /确认导入|Confirm Import/ }).click();
+  await expect.poll(() => confirmPayload).not.toBeNull();
+  expect(confirmPayload?.conflict_strategy).toBe("skip");
+  expect((confirmPayload?.items as unknown[]).length).toBe(1);
 });
 
 test("category create, edit, and delete refresh the sidebar tree and table together", async ({ page }) => {

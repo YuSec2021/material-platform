@@ -91,7 +91,7 @@ test.afterAll(async () => {
 
 async function pageForTest(user = superAdminUser, language = "zh-CN") {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable in this sandbox: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
   await (context as any).addInitScript(
     ({ currentUser, lng }: { currentUser: typeof superAdminUser; lng: string }) => {
       window.localStorage.setItem(

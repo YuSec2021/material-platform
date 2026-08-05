@@ -1,15 +1,16 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Edit, Plus, Power, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, Edit, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient, type ProductName, type ProductNamePayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { Modal } from "../../common/Modal";
+import { SearchableSelect } from "../../common/SearchableSelect";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
-import { Badge } from "@/app/components/ui/badge";
+import { Switch } from "@/app/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +32,8 @@ type PendingAction =
 const emptyForm: FormState = {
   name: "",
   unit: "",
+  unit_id: null,
+  category_id: null,
   category: "",
 };
 
@@ -151,8 +154,14 @@ export function ProductNameList() {
     queryFn: apiClient.categories,
     retry: false,
   });
+  const measurementUnitsQuery = useQuery({
+    queryKey: ["measurement-units", "enabled"],
+    queryFn: () => apiClient.measurementUnits({ enabled: true }),
+    retry: false,
+  });
 
   const categories = categoryQuery.data ?? [];
+  const measurementUnits = measurementUnitsQuery.data ?? [];
 
   const filteredData = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -220,6 +229,7 @@ export function ProductNameList() {
     setEditingProduct(null);
     setForm({
       ...emptyForm,
+      category_id: categories[0]?.id ?? null,
       category: categories[0]?.name ?? "",
     });
     setIsFormOpen(true);
@@ -230,6 +240,8 @@ export function ProductNameList() {
     setForm({
       name: product.name,
       unit: product.unit,
+      unit_id: product.unit_id,
+      category_id: product.category_id,
       category: product.category,
     });
     setIsFormOpen(true);
@@ -264,15 +276,24 @@ export function ProductNameList() {
     {
       header: text.status,
       accessor: (row: ProductName) => (
-        <Badge variant={row.status === "active" ? "default" : "secondary"}>
-          {text[row.status]}
-        </Badge>
+        <Switch
+          checked={row.status === "active"}
+          aria-label={`${row.name}${row.status === "active" ? text.active : text.inactive}`}
+          disabled={statusMutation.isPending}
+          onCheckedChange={(checked) =>
+            setPendingAction({
+              type: "status",
+              product: row,
+              nextStatus: checked ? "active" : "inactive",
+            })
+          }
+          className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-red-600"
+        />
       ),
     },
     {
       header: text.actions,
       accessor: (row: ProductName) => {
-        const nextStatus = row.status === "active" ? "inactive" : "active";
         return (
           <div className="flex flex-wrap gap-2">
             <Button
@@ -283,15 +304,6 @@ export function ProductNameList() {
             >
               <Edit className="h-3.5 w-3.5" />
               {text.edit}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setPendingAction({ type: "status", product: row, nextStatus })}
-              variant="secondary"
-              size="sm"
-            >
-              <Power className="h-3.5 w-3.5" />
-              {nextStatus === "active" ? text.setActive : text.setInactive}
             </Button>
             <Button
               type="button"
@@ -399,7 +411,7 @@ export function ProductNameList() {
           </>
         }
       >
-        <form id="product-name-form" onSubmit={submitForm} className="space-y-4">
+        <form id="product-name-form" onSubmit={submitForm} className="grid gap-4 md:grid-cols-2">
           <label className="block space-y-1">
             <span className="text-sm text-muted-foreground">{text.code}</span>
             <Input
@@ -420,28 +432,30 @@ export function ProductNameList() {
             />
           </label>
           <label className="block space-y-1">
-            <span className="text-sm text-muted-foreground">{text.unit}</span>
-            <Input
-              aria-label={text.unit}
-              value={form.unit}
-              onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
-            />
-          </label>
-          <label className="block space-y-1">
             <span className="text-sm text-muted-foreground">{text.category}</span>
             {categories.length > 0 ? (
-              <select
-                value={form.category}
-                onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-              >
-                <option value="">{text.selectCategory}</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.name}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                ariaLabel={text.category}
+                value={form.category_id === null ? "" : String(form.category_id)}
+                onValueChange={(value) => {
+                  const categoryId = value ? Number(value) : null;
+                  const category = categories.find((item) => item.id === categoryId);
+                  setForm((current) => ({
+                    ...current,
+                    category_id: categoryId,
+                    category: category?.name ?? "",
+                  }));
+                }}
+                options={categories.map((category) => ({
+                  value: String(category.id),
+                  label: `${category.name} (${category.code})`,
+                  keywords: category.code,
+                }))}
+                placeholder={text.selectCategory}
+                searchPlaceholder={i18n.language === "en-US" ? "Search categories..." : "搜索类目名称或编码..."}
+                emptyText={i18n.language === "en-US" ? "No matching categories" : "暂无匹配类目"}
+                clearLabel={i18n.language === "en-US" ? "No category" : "不选择类目"}
+              />
             ) : (
               <Input
                 aria-label={text.category}
@@ -450,8 +464,33 @@ export function ProductNameList() {
               />
             )}
           </label>
+          <label className="block space-y-1">
+            <span className="text-sm text-muted-foreground">{text.unit}</span>
+            <SearchableSelect
+              ariaLabel={text.unit}
+              value={form.unit_id === null ? "" : String(form.unit_id)}
+              onValueChange={(value) => {
+                const unitId = value ? Number(value) : null;
+                const unit = measurementUnits.find((item) => item.id === unitId);
+                setForm((current) => ({
+                  ...current,
+                  unit_id: unitId,
+                  unit: unit?.symbol ?? "",
+                }));
+              }}
+              options={measurementUnits.map((unit) => ({
+                value: String(unit.id),
+                label: `${unit.name} (${unit.symbol})`,
+                keywords: unit.symbol,
+              }))}
+              placeholder={i18n.language === "en-US" ? "Select a unit" : "请选择计量单位"}
+              searchPlaceholder={i18n.language === "en-US" ? "Search units..." : "搜索计量单位..."}
+              emptyText={i18n.language === "en-US" ? "No matching units" : "暂无匹配计量单位"}
+              clearLabel={i18n.language === "en-US" ? "No unit" : "无计量单位"}
+            />
+          </label>
           {editingProduct && (
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground md:col-span-2">
               <CheckCircle2 className="h-4 w-4" />
               {text.currentStatus}: {text[editingProduct.status]}
             </div>

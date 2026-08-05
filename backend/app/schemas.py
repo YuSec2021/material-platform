@@ -5,24 +5,104 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class ApplicationVersionIn(BaseModel):
+    version: str = Field(min_length=1, max_length=40)
+    title: str = Field(default="", max_length=160)
+    release_notes: str = ""
+
+
+class ApplicationVersionUpdate(BaseModel):
+    version: str | None = Field(default=None, min_length=1, max_length=40)
+    title: str | None = Field(default=None, max_length=160)
+    release_notes: str | None = None
+
+
+class ApplicationVersionOut(BaseModel):
+    id: int | None
+    version: str
+    title: str
+    release_notes: str
+    status: str
+    released_at: str | None
+    created_by: str
+    created_at: str | None
+    updated_at: str | None
+    managed: bool = True
+
+
+class MeasurementUnitSummary(BaseModel):
+    id: int
+    code: str
+    name: str
+    symbol: str
+
+
+class BrandSummary(BaseModel):
+    id: int
+    name: str
+
+
+class MeasurementUnitIn(BaseModel):
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=80)
+    symbol: str = Field(min_length=1, max_length=32)
+    unit_type: str = Field(default="general", min_length=1, max_length=40)
+    description: str = ""
+    decimal_places: int = Field(default=0, ge=0, le=12)
+    enabled: bool = True
+    sort_order: int = 0
+
+
+class MeasurementUnitUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    symbol: str | None = Field(default=None, min_length=1, max_length=32)
+    unit_type: str | None = Field(default=None, min_length=1, max_length=40)
+    description: str | None = None
+    decimal_places: int | None = Field(default=None, ge=0, le=12)
+    enabled: bool | None = None
+    sort_order: int | None = None
+
+
+class MeasurementUnitOut(MeasurementUnitSummary):
+    unit_type: str
+    description: str
+    decimal_places: int
+    enabled: bool
+    is_system: bool
+    sort_order: int
+    usage_count: int = 0
+    product_name_count: int = 0
+    material_count: int = 0
+    attribute_count: int = 0
+    created_at: str
+    updated_at: str
+
+
 class ProductNameOut(BaseModel):
     id: int
     product_name_code: str
     status: str
     name: str
     unit: str
+    unit_id: int | None = None
+    measurement_unit: MeasurementUnitSummary | None = None
+    category_id: int | None = None
     category: str
 
 
 class ProductNameIn(BaseModel):
     name: str
     unit: str = ""
+    unit_id: int | None = None
+    category_id: int | None = None
     category: str = ""
 
 
 class ProductNameUpdate(BaseModel):
     name: str | None = None
     unit: str | None = None
+    unit_id: int | None = None
+    category_id: int | None = None
     category: str | None = None
 
 
@@ -36,6 +116,8 @@ class AttributeIn(BaseModel):
     name: str
     data_type: str = "text"
     unit: str = ""
+    unit_id: int | None = None
+    brand_id: int | None = None
     required: bool = False
     default_value: str = ""
     options: list[str] | str = Field(default_factory=list)
@@ -47,6 +129,8 @@ class AttributeUpdate(BaseModel):
     name: str | None = None
     data_type: str | None = None
     unit: str | None = None
+    unit_id: int | None = None
+    brand_id: int | None = None
     required: bool | None = None
     default_value: str | None = None
     options: list[str] | str | None = None
@@ -63,6 +147,10 @@ class AttributeOut(BaseModel):
     name: str
     data_type: str
     unit: str
+    unit_id: int | None = None
+    measurement_unit: MeasurementUnitSummary | None = None
+    brand_id: int | None = None
+    brand: BrandSummary | None = None
     required: bool
     default_value: str
     options: list[str]
@@ -360,6 +448,18 @@ class CategoryAttributeUpdate(BaseModel):
     sort_order: int | None = None
 
 
+class CategoryAttributeImportItem(BaseModel):
+    row_number: int = Field(ge=2)
+    category_id: int
+    attribute: CategoryAttributeCreate
+
+
+class CategoryAttributeImportConfirm(BaseModel):
+    category_library_id: int
+    conflict_strategy: Literal["skip", "update", "error"] = "skip"
+    items: list[CategoryAttributeImportItem]
+
+
 class CategoryAttributeRead(BaseModel):
     id: int
     category_id: int
@@ -400,6 +500,7 @@ class MaterialIn(BaseModel):
     material_library_id: int
     category_id: int
     unit: str = ""
+    unit_id: int | None = None
     brand_id: int | None = None
     status: str = "normal"
     description: str = ""
@@ -413,6 +514,7 @@ class MaterialUpdate(BaseModel):
     material_library_id: int | None = None
     category_id: int | None = None
     unit: str | None = None
+    unit_id: int | None = None
     brand_id: int | None = None
     status: str | None = None
     transition_reason: str | None = None
@@ -442,6 +544,8 @@ class MaterialOut(BaseModel):
     category_id: int
     category: str
     unit: str
+    unit_id: int | None = None
+    measurement_unit: MeasurementUnitSummary | None = None
     brand_id: int | None
     brand: str
     status: str

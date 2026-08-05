@@ -163,7 +163,7 @@ test.afterAll(async () => {
 });
 
 test("super admin can create, edit, toggle, test, and delete a model card", async () => {
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
   await context.addInitScript(() => {
     window.localStorage.setItem("language", "zh-CN");
     window.localStorage.setItem("ai-material-auth-session", JSON.stringify({ username: "super_admin", role: "super_admin" }));
@@ -229,7 +229,7 @@ test("super admin can create, edit, toggle, test, and delete a model card", asyn
 });
 
 test("regular user sees localized read-only model cards", async () => {
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
   await context.addInitScript(() => {
     window.localStorage.setItem("language", "en-US");
     window.localStorage.setItem("ai-material-auth-session", JSON.stringify({ username: "regular_user", role: "user" }));

@@ -25,13 +25,50 @@ export type ProductName = {
   status: "active" | "inactive";
   name: string;
   unit: string;
+  unit_id: number | null;
+  measurement_unit: MeasurementUnitSummary | null;
+  category_id: number | null;
   category: string;
 };
 
 export type ProductNamePayload = {
   name: string;
   unit?: string;
+  unit_id?: number | null;
+  category_id?: number | null;
   category?: string;
+};
+
+export type MeasurementUnitSummary = {
+  id: number;
+  code: string;
+  name: string;
+  symbol: string;
+};
+
+export type MeasurementUnit = MeasurementUnitSummary & {
+  unit_type: string;
+  description: string;
+  decimal_places: number;
+  enabled: boolean;
+  is_system: boolean;
+  sort_order: number;
+  usage_count: number;
+  product_name_count: number;
+  material_count: number;
+  attribute_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MeasurementUnitPayload = {
+  name: string;
+  symbol: string;
+  unit_type: string;
+  description: string;
+  decimal_places: number;
+  enabled: boolean;
+  sort_order: number;
 };
 
 export type Category = {
@@ -77,6 +114,11 @@ export type Brand = {
   enabled: boolean;
 };
 
+export type BrandSummary = {
+  id: number;
+  name: string;
+};
+
 export type Attribute = {
   id: number;
   code: string;
@@ -85,6 +127,10 @@ export type Attribute = {
   name: string;
   data_type: string;
   unit: string;
+  unit_id: number | null;
+  measurement_unit: MeasurementUnitSummary | null;
+  brand_id: number | null;
+  brand: BrandSummary | null;
   required: boolean;
   default_value: string;
   options: string[];
@@ -113,11 +159,14 @@ export type AttributePayload = {
   name: string;
   data_type: string;
   unit?: string;
+  unit_id?: number | null;
+  brand_id?: number | null;
   required: boolean;
   default_value: string;
   options: string[];
   description: string;
   source?: string;
+  enabled?: boolean;
 };
 
 export type BrandPayload = {
@@ -174,6 +223,8 @@ export type Material = {
   category_id: number;
   category: string;
   unit: string;
+  unit_id: number | null;
+  measurement_unit: MeasurementUnitSummary | null;
   brand_id: number | null;
   brand: string;
   status: "normal" | "stop_purchase" | "stop_use" | "stop-purchase" | "stop-use";
@@ -253,6 +304,43 @@ export type CategoryAttributePayload = {
   allow_empty?: boolean;
   default_value?: string | null;
   sort_order?: number | null;
+};
+
+export type CategoryAttributeImportConflictStrategy = "skip" | "update" | "error";
+
+export type CategoryAttributeImportPreviewItem = {
+  row_number: number;
+  category_id: number | null;
+  category_code: string;
+  category_name: string;
+  category_path: string;
+  attribute: CategoryAttributePayload | null;
+  existing_attribute_id: number | null;
+  action: "create" | "update" | "skip" | "error";
+  selectable: boolean;
+  errors: string[];
+};
+
+export type CategoryAttributeImportPreview = {
+  category_library_id: number;
+  conflict_strategy: CategoryAttributeImportConflictStrategy;
+  total_count: number;
+  valid_count: number;
+  create_count: number;
+  update_count: number;
+  skipped_count: number;
+  error_count: number;
+  items: CategoryAttributeImportPreviewItem[];
+};
+
+export type CategoryAttributeImportResult = {
+  category_library_id: number;
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  created_ids: number[];
+  updated_ids: number[];
+  skipped: Array<Record<string, unknown>>;
 };
 
 export type CategoryPropertyList = {
@@ -410,6 +498,7 @@ export type MaterialPayload = {
   material_library_id: number;
   category_id: number;
   unit: string;
+  unit_id?: number | null;
   brand_id: number | null;
   status?: "normal";
   description: string;
@@ -653,6 +742,25 @@ export type SystemConfigPayload = Partial<{
   stop_use_reasons: ReasonOption[];
   approval_mode: "simple" | "multi_node";
 }>;
+
+export type ApplicationVersion = {
+  id: number | null;
+  version: string;
+  title: string;
+  release_notes: string;
+  status: "draft" | "published" | "archived" | "fallback";
+  released_at: string | null;
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+  managed: boolean;
+};
+
+export type ApplicationVersionPayload = {
+  version: string;
+  title: string;
+  release_notes: string;
+};
 
 export type StopPurchasePayload = {
   type: "stop_purchase";
@@ -1200,6 +1308,18 @@ export const apiClient = {
   deleteProductName(id: number) {
     return request<{ deleted: boolean; id: number; soft_deleted?: boolean }>(`/product-names/${id}`, { method: "DELETE" });
   },
+  measurementUnits(params: { keyword?: string; unit_type?: string; enabled?: boolean } = {}) {
+    return request<MeasurementUnit[]>(withQuery("/measurement-units", params));
+  },
+  createMeasurementUnit(payload: MeasurementUnitPayload) {
+    return request<MeasurementUnit>("/measurement-units", { method: "POST", body: payload });
+  },
+  updateMeasurementUnit(id: number, payload: Partial<MeasurementUnitPayload>) {
+    return request<MeasurementUnit>(`/measurement-units/${id}`, { method: "PUT", body: payload });
+  },
+  deleteMeasurementUnit(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/measurement-units/${id}`, { method: "DELETE" });
+  },
   categories() {
     return request<Category[]>("/categories");
   },
@@ -1232,6 +1352,40 @@ export const apiClient = {
   },
   deleteCategoryAttribute(categoryId: number, attributeId: number) {
     return request<{ deleted: boolean; id: number }>(`/categories/${categoryId}/attributes/${attributeId}`, { method: "DELETE" });
+  },
+  downloadCategoryAttributeImportTemplate() {
+    return download("/category-attributes/import/template");
+  },
+  previewCategoryAttributeImport(
+    categoryLibraryId: number,
+    file: File,
+    conflictStrategy: CategoryAttributeImportConflictStrategy,
+  ) {
+    const formData = new FormData();
+    formData.set("file", file);
+    return request<CategoryAttributeImportPreview>(
+      withQuery("/category-attributes/import/preview", {
+        category_library_id: categoryLibraryId,
+        conflict_strategy: conflictStrategy,
+      }),
+      { method: "POST", body: formData },
+    );
+  },
+  confirmCategoryAttributeImport(preview: CategoryAttributeImportPreview) {
+    return request<CategoryAttributeImportResult>("/category-attributes/import/confirm", {
+      method: "POST",
+      body: {
+        category_library_id: preview.category_library_id,
+        conflict_strategy: preview.conflict_strategy,
+        items: preview.items
+          .filter((item) => item.selectable && item.category_id !== null && item.attribute !== null)
+          .map((item) => ({
+            row_number: item.row_number,
+            category_id: item.category_id,
+            attribute: item.attribute,
+          })),
+      },
+    });
   },
   downloadCategoryTemplate() {
     return download("/categories/template");
@@ -1279,6 +1433,9 @@ export const apiClient = {
   },
   updateBrand(id: number, payload: Partial<BrandPayload>) {
     return request<Brand>(`/brands/${id}`, { method: "PUT", body: payload });
+  },
+  updateBrandStatus(id: number, enabled: boolean) {
+    return request<Brand>(`/brands/${id}`, { method: "PUT", body: { enabled } });
   },
   deleteBrand(id: number) {
     return request<{ deleted: boolean; id: number }>(`/brands/${id}`, { method: "DELETE" });
@@ -1483,6 +1640,24 @@ export const apiClient = {
   },
   updateSystemConfig(payload: SystemConfigPayload) {
     return request<SystemConfig>("/system/config", { method: "PUT", body: payload });
+  },
+  currentApplicationVersion() {
+    return request<ApplicationVersion>("/application-versions/current");
+  },
+  applicationVersions() {
+    return request<ApplicationVersion[]>("/application-versions");
+  },
+  createApplicationVersion(payload: ApplicationVersionPayload) {
+    return request<ApplicationVersion>("/application-versions", { method: "POST", body: payload });
+  },
+  updateApplicationVersion(id: number, payload: Partial<ApplicationVersionPayload>) {
+    return request<ApplicationVersion>(`/application-versions/${id}`, { method: "PUT", body: payload });
+  },
+  publishApplicationVersion(id: number) {
+    return request<ApplicationVersion>(`/application-versions/${id}/publish`, { method: "POST" });
+  },
+  deleteApplicationVersion(id: number) {
+    return request<{ deleted: boolean; id: number }>(`/application-versions/${id}`, { method: "DELETE" });
   },
   workflowApplications(params: WorkflowApplicationQuery = {}) {
     return request<WorkflowApplication[]>(withQuery("/workflows/applications", params));

@@ -1,20 +1,4 @@
 services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: material_retrieval
-      POSTGRES_USER: material
-      POSTGRES_PASSWORD: material_password
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U material -d material_retrieval"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   qdrant:
     image: qdrant/qdrant:v1.12.6
     ports:
@@ -27,18 +11,20 @@ services:
     build:
       context: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg://material:material_password@postgres:5432/material_retrieval
+      # Must point to the PostgreSQL instance managed by aios-infra. When the
+      # backend itself runs in Docker, use an address reachable from Docker
+      # instead of 127.0.0.1 (for example host.docker.internal on macOS).
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must point to aios-infra PostgreSQL}
       QDRANT_URL: http://qdrant:6333
+      MILVUS_URI: ${MILVUS_URI:-http://192.168.100.100:19530}
       AI_DEBUG: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
       qdrant:
         condition: service_started
     ports:
-      - "24334:24334"
+      - "24435:24435"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:24334/health', timeout=3).read()\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:24435/health', timeout=3).read()\""]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -51,9 +37,9 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "24333:24333"
+      - "24434:24434"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:24333 >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:24434 >/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -76,5 +62,4 @@ services:
       retries: 20
 
 volumes:
-  postgres_data:
   qdrant_data:

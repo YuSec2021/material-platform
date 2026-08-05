@@ -210,3 +210,28 @@ test("category attributes panel follows the selected category without duplicatio
   expect(await page.locator(`${treeSelector} [data-testid="category-attributes-panel"]`).count()).toEqual(0);
   expect(await page.locator('[data-testid="category-attributes-panel"]').count()).toEqual(1);
 });
+
+test("required and allow-empty options are mutually exclusive", async ({ page }) => {
+  await openCategoryPage(page);
+
+  await page.locator('[data-testid="category-tree-container"] [data-testid="category-tree-node"][data-node-type="category"]').first().click();
+  await page.getByRole("button", { name: /新增属性|New Property/ }).click();
+
+  const required = page.getByLabel(/必填|Required/);
+  const allowEmpty = page.getByLabel(/允许为空|Allow Empty/);
+
+  await expect(required).not.toBeChecked();
+  await expect(allowEmpty).toBeChecked();
+  await required.click();
+  await expect(required).toBeChecked();
+  await expect(allowEmpty).not.toBeChecked();
+  await expect(allowEmpty).toBeDisabled();
+
+  await required.click();
+  await expect(required).not.toBeChecked();
+  await expect(allowEmpty).not.toBeDisabled();
+  await expect(allowEmpty).not.toBeChecked();
+  await allowEmpty.click();
+  await expect(allowEmpty).toBeChecked();
+  await expect(required).not.toBeChecked();
+});

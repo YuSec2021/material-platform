@@ -34,15 +34,15 @@ test("uses the new ports, proxies API requests, and restarts idempotently", asyn
   restartProject();
   restartProject();
 
-  const frontendResponse = await request.get("http://localhost:24333/login");
+  const frontendResponse = await request.get("http://localhost:24434/login");
   expect(frontendResponse.status()).toBe(200);
   expect(await frontendResponse.text()).toContain("<div id=\"root\">");
 
-  const backendResponse = await request.get("http://localhost:24334/health");
+  const backendResponse = await request.get("http://localhost:24435/health");
   expect(backendResponse.status()).toBe(200);
   expect(await backendResponse.json()).toMatchObject({ status: "ok" });
 
-  const loginResponse = await request.post("http://localhost:24333/api/v1/auth/login", {
+  const loginResponse = await request.post("http://localhost:24434/api/v1/auth/login", {
     data: { username: "super_admin" },
   });
   expect(loginResponse.status()).toBe(200);
@@ -51,8 +51,8 @@ test("uses the new ports, proxies API requests, and restarts idempotently", asyn
     is_super_admin: true,
   });
 
-  expect(listenerCount(24333)).toBe(1);
-  expect(listenerCount(24334)).toBe(1);
+  expect(listenerCount(24434)).toBe(1);
+  expect(listenerCount(24435)).toBe(1);
   expect(listenerCount(5173)).toBe(0);
   expect(listenerCount(8000)).toBe(0);
 
@@ -62,14 +62,18 @@ test("uses the new ports, proxies API requests, and restarts idempotently", asyn
       directLegacyRequests.push(outgoingRequest.url());
     }
   });
-  await page.goto("http://localhost:24333/login");
+  await page.goto("http://localhost:24434/login");
   await page.getByLabel(/用户名|Username/).fill("super_admin");
   const loginRequest = page.waitForResponse(
-    (response) => response.url() === "http://localhost:24333/api/v1/auth/login",
+    (response) => response.url() === "http://localhost:24434/api/v1/auth/login",
   );
   await page.getByRole("button", { name: /登录|Log in/ }).click();
   expect((await loginRequest).status()).toBe(200);
-  await expect(page).toHaveURL("http://localhost:24333/");
+  await expect(page).toHaveURL("http://localhost:24434/");
   await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
+
+  await page.goto("http://localhost:24434/standard/category");
+  await expect(page.getByRole("button", { name: "批量导入", exact: true })).toBeEnabled();
+  await expect(page.getByText("正在加载后端数据...", { exact: true })).toHaveCount(0);
   expect(directLegacyRequests).toEqual([]);
 });

@@ -13,7 +13,7 @@ test.afterAll(async () => {
 });
 
 test("AI import preview column headers refresh after each recognition", async () => {
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
 
   await (context as any).addInitScript(
     () => {

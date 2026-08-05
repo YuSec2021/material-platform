@@ -10,12 +10,45 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
-DB_PATH = Path(__file__).resolve().parents[1] / "material_retrieval.db"
-SQLALCHEMY_DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DB_PATH}")
+def configured_database_url() -> str:
+    configured = os.environ.get("DATABASE_URL", "").strip()
+    if configured:
+        return configured
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.exists():
+        return ""
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        if not raw_line.startswith("DATABASE_URL="):
+            continue
+        return raw_line.split("=", 1)[1].strip().strip("'\"")
+    return ""
 
-connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+SQLALCHEMY_DATABASE_URL = configured_database_url()
+if not SQLALCHEMY_DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is required and must point to PostgreSQL")
+if SQLALCHEMY_DATABASE_URL.startswith("postgresql://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1,
+    )
+elif SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace(
+        "postgres://",
+        "postgresql+psycopg://",
+        1,
+    )
+if not SQLALCHEMY_DATABASE_URL.startswith("postgresql+psycopg://"):
+    raise RuntimeError("DATABASE_URL must use PostgreSQL with the psycopg driver")
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    connect_args={"connect_timeout": 5},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 _DEFAULT_SLOW_SQL_THRESHOLD_MS = 200.0

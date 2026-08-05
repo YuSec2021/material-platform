@@ -1,4 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
   BrainCircuit,
   Bug,
@@ -20,6 +21,7 @@ import { useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/app/auth/AuthContext";
+import { apiClient } from "@/app/api/client";
 import {
   Dialog,
   DialogContent,
@@ -59,6 +61,7 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
         { key: "productName", title: t("nav.productName"), path: "/standard/product-name" },
         { key: "attribute", title: t("nav.attribute"), path: "/standard/attribute" },
         { key: "brand", title: t("nav.brand"), path: "/standard/brand" },
+        { key: "measurementUnit", title: t("nav.measurementUnit"), path: "/standard/measurement-unit" },
       ],
     },
     {
@@ -92,6 +95,9 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
         { key: "systemInfo", title: t("nav.systemInfo"), path: "/system/info" },
         { key: "reasons", title: t("nav.reasons"), path: "/system/reason-options" },
         { key: "approvalMode", title: t("nav.approvalMode"), path: "/system/approval-mode" },
+        ...(isSuperAdmin
+          ? [{ key: "versions", title: t("nav.versions"), path: "/system/versions" }]
+          : []),
       ],
     },
   ];
@@ -227,7 +233,7 @@ function NavigationTree({
 export function MainLayout() {
   const navigate = useNavigate();
   const auth = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expandedMenus, setExpandedMenus] = useState<string[]>([
     "standard",
     "material",
@@ -239,6 +245,13 @@ export function MainLayout() {
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const versionQuery = useQuery({
+    queryKey: ["current-application-version"],
+    queryFn: apiClient.currentApplicationVersion,
+    enabled: isAboutOpen,
+    staleTime: 60_000,
+    retry: false,
+  });
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const toggleTheme = () => setTheme(isDark ? "light" : "dark");
@@ -340,7 +353,36 @@ export function MainLayout() {
               </DialogHeader>
               <dl className="space-y-3 text-sm text-foreground">
                 <div>{t("app.aboutName")}</div>
-                <div>{t("app.aboutVersion")}</div>
+                <div>
+                  {t("app.aboutVersionLabel")}{" "}
+                  <strong>
+                    {versionQuery.isLoading
+                      ? t("app.aboutVersionLoading")
+                      : `v${versionQuery.data?.version ?? "4.2.0"}`}
+                  </strong>
+                </div>
+                {versionQuery.data?.title && (
+                  <div>
+                    {t("app.aboutReleaseTitle")} {versionQuery.data.title}
+                  </div>
+                )}
+                {versionQuery.data?.release_notes && (
+                  <div>
+                    <div>{t("app.aboutReleaseNotes")}</div>
+                    <p className="mt-1 whitespace-pre-wrap rounded-md bg-muted p-3 text-muted-foreground">
+                      {versionQuery.data.release_notes}
+                    </p>
+                  </div>
+                )}
+                {versionQuery.data?.released_at && (
+                  <div>
+                    {t("app.aboutReleasedAt")}{" "}
+                    {new Intl.DateTimeFormat(
+                      i18n.language === "en-US" ? "en-US" : "zh-CN",
+                      { dateStyle: "medium", timeStyle: "short" },
+                    ).format(new Date(versionQuery.data.released_at))}
+                  </div>
+                )}
                 <div>{t("app.aboutDescription")}</div>
               </dl>
             </DialogContent>

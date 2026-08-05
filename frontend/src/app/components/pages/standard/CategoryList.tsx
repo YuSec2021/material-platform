@@ -66,6 +66,7 @@ type CategoryTreeSelection =
 
 const CATEGORY_PAGE_SIZE = 10;
 const CATEGORY_TREE_BATCH_SIZE = 200;
+const CATEGORY_TREE_FULL_BATCH_SIZE = 1000;
 const CATEGORY_TREE_WINDOW_SIZE = 240;
 const CATEGORY_LEVEL_KEYS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"] as const;
 const CATEGORY_IMPORT_ACCEPT = ".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
@@ -536,6 +537,7 @@ export function CategoryList() {
   const [loadingCategoryIds, setLoadingCategoryIds] = useState<number[]>([]);
   const [childParentsWithMore, setChildParentsWithMore] = useState<number[]>([]);
   const [categoryCacheVersion, setCategoryCacheVersion] = useState(0);
+  const [isExpandingAll, setIsExpandingAll] = useState(false);
 
   const query = useQuery({
     queryKey: ["categories"],
@@ -793,6 +795,47 @@ export function CategoryList() {
     [loadLibraryRoots, queryClient],
   );
 
+  const loadEntireLibraryTree = useCallback(
+    async (libraryId: number) => {
+      const allCategories: Category[] = [];
+      let offset = 0;
+      while (true) {
+        const batch = await apiClient.categoriesByParams({
+          category_library_id: libraryId,
+          limit: CATEGORY_TREE_FULL_BATCH_SIZE,
+          offset,
+        });
+        allCategories.push(...batch);
+        if (batch.length < CATEGORY_TREE_FULL_BATCH_SIZE) {
+          break;
+        }
+        offset += batch.length;
+      }
+
+      const roots: Category[] = [];
+      const groupedChildren = new Map<number, Category[]>();
+      allCategories.forEach((category) => {
+        if (category.parent_category_id === null) {
+          roots.push(category);
+          return;
+        }
+        const children = groupedChildren.get(category.parent_category_id) ?? [];
+        children.push(category);
+        groupedChildren.set(category.parent_category_id, children);
+      });
+
+      queryClient.setQueryData(categoryLibraryRootsKey(libraryId), mergeCategoryBatch([], roots));
+      allCategories.forEach((category) => {
+        queryClient.setQueryData(
+          categoryChildrenKey(category.id),
+          mergeCategoryBatch([], groupedChildren.get(category.id) ?? []),
+        );
+      });
+      return allCategories;
+    },
+    [queryClient],
+  );
+
   const selectLibrary = (library: CategoryLibrary) => {
     setSelectedTree({ type: "library", id: library.id });
   };
@@ -838,14 +881,36 @@ export function CategoryList() {
     });
   };
 
-  const expandAllTree = () => {
+  const expandAllTree = async () => {
+    if (isExpandingAll) {
+      return;
+    }
+    const libraryIds = libraries.map((library) => library.id);
+    setIsExpandingAll(true);
     setExpandedLibraryIds(libraries.map((library) => library.id));
-    void Promise.all(libraries.map((library) => ensureLibraryRoots(library.id)));
-    setExpandedCategoryIds(
-      Array.from(childrenByParentId.entries())
-        .filter(([, childCategories]) => childCategories.length > 0)
-        .map(([parentId]) => parentId),
-    );
+    setLoadingLibraryIds(libraryIds);
+    try {
+      const allCategories = (await Promise.all(libraryIds.map(loadEntireLibraryTree))).flat();
+      const loadedCategoryIds = allCategories.map((category) => category.id);
+      const expandableCategoryIds = Array.from(
+        new Set(
+          allCategories
+            .map((category) => category.parent_category_id)
+            .filter((parentId): parentId is number => parentId !== null),
+        ),
+      );
+      setLoadedRootLibraryIds(libraryIds);
+      setLoadedChildParentIds(loadedCategoryIds);
+      setRootLibrariesWithMore([]);
+      setChildParentsWithMore([]);
+      setExpandedCategoryIds(expandableCategoryIds);
+      setCategoryCacheVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingLibraryIds([]);
+      setIsExpandingAll(false);
+    }
   };
 
   const collapseAllTree = () => {
@@ -1124,9 +1189,11 @@ export function CategoryList() {
         <div className="mb-3 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={expandAllTree}
-            className="rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40"
+            onClick={() => void expandAllTree()}
+            disabled={isExpandingAll}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40 disabled:cursor-wait disabled:opacity-60"
           >
+            {isExpandingAll && <Loader2 className="h-3 w-3 animate-spin" />}
             {t("categoryImport.expandAll")}
           </button>
           <button

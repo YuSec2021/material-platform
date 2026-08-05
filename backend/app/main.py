@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import base64
 import binascii
@@ -25,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session
 
 from .database import (
@@ -39,6 +40,7 @@ from .database import (
 )
 from .migrations.sprint55_migrate_ai_config import run_sprint55_migration
 from .models import (
+    ApplicationVersion,
     Attribute,
     AttributeChange,
     AIAgentConfig,
@@ -63,6 +65,7 @@ from .models import (
     MaterialLibrary,
     MaterialLibraryAdminRole,
     MaterialLibraryCategoryLibrary,
+    MeasurementUnit,
     Model,
     ModelConfig,
     ProductName,
@@ -81,6 +84,9 @@ from .models import (
     WorkflowHistory,
 )
 from .schemas import (
+    ApplicationVersionIn,
+    ApplicationVersionOut,
+    ApplicationVersionUpdate,
     AiMaterialAddConfirmIn,
     AiMaterialAddPreviewIn,
     AiCapabilityPriceIn,
@@ -100,6 +106,7 @@ from .schemas import (
     BrandIn,
     BrandLogo,
     BrandOut,
+    BrandSummary,
     BrandUpdate,
     CapabilityMappingIn,
     CapabilityMappingOut,
@@ -108,6 +115,7 @@ from .schemas import (
     CapabilityMappingUpdate,
     CategoryIn,
     CategoryAttributeCreate,
+    CategoryAttributeImportConfirm,
     CategoryAttributeRead,
     CategoryAttributeUpdate,
     CategoryLibraryIn,
@@ -151,6 +159,10 @@ from .schemas import (
     MaterialTransitionIn,
     MaterialUpdate,
     ManualStopPurchaseIn,
+    MeasurementUnitIn,
+    MeasurementUnitOut,
+    MeasurementUnitSummary,
+    MeasurementUnitUpdate,
     ProductNameIn,
     ProductNameOut,
     ProductNameStatusUpdate,
@@ -197,7 +209,8 @@ from .schemas import (
 )
 
 
-API_VERSION = "15.0.0"
+API_VERSION = "16.0.0"
+DEFAULT_PRODUCT_VERSION = "4.2.0"
 
 app = FastAPI(title="AI Material Management Platform", version=API_VERSION)
 app.add_middleware(
@@ -583,6 +596,7 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "directory", "permission_key": "directory.category_management", "label": "Category Management Directory"},
     {"module": "brand_management", "permission_type": "directory", "permission_key": "directory.brand_management", "label": "Brand Management Directory"},
     {"module": "product_name_management", "permission_type": "directory", "permission_key": "directory.product_name_management", "label": "Product Name Directory"},
+    {"module": "measurement_unit_management", "permission_type": "directory", "permission_key": "directory.measurement_unit_management", "label": "Measurement Unit Directory"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.create", "label": "Material Archive Create"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.edit", "label": "Material Archive Edit"},
     {"module": "material_archives", "permission_type": "button", "permission_key": "button.material_archives.delete", "label": "Material Archive Delete"},
@@ -679,6 +693,9 @@ PERMISSION_CATALOG = [
     {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/categories/{category_id}/properties", "label": "GET /api/v1/categories/{category_id}/properties"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/{category_id}/attributes", "label": "POST /api/v1/categories/{category_id}/attributes"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/categories/{category_id}/attributes/batch", "label": "POST /api/v1/categories/{category_id}/attributes/batch"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.GET./api/v1/category-attributes/import/template", "label": "GET /api/v1/category-attributes/import/template"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/category-attributes/import/preview", "label": "POST /api/v1/category-attributes/import/preview"},
+    {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/category-attributes/import/confirm", "label": "POST /api/v1/category-attributes/import/confirm"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/categories/{category_id}/attributes/{attribute_id}", "label": "PUT /api/v1/categories/{category_id}/attributes/{attribute_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/categories/{category_id}/attributes/{attribute_id}", "label": "DELETE /api/v1/categories/{category_id}/attributes/{attribute_id}"},
     {"module": "category_management", "permission_type": "api", "permission_key": "api.POST./api/v1/ai/category-recognition/recognize", "label": "POST /api/v1/ai/category-recognition/recognize"},
@@ -703,12 +720,29 @@ PERMISSION_CATALOG = [
     {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.create", "label": "Product Name Create"},
     {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.edit", "label": "Product Name Edit"},
     {"module": "product_name_management", "permission_type": "button", "permission_key": "button.product_names.delete", "label": "Product Name Delete"},
+    {"module": "measurement_unit_management", "permission_type": "button", "permission_key": "button.measurement_units.create", "label": "Measurement Unit Create"},
+    {"module": "measurement_unit_management", "permission_type": "button", "permission_key": "button.measurement_units.edit", "label": "Measurement Unit Edit"},
+    {"module": "measurement_unit_management", "permission_type": "button", "permission_key": "button.measurement_units.delete", "label": "Measurement Unit Delete"},
+    {"module": "measurement_unit_management", "permission_type": "api", "permission_key": "api.GET./api/v1/measurement-units", "label": "GET /api/v1/measurement-units"},
+    {"module": "measurement_unit_management", "permission_type": "api", "permission_key": "api.POST./api/v1/measurement-units", "label": "POST /api/v1/measurement-units"},
+    {"module": "measurement_unit_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/measurement-units/{unit_id}", "label": "PUT /api/v1/measurement-units/{unit_id}"},
+    {"module": "measurement_unit_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/measurement-units/{unit_id}", "label": "DELETE /api/v1/measurement-units/{unit_id}"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.GET./api/v1/brands", "label": "GET /api/v1/brands"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.POST./api/v1/brands", "label": "POST /api/v1/brands"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/brands/{brand_id}", "label": "PUT /api/v1/brands/{brand_id}"},
     {"module": "brand_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/brands/{brand_id}", "label": "DELETE /api/v1/brands/{brand_id}"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/system/config", "label": "GET /api/v1/system/config"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.PUT./api/v1/system/config", "label": "PUT /api/v1/system/config"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.GET./api/v1/application-versions/current", "label": "GET /api/v1/application-versions/current"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.GET./api/v1/application-versions", "label": "GET /api/v1/application-versions"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.POST./api/v1/application-versions", "label": "POST /api/v1/application-versions"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/application-versions/{version_id}", "label": "PUT /api/v1/application-versions/{version_id}"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.POST./api/v1/application-versions/{version_id}/publish", "label": "POST /api/v1/application-versions/{version_id}/publish"},
+    {"module": "version_management", "permission_type": "api", "permission_key": "api.DELETE./api/v1/application-versions/{version_id}", "label": "DELETE /api/v1/application-versions/{version_id}"},
+    {"module": "version_management", "permission_type": "button", "permission_key": "button.application_versions.create", "label": "Application Version Create"},
+    {"module": "version_management", "permission_type": "button", "permission_key": "button.application_versions.edit", "label": "Application Version Edit"},
+    {"module": "version_management", "permission_type": "button", "permission_key": "button.application_versions.publish", "label": "Application Version Publish"},
+    {"module": "version_management", "permission_type": "button", "permission_key": "button.application_versions.delete", "label": "Application Version Delete"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs", "label": "GET /api/v1/audit-logs"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs/{log_id}", "label": "GET /api/v1/audit-logs/{log_id}"},
     {"module": "system_admin", "permission_type": "api", "permission_key": "api.GET./api/v1/audit-logs/export", "label": "GET /api/v1/audit-logs/export"},
@@ -726,6 +760,7 @@ def startup() -> None:
     ensure_category_attribute_schema()
     ensure_material_library_association_schema()
     ensure_product_name_schema()
+    ensure_measurement_unit_schema()
     db = next(get_db())
     try:
         ensure_product_name_code_sequence(db)
@@ -752,69 +787,16 @@ def ensure_web_vitals_schema() -> None:
 
 
 def ensure_audit_log_schema() -> None:
-    required = {"id", "user", "resource", "action", "before_value", "after_value", "timestamp", "source"}
     with engine.begin() as connection:
-        if engine.dialect.name == "sqlite":
-            table_exists = connection.exec_driver_sql(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
-            ).fetchone()
-            if table_exists:
-                columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(audit_log)").fetchall()}
-                if not required.issubset(columns):
-                    legacy_name = f"audit_log_legacy_{int(time.time())}"
-                    connection.exec_driver_sql(f"ALTER TABLE audit_log RENAME TO {legacy_name}")
-                    legacy_indexes = connection.exec_driver_sql(
-                        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_audit_log_%'"
-                    ).fetchall()
-                    for index in legacy_indexes:
-                        connection.exec_driver_sql(f"DROP INDEX IF EXISTS {index[0]}")
         AuditLog.__table__.create(bind=connection, checkfirst=True)
 
 
 def ensure_material_code_rule_schema() -> None:
-    if engine.dialect.name != "sqlite":
-        Base.metadata.create_all(bind=engine)
-        return
-    table_columns = {
-        "material_libraries": {
-            "auto_code_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
-            "recode_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
-            "current_rule_version_id": "INTEGER",
-        },
-        "materials": {
-            "original_code": "VARCHAR(64) DEFAULT '' NOT NULL",
-            "previous_code": "VARCHAR(64) DEFAULT '' NOT NULL",
-            "code_rule_version_id": "INTEGER",
-            "code_change_count": "INTEGER DEFAULT 0 NOT NULL",
-            "code_status": "VARCHAR(40) DEFAULT 'manual' NOT NULL",
-        },
-    }
-    with engine.begin() as connection:
-        for table_name, columns in table_columns.items():
-            existing = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
-            for column_name, ddl in columns.items():
-                if column_name not in existing:
-                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
-        Base.metadata.create_all(bind=connection)
+    Base.metadata.create_all(bind=engine)
 
 
 def ensure_category_schema() -> None:
     with engine.begin() as connection:
-        if engine.dialect.name == "sqlite":
-            Base.metadata.create_all(bind=connection)
-            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(categories)").fetchall()}
-            if "category_library_id" not in existing:
-                connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN category_library_id INTEGER")
-            if "parent_category_id" not in existing:
-                connection.exec_driver_sql("ALTER TABLE categories ADD COLUMN parent_category_id INTEGER")
-            for index in connection.exec_driver_sql("PRAGMA index_list(categories)").fetchall():
-                index_name = index[1]
-                is_unique = bool(index[2])
-                columns = [row[2] for row in connection.exec_driver_sql(f"PRAGMA index_info({index_name})").fetchall()]
-                if is_unique and columns == ["name"]:
-                    connection.exec_driver_sql(f"DROP INDEX {index_name}")
-            return
-
         Base.metadata.create_all(bind=connection)
         connection.exec_driver_sql("ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_name_key")
         connection.exec_driver_sql("DROP INDEX IF EXISTS ix_categories_name")
@@ -844,59 +826,14 @@ def ensure_category_attribute_schema() -> None:
     with engine.begin() as connection:
         Base.metadata.create_all(bind=connection)
         CategoryAttribute.__table__.create(bind=connection, checkfirst=True)
-        if engine.dialect.name == "sqlite":
-            connection.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
-                "ON category_attributes (category_id, name)"
-            )
-        else:
-            connection.exec_driver_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
-                "ON category_attributes (category_id, name)"
-            )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
+            "ON category_attributes (category_id, name)"
+        )
 
 
 def ensure_material_library_association_schema() -> None:
     with engine.begin() as connection:
-        if engine.dialect.name == "sqlite":
-            Base.metadata.create_all(bind=connection)
-            MaterialLibraryAdminRole.__table__.create(bind=connection, checkfirst=True)
-            MaterialLibraryCategoryLibrary.__table__.create(bind=connection, checkfirst=True)
-            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(material_libraries)").fetchall()}
-            if "material_library_admin_id" not in existing:
-                connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN material_library_admin_id INTEGER")
-            if "category_library_id" not in existing:
-                connection.exec_driver_sql("ALTER TABLE material_libraries ADD COLUMN category_library_id INTEGER")
-            category_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(category_libraries)").fetchall()}
-            if "qdrant_enabled" not in category_columns:
-                connection.exec_driver_sql("ALTER TABLE category_libraries ADD COLUMN qdrant_enabled BOOLEAN DEFAULT 0 NOT NULL")
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_material_libraries_material_library_admin_id "
-                "ON material_libraries (material_library_admin_id)"
-            )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_material_libraries_category_library_id "
-                "ON material_libraries (category_library_id)"
-            )
-            connection.exec_driver_sql(
-                """
-                INSERT OR IGNORE INTO material_library_admin_roles (material_library_id, role_id, created_at)
-                SELECT id, material_library_admin_id, CURRENT_TIMESTAMP
-                FROM material_libraries
-                WHERE material_library_admin_id IS NOT NULL
-                """
-            )
-            connection.exec_driver_sql(
-                """
-                INSERT OR IGNORE INTO material_library_category_libraries (material_library_id, category_library_id, created_at)
-                SELECT id, category_library_id, CURRENT_TIMESTAMP
-                FROM material_libraries
-                WHERE category_library_id IS NOT NULL
-                """
-            )
-            RoleCodeSequence.__table__.create(bind=connection, checkfirst=True)
-            return
-
         Base.metadata.create_all(bind=connection)
         MaterialLibraryAdminRole.__table__.create(bind=connection, checkfirst=True)
         MaterialLibraryCategoryLibrary.__table__.create(bind=connection, checkfirst=True)
@@ -958,23 +895,6 @@ def ensure_material_library_association_schema() -> None:
 
 def ensure_product_name_schema() -> None:
     with engine.begin() as connection:
-        if engine.dialect.name == "sqlite":
-            Base.metadata.create_all(bind=connection)
-            existing = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(product_names)").fetchall()}
-            if "product_name_code" not in existing:
-                connection.exec_driver_sql(
-                    "ALTER TABLE product_names ADD COLUMN product_name_code VARCHAR(12) DEFAULT '' NOT NULL"
-                )
-            if "status" not in existing:
-                connection.exec_driver_sql(
-                    "ALTER TABLE product_names ADD COLUMN status VARCHAR(20) DEFAULT 'active' NOT NULL"
-                )
-            connection.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS ix_product_names_status ON product_names (status)"
-            )
-            ProductNameCodeSequence.__table__.create(bind=connection, checkfirst=True)
-            return
-
         Base.metadata.create_all(bind=connection)
         columns = {
             row[0]
@@ -991,6 +911,35 @@ def ensure_product_name_schema() -> None:
         if "status" not in columns:
             connection.exec_driver_sql("ALTER TABLE product_names ADD COLUMN status VARCHAR(20) DEFAULT 'active' NOT NULL")
         connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_product_names_status ON product_names (status)")
+
+
+def ensure_measurement_unit_schema() -> None:
+    """Create only the unit schema; legacy value backfill remains operator-run."""
+    with engine.begin() as connection:
+        MeasurementUnit.__table__.create(bind=connection, checkfirst=True)
+        target_tables = ("product_names", "materials", "attributes")
+        for table_name in target_tables:
+            has_column = connection.execute(
+                text(
+                    """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                  AND column_name = 'unit_id'
+                """
+                ),
+                {"table_name": table_name},
+            ).fetchone()
+            if not has_column:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {table_name} ADD COLUMN unit_id INTEGER "
+                    "REFERENCES measurement_units(id) ON DELETE RESTRICT"
+                )
+            connection.exec_driver_sql(
+                f"CREATE INDEX IF NOT EXISTS ix_{table_name}_unit_id "
+                f"ON {table_name} (unit_id)"
+            )
 
 
 def ensure_seed_product(db: Session) -> ProductName:
@@ -2634,6 +2583,8 @@ NON_SUPER_READ_PERMISSIONS = {
     "api.GET./api/v1/categories/{category_id}/properties",
     "api.GET./api/v1/product-names",
     "api.GET./api/v1/product-names/{product_name_id}",
+    "api.GET./api/v1/measurement-units",
+    "api.GET./api/v1/application-versions/current",
     "api.GET./api/v1/brands",
     "api.GET./api/v1/attributes",
     "api.GET./api/v1/material-libraries",
@@ -2998,14 +2949,207 @@ def validate_product_name_status(status: str) -> str:
     return normalized
 
 
+def normalize_application_version(value: str) -> str:
+    normalized = value.strip()
+    if normalized.lower().startswith("v"):
+        normalized = normalized[1:]
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?", normalized):
+        raise HTTPException(
+            status_code=422,
+            detail="Version must look like 4.2.0 or 2026.7.30-beta.1",
+        )
+    return normalized
+
+
+def application_version_to_out(
+    version: ApplicationVersion | None,
+) -> ApplicationVersionOut:
+    if version is None:
+        return ApplicationVersionOut(
+            id=None,
+            version=DEFAULT_PRODUCT_VERSION,
+            title="智料通",
+            release_notes="",
+            status="fallback",
+            released_at=None,
+            created_by="system",
+            created_at=None,
+            updated_at=None,
+            managed=False,
+        )
+    return ApplicationVersionOut(
+        id=version.id,
+        version=version.version,
+        title=version.title,
+        release_notes=version.release_notes,
+        status=version.status,
+        released_at=version.released_at.isoformat() if version.released_at else None,
+        created_by=version.created_by,
+        created_at=version.created_at.isoformat(),
+        updated_at=version.updated_at.isoformat(),
+        managed=True,
+    )
+
+
+def get_application_version_or_404(db: Session, version_id: int) -> ApplicationVersion:
+    version = db.get(ApplicationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Application version not found")
+    return version
+
+
+def measurement_unit_summary(unit: MeasurementUnit | None) -> MeasurementUnitSummary | None:
+    if unit is None:
+        return None
+    return MeasurementUnitSummary(
+        id=unit.id,
+        code=unit.code,
+        name=unit.name,
+        symbol=unit.symbol,
+    )
+
+
+def measurement_unit_usage(db: Session, unit: MeasurementUnit) -> dict[str, int]:
+    legacy_values = {
+        value.strip().lower()
+        for value in (unit.code, unit.name, unit.symbol)
+        if value.strip()
+    }
+
+    def count(model: type[ProductName] | type[Material] | type[Attribute]) -> int:
+        legacy_match = and_(
+            model.unit_id.is_(None),
+            func.lower(func.trim(model.unit)).in_(legacy_values),
+        )
+        return int(
+            db.query(func.count(model.id))
+            .filter(or_(model.unit_id == unit.id, legacy_match))
+            .scalar()
+            or 0
+        )
+
+    product_name_count = count(ProductName)
+    material_count = count(Material)
+    attribute_count = count(Attribute)
+    return {
+        "product_name_count": product_name_count,
+        "material_count": material_count,
+        "attribute_count": attribute_count,
+        "usage_count": product_name_count + material_count + attribute_count,
+    }
+
+
+def product_name_usage(db: Session, product: ProductName) -> dict[str, int]:
+    attribute_count = int(
+        db.query(func.count(Attribute.id))
+        .filter(Attribute.product_name_id == product.id)
+        .scalar()
+        or 0
+    )
+    material_count = int(
+        db.query(func.count(Material.id))
+        .filter(Material.product_name_id == product.id)
+        .scalar()
+        or 0
+    )
+    return {
+        "attribute_count": attribute_count,
+        "material_count": material_count,
+        "usage_count": attribute_count + material_count,
+    }
+
+
+def attribute_usage(db: Session, attribute: Attribute) -> int:
+    return int(
+        db.query(func.count(Material.id))
+        .filter(Material.product_name_id == attribute.product_name_id)
+        .scalar()
+        or 0
+    )
+
+
+def material_active_workflow_count(db: Session, material: Material) -> int:
+    applications = (
+        db.query(WorkflowApplication)
+        .filter(WorkflowApplication.status.notin_(TERMINAL_WORKFLOW_STATUSES))
+        .all()
+    )
+    return sum(
+        1
+        for application in applications
+        if int(workflow_payload(application.payload).get("material_id") or 0) == material.id
+    )
+
+
+def measurement_unit_to_out(db: Session, unit: MeasurementUnit) -> MeasurementUnitOut:
+    return MeasurementUnitOut(
+        id=unit.id,
+        code=unit.code,
+        name=unit.name,
+        symbol=unit.symbol,
+        unit_type=unit.unit_type,
+        description=unit.description,
+        decimal_places=unit.decimal_places,
+        enabled=unit.enabled,
+        is_system=unit.is_system,
+        sort_order=unit.sort_order,
+        created_at=unit.created_at.isoformat(),
+        updated_at=unit.updated_at.isoformat(),
+        **measurement_unit_usage(db, unit),
+    )
+
+
+def get_measurement_unit_or_404(
+    db: Session,
+    unit_id: int,
+    *,
+    require_enabled: bool = False,
+) -> MeasurementUnit:
+    unit = db.get(MeasurementUnit, unit_id)
+    if not unit:
+        raise HTTPException(status_code=404, detail="Measurement unit not found")
+    if require_enabled and not unit.enabled:
+        raise HTTPException(status_code=422, detail="Disabled measurement unit cannot be selected")
+    return unit
+
+
+def get_brand_or_404(
+    db: Session,
+    brand_id: int,
+    *,
+    require_enabled: bool = False,
+) -> Brand:
+    brand = db.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    if require_enabled and not brand.enabled:
+        raise HTTPException(status_code=422, detail="Disabled brand cannot be selected")
+    return brand
+
+
+def generate_measurement_unit_code(db: Session) -> str:
+    for _ in range(10):
+        code = f"UNIT-{uuid.uuid4().hex[:12].upper()}"
+        if not db.query(MeasurementUnit).filter(MeasurementUnit.code == code).first():
+            return code
+    raise HTTPException(status_code=503, detail="Unable to allocate measurement unit code")
+
+
+def measurement_unit_display(unit: MeasurementUnit | None, legacy_value: str) -> str:
+    return unit.symbol if unit is not None else legacy_value
+
+
 def product_name_to_out(product: ProductName) -> ProductNameOut:
     return ProductNameOut(
         id=product.id,
         product_name_code=product.product_name_code,
         status=product.status,
         name=product.name,
-        unit=product.unit,
-        category=product.category,
+        unit=measurement_unit_display(product.measurement_unit, product.unit),
+        unit_id=product.unit_id,
+        measurement_unit=measurement_unit_summary(product.measurement_unit),
+        category_id=product.category_id,
+        category=product.category_ref.name if product.category_ref else product.category,
     )
 
 
@@ -3015,8 +3159,10 @@ def product_name_audit_value(product: ProductName) -> dict[str, Any]:
         "product_name_code": product.product_name_code,
         "status": product.status,
         "name": product.name,
-        "unit": product.unit,
-        "category": product.category,
+        "unit": measurement_unit_display(product.measurement_unit, product.unit),
+        "unit_id": product.unit_id,
+        "category_id": product.category_id,
+        "category": product.category_ref.name if product.category_ref else product.category,
     }
 
 
@@ -3025,6 +3171,20 @@ def get_product_name_or_404(db: Session, product_name_id: int) -> ProductName:
     if not product:
         raise HTTPException(status_code=404, detail="Product name not found")
     return product
+
+
+def get_product_category_or_404(
+    db: Session,
+    category_id: int,
+    *,
+    require_enabled: bool = False,
+) -> Category:
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if require_enabled and not category.enabled:
+        raise HTTPException(status_code=422, detail="Disabled category cannot be selected")
+    return category
 
 
 def get_role_or_404(db: Session, role_id: int) -> Role:
@@ -3112,7 +3272,15 @@ def attribute_to_out(attribute: Attribute) -> AttributeOut:
         product_name=attribute.product_name.name,
         name=attribute.name,
         data_type=attribute.data_type,
-        unit=attribute.unit,
+        unit=measurement_unit_display(attribute.measurement_unit, attribute.unit),
+        unit_id=attribute.unit_id,
+        measurement_unit=measurement_unit_summary(attribute.measurement_unit),
+        brand_id=attribute.brand_id,
+        brand=(
+            BrandSummary(id=attribute.brand.id, name=attribute.brand.name)
+            if attribute.brand is not None
+            else None
+        ),
         required=attribute.required,
         default_value=attribute.default_value,
         options=normalize_options(attribute.options),
@@ -3497,6 +3665,11 @@ def category_to_out(category: Category) -> CategoryOut:
 CATEGORY_ATTRIBUTE_TYPES = {"string", "number", "enum", "date"}
 
 
+def validate_category_attribute_requiredness(required: bool, allow_empty: bool) -> None:
+    if required and allow_empty:
+        raise HTTPException(status_code=422, detail="Required attributes cannot allow empty values")
+
+
 def category_attribute_options(value: str | list[str] | None) -> list[str]:
     if isinstance(value, list):
         return [compact_space(str(item)) for item in value if compact_space(str(item))]
@@ -3529,7 +3702,8 @@ def validate_category_attribute_payload(
     payload: CategoryAttributeCreate | CategoryAttributeUpdate,
     existing: CategoryAttribute | None = None,
 ) -> dict[str, Any]:
-    ensure_category_attribute_schema()
+    # Category-attribute schema is prepared during application startup. Running
+    # DDL here can self-block a batch import after its transaction writes row 1.
     values: dict[str, Any] = {}
     fields_set = payload.model_fields_set
     if isinstance(payload, CategoryAttributeCreate) or "name" in fields_set:
@@ -3560,6 +3734,9 @@ def validate_category_attribute_payload(
             value = getattr(payload, field)
             if value is not None:
                 values[field] = value
+    effective_required = values.get("required", existing.required if existing is not None else False)
+    effective_allow_empty = values.get("allow_empty", existing.allow_empty if existing is not None else True)
+    validate_category_attribute_requiredness(effective_required, effective_allow_empty)
     if isinstance(payload, CategoryAttributeCreate) or "options" in fields_set:
         options = getattr(payload, "options", None) or []
         values["options"] = json.dumps(category_attribute_options(options), ensure_ascii=False)
@@ -3686,6 +3863,40 @@ def validate_required_category_properties(
             detail={
                 "error": "Missing required category properties",
                 "missing_properties": missing,
+            },
+        )
+
+
+def validate_required_product_attributes(
+    db: Session,
+    product: ProductName,
+    values: dict[str, Any],
+) -> None:
+    required_attributes = (
+        db.query(Attribute)
+        .filter(
+            Attribute.product_name_id == product.id,
+            Attribute.enabled.is_(True),
+            Attribute.required.is_(True),
+        )
+        .order_by(Attribute.id)
+        .all()
+    )
+    missing = [
+        attribute.name
+        for attribute in required_attributes
+        if values.get(attribute.name) is None
+        or (
+            isinstance(values.get(attribute.name), str)
+            and not str(values.get(attribute.name)).strip()
+        )
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Missing required product attributes",
+                "missing_attributes": missing,
             },
         )
 
@@ -4308,7 +4519,9 @@ def material_to_out(material: Material) -> MaterialOut:
         material_library=material.material_library.name,
         category_id=material.category_id,
         category=material.category.name,
-        unit=material.unit,
+        unit=measurement_unit_display(material.measurement_unit, material.unit),
+        unit_id=material.unit_id,
+        measurement_unit=measurement_unit_summary(material.measurement_unit),
         brand_id=material.brand_id,
         brand=material.brand.name if material.brand else "",
         status=material.status,
@@ -4719,6 +4932,20 @@ def material_context_by_payload(
         raise HTTPException(status_code=404, detail="Material library not found")
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if product.status != "active":
+        raise HTTPException(status_code=422, detail="停用的品名不能用于创建物料")
+    if not library.enabled:
+        raise HTTPException(status_code=422, detail="停用的物料库不能用于创建物料")
+    if not category.enabled:
+        raise HTTPException(status_code=422, detail="停用的类目不能用于创建物料")
+    linked_library_ids = linked_category_library_ids(library)
+    if (
+        category.category_library_id is not None
+        and category.category_library_id not in linked_library_ids
+    ):
+        raise HTTPException(status_code=422, detail="所选类目不属于该物料库绑定的类目体系")
+    if product.category_id is not None and product.category_id != category.id:
+        raise HTTPException(status_code=422, detail="所选品名不属于该类目")
     return product, library, category
 
 
@@ -5515,7 +5742,7 @@ def create_rule(
         value=payload.value.strip(),
         options=json.dumps(payload.options, ensure_ascii=False),
         priority=payload.priority,
-        enabled=payload.enabled,
+        enabled=True,
     )
     db.add(rule)
     db.commit()
@@ -5635,6 +5862,336 @@ def delete_rule(
     return {"deleted": True, "id": rule_id}
 
 
+@app.get(
+    "/api/v1/application-versions/current",
+    response_model=ApplicationVersionOut,
+)
+def get_current_application_version(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.GET./api/v1/application-versions/current")
+    ),
+) -> ApplicationVersionOut:
+    version = (
+        db.query(ApplicationVersion)
+        .filter(ApplicationVersion.status == "published")
+        .order_by(ApplicationVersion.released_at.desc(), ApplicationVersion.id.desc())
+        .first()
+    )
+    return application_version_to_out(version)
+
+
+@app.get("/api/v1/application-versions", response_model=list[ApplicationVersionOut])
+def list_application_versions(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.GET./api/v1/application-versions")
+    ),
+) -> list[ApplicationVersionOut]:
+    versions = (
+        db.query(ApplicationVersion)
+        .order_by(ApplicationVersion.created_at.desc(), ApplicationVersion.id.desc())
+        .all()
+    )
+    return [application_version_to_out(version) for version in versions]
+
+
+@app.post("/api/v1/application-versions", response_model=ApplicationVersionOut)
+def create_application_version(
+    payload: ApplicationVersionIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.POST./api/v1/application-versions")
+    ),
+) -> ApplicationVersionOut:
+    require_button_permission(auth, "button.application_versions.create")
+    version_number = normalize_application_version(payload.version)
+    if db.query(ApplicationVersion).filter(ApplicationVersion.version == version_number).first():
+        raise HTTPException(status_code=409, detail="Application version already exists")
+    version = ApplicationVersion(
+        version=version_number,
+        title=payload.title.strip() or f"版本 {version_number}",
+        release_notes=payload.release_notes.strip(),
+        status="draft",
+        created_by=auth.username,
+    )
+    db.add(version)
+    db.commit()
+    db.refresh(version)
+    return application_version_to_out(version)
+
+
+@app.put(
+    "/api/v1/application-versions/{version_id}",
+    response_model=ApplicationVersionOut,
+)
+def update_application_version(
+    version_id: int,
+    payload: ApplicationVersionUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.PUT./api/v1/application-versions/{version_id}")
+    ),
+) -> ApplicationVersionOut:
+    require_button_permission(auth, "button.application_versions.edit")
+    version = get_application_version_or_404(db, version_id)
+    if payload.version is not None:
+        version_number = normalize_application_version(payload.version)
+        duplicate = (
+            db.query(ApplicationVersion)
+            .filter(
+                ApplicationVersion.id != version.id,
+                ApplicationVersion.version == version_number,
+            )
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Application version already exists")
+        version.version = version_number
+    if payload.title is not None:
+        version.title = payload.title.strip() or f"版本 {version.version}"
+    if payload.release_notes is not None:
+        version.release_notes = payload.release_notes.strip()
+    version.updated_at = now()
+    db.commit()
+    db.refresh(version)
+    return application_version_to_out(version)
+
+
+@app.post(
+    "/api/v1/application-versions/{version_id}/publish",
+    response_model=ApplicationVersionOut,
+)
+def publish_application_version(
+    version_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission(
+            "api.POST./api/v1/application-versions/{version_id}/publish"
+        )
+    ),
+) -> ApplicationVersionOut:
+    require_button_permission(auth, "button.application_versions.publish")
+    version = get_application_version_or_404(db, version_id)
+    published_at = now()
+    for current in (
+        db.query(ApplicationVersion)
+        .filter(
+            ApplicationVersion.status == "published",
+            ApplicationVersion.id != version.id,
+        )
+        .all()
+    ):
+        current.status = "archived"
+        current.updated_at = published_at
+    version.status = "published"
+    version.released_at = published_at
+    version.updated_at = published_at
+    db.commit()
+    db.refresh(version)
+    return application_version_to_out(version)
+
+
+@app.delete("/api/v1/application-versions/{version_id}")
+def delete_application_version(
+    version_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.DELETE./api/v1/application-versions/{version_id}")
+    ),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.application_versions.delete")
+    version = get_application_version_or_404(db, version_id)
+    if version.status == "published":
+        raise HTTPException(
+            status_code=409,
+            detail="Publish another version before deleting the current version",
+        )
+    db.delete(version)
+    db.commit()
+    return {"deleted": True, "id": version_id}
+
+
+@app.get("/api/v1/measurement-units", response_model=list[MeasurementUnitOut])
+def list_measurement_units(
+    keyword: str = "",
+    unit_type: str = "",
+    enabled: bool | None = None,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.GET./api/v1/measurement-units")
+    ),
+) -> list[MeasurementUnitOut]:
+    query = db.query(MeasurementUnit)
+    if keyword.strip():
+        like = f"%{keyword.strip()}%"
+        query = query.filter(
+            or_(
+                MeasurementUnit.code.ilike(like),
+                MeasurementUnit.name.ilike(like),
+                MeasurementUnit.symbol.ilike(like),
+                MeasurementUnit.description.ilike(like),
+            )
+        )
+    if unit_type.strip():
+        query = query.filter(MeasurementUnit.unit_type == unit_type.strip())
+    if enabled is not None:
+        query = query.filter(MeasurementUnit.enabled == enabled)
+    units = query.order_by(
+        MeasurementUnit.sort_order,
+        MeasurementUnit.id,
+    ).all()
+    return [measurement_unit_to_out(db, unit) for unit in units]
+
+
+@app.post("/api/v1/measurement-units", response_model=MeasurementUnitOut)
+def create_measurement_unit(
+    payload: MeasurementUnitIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.POST./api/v1/measurement-units")
+    ),
+) -> MeasurementUnitOut:
+    require_button_permission(auth, "button.measurement_units.create")
+    code = (
+        payload.code.strip().upper()
+        if payload.code is not None
+        else generate_measurement_unit_code(db)
+    )
+    name = payload.name.strip()
+    symbol = payload.symbol.strip()
+    unit_type = payload.unit_type.strip().lower()
+    if not code or not name or not symbol or not unit_type:
+        raise HTTPException(status_code=422, detail="Name, symbol and type are required")
+    duplicate = (
+        db.query(MeasurementUnit)
+        .filter(
+            or_(
+                func.lower(MeasurementUnit.code) == code.lower(),
+                func.lower(MeasurementUnit.name) == name.lower(),
+            )
+        )
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "UNIT_ALREADY_EXISTS",
+                "message": "Measurement unit code or name already exists",
+            },
+        )
+    unit = MeasurementUnit(
+        code=code,
+        name=name,
+        symbol=symbol,
+        unit_type=unit_type,
+        description=payload.description.strip(),
+        decimal_places=payload.decimal_places,
+        enabled=payload.enabled,
+        is_system=False,
+        sort_order=payload.sort_order,
+    )
+    db.add(unit)
+    db.commit()
+    db.refresh(unit)
+    return measurement_unit_to_out(db, unit)
+
+
+@app.put("/api/v1/measurement-units/{unit_id}", response_model=MeasurementUnitOut)
+def update_measurement_unit(
+    unit_id: int,
+    payload: MeasurementUnitUpdate,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.PUT./api/v1/measurement-units/{unit_id}")
+    ),
+) -> MeasurementUnitOut:
+    require_button_permission(auth, "button.measurement_units.edit")
+    unit = get_measurement_unit_or_404(db, unit_id)
+    if payload.enabled is False and unit.enabled:
+        usage = measurement_unit_usage(db, unit)
+        if usage["usage_count"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f'计量单位“{unit.name}”正在被 {usage["usage_count"]} 条业务数据使用，无法停用',
+            )
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Measurement unit name is required")
+        duplicate = (
+            db.query(MeasurementUnit)
+            .filter(
+                MeasurementUnit.id != unit.id,
+                func.lower(MeasurementUnit.name) == name.lower(),
+            )
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "UNIT_ALREADY_EXISTS",
+                    "message": "Measurement unit name already exists",
+                },
+            )
+        unit.name = name
+    if payload.symbol is not None:
+        symbol = payload.symbol.strip()
+        if not symbol:
+            raise HTTPException(status_code=422, detail="Measurement unit symbol is required")
+        unit.symbol = symbol
+    if payload.unit_type is not None:
+        unit_type = payload.unit_type.strip().lower()
+        if not unit_type:
+            raise HTTPException(status_code=422, detail="Measurement unit type is required")
+        unit.unit_type = unit_type
+    if payload.description is not None:
+        unit.description = payload.description.strip()
+    for field in ("decimal_places", "enabled", "sort_order"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(unit, field, value)
+    unit.updated_at = now()
+    db.commit()
+    db.refresh(unit)
+    return measurement_unit_to_out(db, unit)
+
+
+@app.delete("/api/v1/measurement-units/{unit_id}")
+def delete_measurement_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(
+        require_api_permission("api.DELETE./api/v1/measurement-units/{unit_id}")
+    ),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.measurement_units.delete")
+    unit = get_measurement_unit_or_404(db, unit_id)
+    if unit.is_system:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SYSTEM_UNIT_CANNOT_BE_DELETED",
+                "message": "System measurement units can be disabled but not deleted",
+            },
+        )
+    usage = measurement_unit_usage(db, unit)
+    if usage["usage_count"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "UNIT_IN_USE",
+                "message": f'Measurement unit "{unit.name}" is in use',
+                "usage": usage,
+            },
+        )
+    db.delete(unit)
+    db.commit()
+    return {"deleted": True, "id": unit_id}
+
+
 @app.get("/api/v1/product-names", response_model=list[ProductNameOut])
 def list_product_names(
     status: str = Query("all"),
@@ -5666,12 +6223,24 @@ def create_product_name(
         raise HTTPException(status_code=422, detail="Product name is required")
     if db.query(ProductName).filter(ProductName.name == name).first():
         raise HTTPException(status_code=409, detail="Product name must be unique")
+    unit = (
+        get_measurement_unit_or_404(db, payload.unit_id, require_enabled=True)
+        if payload.unit_id is not None
+        else None
+    )
+    category = (
+        get_product_category_or_404(db, payload.category_id, require_enabled=True)
+        if payload.category_id is not None
+        else None
+    )
     product = ProductName(
         name=name,
         product_name_code=generate_product_name_code(db),
         status="active",
-        unit=payload.unit.strip(),
-        category=payload.category.strip(),
+        unit=unit.symbol if unit else payload.unit.strip(),
+        unit_id=unit.id if unit else None,
+        category_id=category.id if category else None,
+        category=category.name if category else payload.category.strip(),
     )
     db.add(product)
     db.flush()
@@ -5712,7 +6281,25 @@ def update_product_name(
         product.name = name
     if payload.unit is not None:
         product.unit = payload.unit.strip()
-    if payload.category is not None:
+    if "unit_id" in payload.model_fields_set:
+        unit = (
+            get_measurement_unit_or_404(db, payload.unit_id, require_enabled=True)
+            if payload.unit_id is not None
+            else None
+        )
+        product.unit_id = unit.id if unit else None
+        if unit:
+            product.unit = unit.symbol
+    if "category_id" in payload.model_fields_set:
+        category = (
+            get_product_category_or_404(db, payload.category_id, require_enabled=True)
+            if payload.category_id is not None
+            else None
+        )
+        product.category_id = category.id if category else None
+        if category:
+            product.category = category.name
+    if payload.category is not None and "category_id" not in payload.model_fields_set:
         product.category = payload.category.strip()
     db.flush()
     after = product_name_audit_value(product)
@@ -5734,6 +6321,16 @@ def update_product_name_status(
     ensure_product_name_code_sequence(db)
     product = get_product_name_or_404(db, product_name_id)
     status = validate_product_name_status(payload.status)
+    if status == "inactive" and product.status == "active":
+        usage = product_name_usage(db, product)
+        if usage["usage_count"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f'品名“{product.name}”正在被 {usage["attribute_count"]} 个属性、'
+                    f'{usage["material_count"]} 个物料使用，无法停用'
+                ),
+            )
     before = product_name_audit_value(product)
     product.status = status
     db.flush()
@@ -5754,6 +6351,12 @@ def delete_product_name(
     require_button_permission(auth, "button.product_names.delete")
     ensure_product_name_code_sequence(db)
     product = get_product_name_or_404(db, product_name_id)
+    usage = product_name_usage(db, product)
+    if usage["usage_count"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f'品名“{product.name}”正在使用中，无法删除或停用',
+        )
     before = product_name_audit_value(product)
     product.status = "inactive"
     db.flush()
@@ -6589,23 +7192,38 @@ def xml_local_name(tag: str) -> str:
 
 
 def category_import_rows_from_table(table_rows: list[list[Any]], source: str) -> list[dict[str, str]]:
+    return spreadsheet_rows_to_dicts(
+        table_rows,
+        source,
+        CATEGORY_IMPORT_HEADERS,
+        required_headers=[CATEGORY_IMPORT_HEADERS[0]],
+    )
+
+
+def spreadsheet_rows_to_dicts(
+    table_rows: list[list[Any]],
+    source: str,
+    headers: list[str],
+    required_headers: list[str],
+) -> list[dict[str, str]]:
     non_empty_rows = [
         [compact_space(str(cell or "")) for cell in row]
         for row in table_rows
         if any(compact_space(str(cell or "")) for cell in row)
     ]
     if not non_empty_rows:
-        raise HTTPException(status_code=422, detail=f"{source} category import file is empty")
-    headers = [cell.strip() for cell in non_empty_rows[0]]
-    if CATEGORY_IMPORT_HEADERS[0] not in headers:
-        raise HTTPException(status_code=422, detail=f"Missing {source} headers: {CATEGORY_IMPORT_HEADERS[0]}")
-    indexes = [headers.index(header) if header in headers else -1 for header in CATEGORY_IMPORT_HEADERS]
+        raise HTTPException(status_code=422, detail=f"{source} import file is empty")
+    actual_headers = [cell.strip() for cell in non_empty_rows[0]]
+    missing_headers = [header for header in required_headers if header not in actual_headers]
+    if missing_headers:
+        raise HTTPException(status_code=422, detail=f"Missing {source} headers: {', '.join(missing_headers)}")
+    indexes = [actual_headers.index(header) if header in actual_headers else -1 for header in headers]
     rows: list[dict[str, str]] = []
     for raw_row in non_empty_rows[1:]:
         rows.append(
             {
                 header: raw_row[index] if index >= 0 and index < len(raw_row) else ""
-                for header, index in zip(CATEGORY_IMPORT_HEADERS, indexes)
+                for header, index in zip(headers, indexes)
             }
         )
     return rows
@@ -6656,13 +7274,22 @@ def xlsx_first_sheet_path(archive: zipfile.ZipFile) -> str:
         rel_id = element.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
         target = relationship_targets.get(rel_id or "")
         if target:
-            return f"xl/{target.lstrip('/')}" if not target.startswith("xl/") else target
+            normalized_target = target.replace("\\", "/")
+            if normalized_target.startswith("/"):
+                sheet_path = posixpath.normpath(normalized_target.lstrip("/"))
+            elif normalized_target.startswith("xl/"):
+                sheet_path = posixpath.normpath(normalized_target)
+            else:
+                sheet_path = posixpath.normpath(posixpath.join("xl", normalized_target))
+            if sheet_path in {"", ".", ".."} or sheet_path.startswith("../"):
+                raise ValueError("worksheet relationship target is invalid")
+            return sheet_path
         sheet_id = compact_space(str(element.attrib.get("sheetId") or "1"))
         return f"xl/worksheets/sheet{sheet_id}.xml"
     return "xl/worksheets/sheet1.xml"
 
 
-def parse_xlsx_category_import(content: bytes) -> list[dict[str, str]]:
+def parse_xlsx_table(content: bytes) -> list[list[str]]:
     with zipfile.ZipFile(BytesIO(content)) as archive:
         shared_strings = xlsx_shared_strings(archive)
         sheet = ElementTree.fromstring(archive.read(xlsx_first_sheet_path(archive)))
@@ -6685,10 +7312,14 @@ def parse_xlsx_category_import(content: bytes) -> list[dict[str, str]]:
             cells[column_index] = compact_space(value)
         if cells:
             table_rows.append([cells.get(index, "") for index in range(max(cells) + 1)])
-    return category_import_rows_from_table(table_rows, "XLSX")
+    return table_rows
 
 
-def parse_xml_xls_category_import(content: bytes) -> list[dict[str, str]]:
+def parse_xlsx_category_import(content: bytes) -> list[dict[str, str]]:
+    return category_import_rows_from_table(parse_xlsx_table(content), "XLSX")
+
+
+def parse_xml_xls_table(content: bytes) -> list[list[str]]:
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -6701,7 +7332,11 @@ def parse_xml_xls_category_import(content: bytes) -> list[dict[str, str]]:
             values.append(compact_space("".join(cell.itertext())))
         if values:
             table_rows.append(values)
-    return category_import_rows_from_table(table_rows, "XLS")
+    return table_rows
+
+
+def parse_xml_xls_category_import(content: bytes) -> list[dict[str, str]]:
+    return category_import_rows_from_table(parse_xml_xls_table(content), "XLS")
 
 
 def read_u16(data: bytes, offset: int) -> int:
@@ -6824,7 +7459,7 @@ def parse_biff_unicode_string(data: bytes, offset: int = 0) -> tuple[str, int]:
     return text, offset
 
 
-def parse_biff_xls_category_import(content: bytes) -> list[dict[str, str]]:
+def parse_biff_xls_table(content: bytes) -> list[list[str]]:
     stream = cfb_workbook_stream(content)
     shared_strings: list[str] = []
     cells: dict[tuple[int, int], str] = {}
@@ -6878,7 +7513,11 @@ def parse_biff_xls_category_import(content: bytes) -> list[dict[str, str]]:
         [compact_space(cells.get((row, column), "")) for column in range(max_column + 1)]
         for row in range(max_row + 1)
     ]
-    return category_import_rows_from_table(table_rows, "XLS")
+    return table_rows
+
+
+def parse_biff_xls_category_import(content: bytes) -> list[dict[str, str]]:
+    return category_import_rows_from_table(parse_biff_xls_table(content), "XLS")
 
 
 def parse_category_import_file(content: bytes, filename: str, content_type: str) -> list[dict[str, str]]:
@@ -6931,6 +7570,289 @@ async def category_import_rows_from_request(request: Request) -> list[dict[str, 
         if isinstance(rows, list):
             return rows
     raise HTTPException(status_code=422, detail="Expected JSON array or object with rows")
+
+
+CATEGORY_ATTRIBUTE_IMPORT_HEADERS = [
+    "类目编码",
+    "类目路径",
+    "属性名称",
+    "中文名称",
+    "英文名称",
+    "属性类型",
+    "枚举选项",
+    "是否必填",
+    "是否允许为空",
+    "默认值",
+    "排序值",
+]
+CATEGORY_ATTRIBUTE_IMPORT_REQUIRED_HEADERS = ["类目编码", "属性名称", "属性类型"]
+CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS = 5000
+
+
+def parse_category_attribute_import_csv(text_value: str) -> list[dict[str, str]]:
+    return spreadsheet_rows_to_dicts(
+        list(csv.reader(StringIO(text_value))),
+        "CSV",
+        CATEGORY_ATTRIBUTE_IMPORT_HEADERS,
+        CATEGORY_ATTRIBUTE_IMPORT_REQUIRED_HEADERS,
+    )
+
+
+def category_attribute_rows_from_table(table_rows: list[list[Any]], source: str) -> list[dict[str, str]]:
+    return spreadsheet_rows_to_dicts(
+        table_rows,
+        source,
+        CATEGORY_ATTRIBUTE_IMPORT_HEADERS,
+        CATEGORY_ATTRIBUTE_IMPORT_REQUIRED_HEADERS,
+    )
+
+
+def parse_category_attribute_import_file(content: bytes, filename: str, content_type: str) -> list[dict[str, str]]:
+    lowered = filename.lower()
+    if lowered.endswith(".csv") or "text/csv" in content_type:
+        try:
+            return parse_category_attribute_import_csv(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV category attribute import file: {exc}") from exc
+    if lowered.endswith(".xlsx") or "spreadsheetml.sheet" in content_type or zipfile.is_zipfile(BytesIO(content)):
+        try:
+            return category_attribute_rows_from_table(parse_xlsx_table(content), "XLSX")
+        except (KeyError, ValueError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLSX category attribute import file: {exc}") from exc
+    if lowered.endswith(".xls") or "application/vnd.ms-excel" in content_type:
+        try:
+            stripped = content.lstrip()
+            table_rows = parse_xml_xls_table(content) if stripped.startswith(b"<") else parse_biff_xls_table(content)
+            return category_attribute_rows_from_table(table_rows, "XLS")
+        except (UnicodeDecodeError, ValueError, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLS category attribute import file: {exc}") from exc
+    raise HTTPException(status_code=422, detail="Unsupported category attribute import file type. Upload CSV, XLSX, or XLS.")
+
+
+async def category_attribute_import_rows_from_request(request: Request) -> list[dict[str, str]]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        upload = form.get("file") or form.get("csv") or form.get("upload")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=422, detail="Category attribute import file is required")
+        content = await upload.read()
+        filename = compact_space(str(getattr(upload, "filename", "") or ""))
+        upload_content_type = compact_space(str(getattr(upload, "content_type", "") or ""))
+        rows = parse_category_attribute_import_file(content, filename, upload_content_type)
+    elif "text/csv" in content_type:
+        content = await request.body()
+        try:
+            rows = parse_category_attribute_import_csv(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV category attribute import file: {exc}") from exc
+    else:
+        payload = await request.json()
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict) and isinstance(payload.get("rows") or payload.get("items"), list):
+            rows = payload.get("rows") or payload.get("items")
+        else:
+            raise HTTPException(status_code=422, detail="Expected JSON array or object with rows")
+    if len(rows) > CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS:
+        raise HTTPException(status_code=422, detail=f"At most {CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS} attribute rows can be imported at once")
+    return rows
+
+
+def parse_category_attribute_import_bool(value: Any, default: bool, field_name: str) -> tuple[bool, str | None]:
+    normalized = compact_space(str(value or "")).lower()
+    if not normalized:
+        return default, None
+    if normalized in {"是", "true", "1", "yes", "y"}:
+        return True, None
+    if normalized in {"否", "false", "0", "no", "n"}:
+        return False, None
+    return default, f"{field_name} must be 是/否 or true/false"
+
+
+def category_attribute_import_options(value: Any) -> list[str]:
+    return list(
+        dict.fromkeys(
+            compact_space(option)
+            for option in re.split(r"[|｜,，;；\n]+", str(value or ""))
+            if compact_space(option)
+        )
+    )
+
+
+def validate_category_attribute_import_semantics(attribute: CategoryAttributeCreate) -> list[str]:
+    errors: list[str] = []
+    attr_type = normalize_category_attribute_type(attribute) or "string"
+    if attr_type == "enum" and not attribute.options:
+        errors.append("枚举属性必须至少提供一个枚举选项")
+    if attr_type == "enum" and attribute.default_value and attribute.default_value not in attribute.options:
+        errors.append("枚举默认值必须包含在枚举选项中")
+    if attribute.required and attribute.allow_empty:
+        errors.append("必填属性不能同时允许为空")
+    if attr_type == "number" and attribute.default_value:
+        try:
+            float(attribute.default_value)
+        except ValueError:
+            errors.append("数字属性的默认值必须是数字")
+    if attr_type == "date" and attribute.default_value:
+        try:
+            datetime.fromisoformat(attribute.default_value)
+        except ValueError:
+            errors.append("日期属性的默认值必须是 ISO 日期，例如 2026-07-31")
+    return errors
+
+
+def normalize_category_attribute_import_row(raw: Any, row_number: int) -> tuple[str, CategoryAttributeCreate | None, list[str]]:
+    if not isinstance(raw, dict):
+        return "", None, ["Row must be an object"]
+    errors: list[str] = []
+    category_code = compact_space(str(raw.get("类目编码") or ""))
+    name = compact_space(str(raw.get("属性名称") or ""))
+    raw_type = compact_space(str(raw.get("属性类型") or "")).lower()
+    if not category_code:
+        errors.append("类目编码 is required")
+    if not name:
+        errors.append("属性名称 is required")
+    if not raw_type:
+        errors.append("属性类型 is required")
+    required, required_error = parse_category_attribute_import_bool(raw.get("是否必填"), False, "是否必填")
+    allow_empty, allow_empty_error = parse_category_attribute_import_bool(raw.get("是否允许为空"), True, "是否允许为空")
+    errors.extend(error for error in [required_error, allow_empty_error] if error)
+    sort_order: int | None = None
+    raw_sort_order = compact_space(str(raw.get("排序值") or ""))
+    if raw_sort_order:
+        try:
+            sort_order = int(raw_sort_order)
+        except ValueError:
+            errors.append("排序值必须是整数")
+    attribute: CategoryAttributeCreate | None = None
+    if name and raw_type:
+        try:
+            normalized_type = {"text": "string", "str": "string", "integer": "number", "float": "number", "decimal": "number"}.get(raw_type, raw_type)
+            attribute = CategoryAttributeCreate(
+                name=name,
+                attr_type=normalized_type,
+                display_name_zh=compact_space(str(raw.get("中文名称") or "")),
+                display_name_en=compact_space(str(raw.get("英文名称") or "")),
+                options=category_attribute_import_options(raw.get("枚举选项")),
+                required=required,
+                allow_empty=allow_empty,
+                default_value=compact_space(str(raw.get("默认值") or "")) or None,
+                sort_order=sort_order,
+            )
+            errors.extend(validate_category_attribute_import_semantics(attribute))
+        except (HTTPException, ValueError) as exc:
+            errors.append(str(exc.detail if isinstance(exc, HTTPException) else exc))
+    return category_code, attribute, errors
+
+
+def preview_category_attribute_import(
+    db: Session,
+    category_library_id: int,
+    raw_rows: list[dict[str, Any]],
+    conflict_strategy: str,
+) -> dict[str, Any]:
+    if conflict_strategy not in {"skip", "update", "error"}:
+        raise HTTPException(status_code=422, detail="conflict_strategy must be skip, update, or error")
+    library = db.get(CategoryLibrary, category_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    categories = db.query(Category).filter(Category.category_library_id == category_library_id).all()
+    categories_by_code = {category.code: category for category in categories}
+    categories_by_id = {category.id: category for category in categories}
+    existing_attributes = (
+        db.query(CategoryAttribute)
+        .join(Category, CategoryAttribute.category_id == Category.id)
+        .filter(Category.category_library_id == category_library_id)
+        .all()
+    )
+    existing_by_key = {(attribute.category_id, attribute.name): attribute for attribute in existing_attributes}
+    declared_keys: set[tuple[int, str]] = set()
+    for row_number, raw in enumerate(raw_rows, start=2):
+        category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
+        category = categories_by_code.get(category_code)
+        if category and attribute and not errors:
+            declared_keys.add((category.id, attribute.name))
+    available_keys = set(existing_by_key) | declared_keys
+    seen_keys: set[tuple[int, str]] = set()
+    items: list[dict[str, Any]] = []
+    for row_number, raw in enumerate(raw_rows, start=2):
+        category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
+        category = categories_by_code.get(category_code)
+        if category_code and not category:
+            errors.append("类目编码不存在或不属于当前类目库")
+        action = "create"
+        existing: CategoryAttribute | None = None
+        if category and attribute:
+            key = (category.id, attribute.name)
+            if key in seen_keys:
+                errors.append("文件中同一类目下的属性名称重复")
+            seen_keys.add(key)
+            inherited_key = inherited_category_attribute_key(
+                category,
+                categories_by_id,
+                available_keys,
+                attribute.name,
+            )
+            if inherited_key and not errors:
+                action = "skip"
+                existing = existing_by_key.get(inherited_key)
+            else:
+                existing = existing_by_key.get(key)
+            if existing and not inherited_key:
+                action = conflict_strategy
+                if conflict_strategy == "error":
+                    errors.append("该类目已存在同名属性")
+        if errors:
+            action = "error"
+        selectable = not errors and action in {"create", "update"}
+        raw_path = raw.get("类目路径") if isinstance(raw, dict) else ""
+        category_path = " / ".join(category_path_for(category, categories_by_id)) if category else compact_space(str(raw_path or ""))
+        items.append(
+            {
+                "row_number": row_number,
+                "category_id": category.id if category else None,
+                "category_code": category_code,
+                "category_name": category.name if category else "",
+                "category_path": category_path,
+                "attribute": attribute.model_dump() if attribute else None,
+                "existing_attribute_id": existing.id if existing else None,
+                "action": action,
+                "selectable": selectable,
+                "errors": errors,
+            }
+        )
+    return {
+        "category_library_id": category_library_id,
+        "conflict_strategy": conflict_strategy,
+        "total_count": len(items),
+        "valid_count": sum(1 for item in items if item["selectable"]),
+        "create_count": sum(1 for item in items if item["action"] == "create" and item["selectable"]),
+        "update_count": sum(1 for item in items if item["action"] == "update" and item["selectable"]),
+        "skipped_count": sum(1 for item in items if item["action"] == "skip"),
+        "error_count": sum(1 for item in items if item["errors"]),
+        "items": items,
+    }
+
+
+def inherited_category_attribute_key(
+    category: Category,
+    categories_by_id: dict[int, Category],
+    attribute_keys: set[tuple[int, str]],
+    attribute_name: str,
+) -> tuple[int, str] | None:
+    parent_id = category.parent_category_id
+    visited: set[int] = set()
+    while parent_id is not None and parent_id not in visited:
+        visited.add(parent_id)
+        key = (parent_id, attribute_name)
+        if key in attribute_keys:
+            return key
+        parent = categories_by_id.get(parent_id)
+        if parent is None:
+            return None
+        parent_id = parent.parent_category_id
+    return None
 
 
 def find_category_by_parent(db: Session, library_id: int, parent_id: int | None, name: str) -> Category | None:
@@ -7554,6 +8476,168 @@ def create_category(
     return category_to_out(category)
 
 
+@app.get("/api/v1/category-attributes/import/template")
+def download_category_attribute_import_template(
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/category-attributes/import/template")),
+) -> StreamingResponse:
+    del auth
+    rows: list[list[Any]] = [
+        CATEGORY_ATTRIBUTE_IMPORT_HEADERS,
+        ["CAT-001", "办公设备 / 打印设备", "打印速度", "打印速度", "Print Speed", "number", "", "是", "否", "30", "10"],
+        ["CAT-001", "办公设备 / 打印设备", "颜色模式", "颜色模式", "Color Mode", "enum", "黑白|彩色", "否", "是", "彩色", "20"],
+    ]
+    output = build_audit_workbook(rows, sheet_name="类目属性导入模板")
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="category-attribute-import-template.xlsx"'},
+    )
+
+
+@app.post("/api/v1/category-attributes/import/preview")
+async def preview_category_attribute_import_file(
+    request: Request,
+    category_library_id: int = Query(...),
+    conflict_strategy: str = Query("skip"),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/category-attributes/import/preview")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.category_management.edit")
+    try:
+        rows = await category_attribute_import_rows_from_request(request)
+        return preview_category_attribute_import(db, category_library_id, rows, conflict_strategy)
+    finally:
+        # The preview is read-only. Release its PostgreSQL transaction before
+        # the response is serialized so runtime schema checks or a subsequent
+        # import cannot be blocked by an idle-in-transaction connection.
+        if db.in_transaction():
+            db.rollback()
+
+
+@app.post("/api/v1/category-attributes/import/confirm")
+def confirm_category_attribute_import(
+    payload: CategoryAttributeImportConfirm,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/category-attributes/import/confirm")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.category_management.edit")
+    if not payload.items:
+        raise HTTPException(status_code=422, detail="At least one valid attribute row is required")
+    if len(payload.items) > CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS:
+        raise HTTPException(status_code=422, detail=f"At most {CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS} attribute rows can be imported at once")
+    library = db.get(CategoryLibrary, payload.category_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Category library not found")
+    categories = db.query(Category).filter(Category.category_library_id == payload.category_library_id).all()
+    categories_by_id = {category.id: category for category in categories}
+    existing_attributes = (
+        db.query(CategoryAttribute)
+        .join(Category, CategoryAttribute.category_id == Category.id)
+        .filter(Category.category_library_id == payload.category_library_id)
+        .all()
+    )
+    existing_by_key = {(attribute.category_id, attribute.name): attribute for attribute in existing_attributes}
+    available_keys = set(existing_by_key) | {
+        (item.category_id, compact_space(item.attribute.name))
+        for item in payload.items
+    }
+    created: list[CategoryAttribute] = []
+    updated: list[CategoryAttribute] = []
+    skipped: list[dict[str, Any]] = []
+    seen_keys: set[tuple[int, str]] = set()
+    try:
+        for item in payload.items:
+            category = categories_by_id.get(item.category_id)
+            if not category:
+                raise HTTPException(status_code=422, detail=f"Row {item.row_number}: category is not in the selected library")
+            semantic_errors = validate_category_attribute_import_semantics(item.attribute)
+            if semantic_errors:
+                raise HTTPException(status_code=422, detail=f"Row {item.row_number}: {'; '.join(semantic_errors)}")
+            key = (category.id, compact_space(item.attribute.name))
+            if key in seen_keys:
+                raise HTTPException(status_code=422, detail=f"Row {item.row_number}: duplicate attribute in this import")
+            seen_keys.add(key)
+            inherited_key = inherited_category_attribute_key(
+                category,
+                categories_by_id,
+                available_keys,
+                key[1],
+            )
+            if inherited_key:
+                inherited = existing_by_key.get(inherited_key)
+                skipped.append(
+                    {
+                        "row_number": item.row_number,
+                        "category_id": category.id,
+                        "attribute_id": inherited.id if inherited else None,
+                        "inherited_from_category_id": inherited_key[0],
+                    }
+                )
+                continue
+            existing = existing_by_key.get(key)
+            if existing and payload.conflict_strategy == "skip":
+                skipped.append({"row_number": item.row_number, "category_id": category.id, "attribute_id": existing.id})
+                continue
+            if existing and payload.conflict_strategy == "error":
+                raise HTTPException(status_code=409, detail=f"Row {item.row_number}: attribute already exists for this category")
+            if existing:
+                update_payload_data = item.attribute.model_dump()
+                if item.attribute.sort_order is None:
+                    update_payload_data.pop("sort_order", None)
+                update_payload = CategoryAttributeUpdate(**update_payload_data)
+                values = validate_category_attribute_payload(db, category, update_payload, existing=existing)
+                before = category_attribute_to_read(existing, category.id, category).model_dump()
+                for field, value in values.items():
+                    setattr(existing, field, value)
+                existing.updated_at = now()
+                db.flush()
+                updated.append(existing)
+                add_audit_log(
+                    db,
+                    auth,
+                    "category_attribute",
+                    "import_update",
+                    before,
+                    category_attribute_to_read(existing, category.id, category).model_dump(),
+                    "human",
+                )
+            else:
+                values = validate_category_attribute_payload(db, category, item.attribute)
+                attribute = CategoryAttribute(category_id=category.id, **values)
+                db.add(attribute)
+                db.flush()
+                created.append(attribute)
+                existing_by_key[key] = attribute
+        add_audit_log(
+            db,
+            auth,
+            "category_attribute",
+            "batch_import",
+            {},
+            {
+                "category_library_id": payload.category_library_id,
+                "conflict_strategy": payload.conflict_strategy,
+                "created_ids": [attribute.id for attribute in created],
+                "updated_ids": [attribute.id for attribute in updated],
+                "skipped_count": len(skipped),
+            },
+            "human",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "category_library_id": payload.category_library_id,
+        "created_count": len(created),
+        "updated_count": len(updated),
+        "skipped_count": len(skipped),
+        "created_ids": [attribute.id for attribute in created],
+        "updated_ids": [attribute.id for attribute in updated],
+        "skipped": skipped,
+    }
+
+
 @app.get("/api/v1/categories/{category_id}/attributes", response_model=list[CategoryAttributeRead])
 def list_category_attributes(
     category_id: int,
@@ -7941,7 +9025,9 @@ def xlsx_cell(value: Any) -> str:
     return f'<c t="inlineStr"><is><t>{text}</t></is></c>'
 
 
-def build_audit_workbook(rows: list[list[Any]]) -> BytesIO:
+def build_audit_workbook(rows: list[list[Any]], sheet_name: str = "Audit Logs") -> BytesIO:
+    safe_sheet_name = re.sub(r"[\\/*?:\[\]]", " ", compact_space(sheet_name))[:31] or "Sheet1"
+    escaped_sheet_name = xml_escape(safe_sheet_name, {'"': "&quot;"})
     sheet_rows = "\n".join(
         f'<row r="{row_index}">' + "".join(xlsx_cell(value) for value in row) + "</row>"
         for row_index, row in enumerate(rows, start=1)
@@ -7967,9 +9053,9 @@ def build_audit_workbook(rows: list[list[Any]]) -> BytesIO:
         )
         archive.writestr(
             "xl/workbook.xml",
-            """<?xml version="1.0" encoding="UTF-8"?>
+            f"""<?xml version="1.0" encoding="UTF-8"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="Audit Logs" sheetId="1" r:id="rId1"/></sheets>
+  <sheets><sheet name="{escaped_sheet_name}" sheetId="1" r:id="rId1"/></sheets>
 </workbook>""",
         )
         archive.writestr(
@@ -8664,7 +9750,12 @@ def list_materials(
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials")),
 ) -> list[MaterialOut]:
     ensure_seed_material_context(db)
-    query = db.query(Material).join(ProductName).join(MaterialLibrary).join(Category)
+    query = (
+        db.query(Material)
+        .join(ProductName)
+        .join(MaterialLibrary)
+        .join(Category, Material.category_id == Category.id)
+    )
     if material_library_id:
         if not is_library_in_scope(auth, material_library_id):
             return []
@@ -8709,12 +9800,11 @@ def create_material(
         payload.category_id,
     )
     validate_required_category_properties(db, library, category, payload.attributes)
+    validate_required_product_attributes(db, product, payload.attributes)
     existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Material already exists for this product name")
-    brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
-    if payload.brand_id and not brand:
-        raise HTTPException(status_code=404, detail="Brand not found")
+    unit = product.measurement_unit
     active_rule = active_rule_for_library(db, library) if library.auto_code_enabled else None
     material_code = next_unique_code(db, Material, "MAT", f"{product.id}:{payload.name}:{now().isoformat()}")
     code_status = "manual"
@@ -8735,8 +9825,9 @@ def create_material(
         product_name_id=product.id,
         material_library_id=library.id,
         category_id=category.id,
-        unit=payload.unit or product.unit,
-        brand_id=brand.id if brand else None,
+        unit=unit.symbol if unit else (payload.unit or product.unit),
+        unit_id=unit.id if unit else None,
+        brand_id=None,
         status=status,
         description=payload.description,
         attributes=json.dumps(payload.attributes, ensure_ascii=False),
@@ -9917,6 +11008,9 @@ def update_material(
     require_library_scope(auth, material.material_library_id)
     if payload.material_library_id:
         require_library_scope(auth, payload.material_library_id)
+    product = material.product_name
+    library = material.material_library
+    category = material.category
     if payload.product_name_id or payload.material_library_id or payload.category_id:
         product, library, category = material_context_by_payload(
             db,
@@ -9939,13 +11033,40 @@ def update_material(
     for field in ["unit", "description", "enabled"]:
         value = getattr(payload, field)
         if value is not None:
+            if field == "enabled" and value is False and material.enabled:
+                usage_count = material_active_workflow_count(db, material)
+                if usage_count:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f'物料“{material.name}”存在 {usage_count} 个未结束审批流程，无法停用',
+                    )
             setattr(material, field, value)
+    if "unit_id" in payload.model_fields_set:
+        unit = (
+            get_measurement_unit_or_404(db, payload.unit_id, require_enabled=True)
+            if payload.unit_id is not None
+            else None
+        )
+        material.unit_id = unit.id if unit else None
+        if unit:
+            material.unit = unit.symbol
     if payload.brand_id is not None:
         brand = db.get(Brand, payload.brand_id) if payload.brand_id else None
         if payload.brand_id and not brand:
             raise HTTPException(status_code=404, detail="Brand not found")
         material.brand_id = brand.id if brand else None
     if payload.attributes is not None:
+        validate_required_category_properties(
+            db,
+            library,
+            category,
+            payload.attributes,
+        )
+        validate_required_product_attributes(
+            db,
+            product,
+            payload.attributes,
+        )
         existing_history = material_attributes(material.attributes).get("_lifecycle_history")
         attributes = dict(payload.attributes)
         if existing_history and "_lifecycle_history" not in attributes:
@@ -10275,12 +11396,24 @@ def create_attribute(
 ) -> AttributeOut:
     require_button_permission(auth, "button.attribute_management.create")
     product = product_by_payload(db, payload.product_name_id, payload.product_name)
+    unit = (
+        get_measurement_unit_or_404(db, payload.unit_id, require_enabled=True)
+        if payload.unit_id is not None
+        else None
+    )
+    brand = (
+        get_brand_or_404(db, payload.brand_id, require_enabled=True)
+        if payload.brand_id is not None
+        else None
+    )
     attribute = Attribute(
         code=next_unique_code(db, Attribute, "ATTR", f"{product.id}:{payload.name}:{func.now()}"),
         product_name_id=product.id,
         name=payload.name,
         data_type=payload.data_type,
-        unit=payload.unit,
+        unit=unit.symbol if unit else payload.unit,
+        unit_id=unit.id if unit else None,
+        brand_id=brand.id if brand else None,
         required=payload.required,
         default_value=payload.default_value,
         options=",".join(normalize_options(payload.options)),
@@ -10308,11 +11441,43 @@ def update_attribute(
         raise HTTPException(status_code=404, detail="Attribute not found")
     before = snapshot(attribute)
     changed: list[str] = []
+    if payload.enabled is False and attribute.enabled:
+        usage_count = attribute_usage(db, attribute)
+        if usage_count:
+            raise HTTPException(
+                status_code=409,
+                detail=f'属性“{attribute.name}”所属品名已有 {usage_count} 个物料，无法停用',
+            )
     for field in ["name", "data_type", "unit", "required", "default_value", "description", "source", "enabled"]:
         value = getattr(payload, field)
         if value is not None and getattr(attribute, field) != value:
             setattr(attribute, field, value)
             changed.append(field)
+    if "unit_id" in payload.model_fields_set:
+        unit = (
+            get_measurement_unit_or_404(db, payload.unit_id, require_enabled=True)
+            if payload.unit_id is not None
+            else None
+        )
+        next_unit_id = unit.id if unit else None
+        if attribute.unit_id != next_unit_id:
+            attribute.unit_id = next_unit_id
+            changed.append("unit_id")
+        if unit and attribute.unit != unit.symbol:
+            attribute.unit = unit.symbol
+            if "unit" not in changed:
+                changed.append("unit")
+    if "brand_id" in payload.model_fields_set:
+        next_brand_id = payload.brand_id
+        if attribute.brand_id != next_brand_id:
+            brand = (
+                get_brand_or_404(db, payload.brand_id, require_enabled=True)
+                if payload.brand_id is not None
+                else None
+            )
+            next_brand_id = brand.id if brand else None
+            attribute.brand_id = next_brand_id
+            changed.append("brand_id")
     if payload.options is not None:
         options = ",".join(normalize_options(payload.options))
         if attribute.options != options:
@@ -10448,6 +11613,17 @@ def update_brand(
     brand = db.get(Brand, brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
+    if payload.enabled is False and brand.enabled:
+        material_count = db.query(func.count(Material.id)).filter(Material.brand_id == brand.id).scalar() or 0
+        attribute_count = db.query(func.count(Attribute.id)).filter(Attribute.brand_id == brand.id).scalar() or 0
+        if material_count or attribute_count:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"品牌“{brand.name}”已被 {attribute_count} 个属性、"
+                    f"{material_count} 个物料引用，无法停用"
+                ),
+            )
     for field in ["name", "description", "enabled"]:
         value = getattr(payload, field)
         if value is not None:
@@ -10469,6 +11645,13 @@ def delete_brand(
     brand = db.get(Brand, brand_id)
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
+    material_count = db.query(func.count(Material.id)).filter(Material.brand_id == brand.id).scalar() or 0
+    attribute_count = db.query(func.count(Attribute.id)).filter(Attribute.brand_id == brand.id).scalar() or 0
+    if material_count or attribute_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"品牌“{brand.name}”正在被属性或物料使用，无法删除",
+        )
     db.delete(brand)
     db.commit()
     return {"deleted": True, "id": brand_id}
@@ -10479,6 +11662,8 @@ def snapshot(attribute: Attribute) -> dict[str, Any]:
         "name": attribute.name,
         "data_type": attribute.data_type,
         "unit": attribute.unit,
+        "unit_id": attribute.unit_id,
+        "brand_id": attribute.brand_id,
         "required": attribute.required,
         "default_value": attribute.default_value,
         "options": normalize_options(attribute.options),

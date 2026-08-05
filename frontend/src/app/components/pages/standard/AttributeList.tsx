@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock3, Edit, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { apiClient, type Attribute, type AttributePayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
@@ -10,6 +11,7 @@ import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Textarea } from "@/app/components/ui/textarea";
 import { Checkbox } from "@/app/components/ui/checkbox";
+import { Switch } from "@/app/components/ui/switch";
 import { Badge } from "@/app/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/app/components/ui/select";
 import { Alert, AlertDescription } from "@/app/components/ui/alert";
@@ -30,6 +32,9 @@ const ATTRIBUTE_TYPES = ["text", "number", "select", "multi_select", "boolean", 
 type AttributeFormState = {
   name: string;
   data_type: string;
+  unit: string;
+  unit_id: number | null;
+  brand_id: number | null;
   required: boolean;
   optionsText: string;
   default_value: string;
@@ -39,6 +44,9 @@ type AttributeFormState = {
 const emptyForm: AttributeFormState = {
   name: "",
   data_type: "text",
+  unit: "",
+  unit_id: null,
+  brand_id: null,
   required: false,
   optionsText: "",
   default_value: "",
@@ -56,6 +64,9 @@ function attributeToForm(attribute: Attribute): AttributeFormState {
   return {
     name: attribute.name,
     data_type: attribute.data_type,
+    unit: attribute.unit,
+    unit_id: attribute.unit_id,
+    brand_id: attribute.brand_id,
     required: attribute.required,
     optionsText: attribute.options.join("\n"),
     default_value: attribute.default_value,
@@ -68,6 +79,9 @@ function formToPayload(form: AttributeFormState): AttributePayload {
     product_name: DEFAULT_PRODUCT_NAME,
     name: form.name.trim(),
     data_type: form.data_type,
+    unit: form.unit,
+    unit_id: form.unit_id,
+    brand_id: form.brand_id,
     required: form.required,
     default_value: form.default_value.trim(),
     options: splitOptions(form.optionsText),
@@ -106,6 +120,20 @@ export function AttributeList() {
     queryFn: apiClient.attributes,
     retry: false,
   });
+  const measurementUnitsQuery = useQuery({
+    queryKey: ["measurement-units", "enabled"],
+    queryFn: () => apiClient.measurementUnits({ enabled: true }),
+    retry: false,
+  });
+  const measurementUnits = measurementUnitsQuery.data ?? [];
+  const brandsQuery = useQuery({
+    queryKey: ["brands"],
+    queryFn: apiClient.brands,
+    retry: false,
+  });
+  const selectableBrands = (brandsQuery.data ?? []).filter(
+    (brand) => brand.enabled || brand.id === form.brand_id,
+  );
 
   const changesQuery = useQuery({
     queryKey: ["attribute-changes", openChangeAttribute?.id],
@@ -136,6 +164,16 @@ export function AttributeList() {
     },
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ attribute, enabled }: { attribute: Attribute; enabled: boolean }) =>
+      apiClient.updateAttribute(attribute.id, { enabled }),
+    onSuccess: async () => {
+      toast.success("属性状态已更新");
+      await queryClient.invalidateQueries({ queryKey: ["attributes"] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const data = useMemo(() => {
     const term = searchTerm.trim();
     const attributes = query.data ?? [];
@@ -143,7 +181,7 @@ export function AttributeList() {
       return attributes;
     }
     return attributes.filter((item) =>
-      [item.name, item.code, item.product_name, item.default_value, item.description].some((value) =>
+      [item.name, item.code, item.product_name, item.brand?.name ?? "", item.default_value, item.description].some((value) =>
         value.includes(term),
       ),
     );
@@ -172,9 +210,23 @@ export function AttributeList() {
       header: "属性类型",
       accessor: (row: Attribute) => <AttributeTypeBadge type={row.data_type} />,
     },
+    { header: "计量单位", accessor: (row: Attribute) => row.unit || "-" },
+    { header: "品牌", accessor: (row: Attribute) => row.brand?.name ?? "无品牌" },
     {
       header: "是否必填",
       accessor: (row: Attribute) => (row.required ? "是" : "否"),
+    },
+    {
+      header: "状态",
+      accessor: (row: Attribute) => (
+        <Switch
+          checked={row.enabled}
+          aria-label={`${row.name}${row.enabled ? "启用" : "停用"}`}
+          disabled={statusMutation.isPending}
+          onCheckedChange={(enabled) => statusMutation.mutate({ attribute: row, enabled })}
+          className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-red-600"
+        />
+      ),
     },
     {
       header: "选项",
@@ -327,13 +379,30 @@ export function AttributeList() {
               </SelectContent>
             </Select>
           </label>
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <Checkbox
-              checked={form.required}
-              onCheckedChange={(checked) => setForm((current) => ({ ...current, required: checked === true }))}
-              aria-label="是否必填"
-            />
-            是否必填
+          <label className="space-y-1 text-sm text-foreground">
+            <span>计量单位</span>
+            <Select
+              value={form.unit_id === null ? "none" : String(form.unit_id)}
+              onValueChange={(value) => {
+                const unitId = value === "none" ? null : Number(value);
+                const unit = measurementUnits.find((item) => item.id === unitId);
+                setForm((current) => ({
+                  ...current,
+                  unit_id: unitId,
+                  unit: unit?.symbol ?? "",
+                }));
+              }}
+            >
+              <SelectTrigger aria-label="计量单位"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无计量单位</SelectItem>
+                {measurementUnits.map((unit) => (
+                  <SelectItem key={unit.id} value={String(unit.id)}>
+                    {unit.name} ({unit.symbol})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           <label className="space-y-1 text-sm text-foreground">
             <span>默认值</span>
@@ -343,6 +412,28 @@ export function AttributeList() {
               value={form.default_value}
               onChange={(event) => setForm((current) => ({ ...current, default_value: event.target.value }))}
             />
+          </label>
+          <label className="space-y-1 text-sm text-foreground">
+            <span>品牌</span>
+            <Select
+              value={form.brand_id === null ? "none" : String(form.brand_id)}
+              onValueChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  brand_id: value === "none" ? null : Number(value),
+                }))
+              }
+            >
+              <SelectTrigger aria-label="品牌"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无品牌</SelectItem>
+                {selectableBrands.map((brand) => (
+                  <SelectItem key={brand.id} value={String(brand.id)} disabled={!brand.enabled}>
+                    {brand.name}{brand.enabled ? "" : "（已停用）"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           <label className="space-y-1 text-sm text-foreground md:col-span-2">
             <span>选项</span>
@@ -361,6 +452,19 @@ export function AttributeList() {
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
+            />
+          </label>
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-foreground md:col-span-2">
+            <span>
+              <span className="block font-medium">是否必填</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                启用后，创建物料时必须填写该属性。
+              </span>
+            </span>
+            <Checkbox
+              checked={form.required}
+              onCheckedChange={(checked) => setForm((current) => ({ ...current, required: checked === true }))}
+              aria-label="是否必填"
             />
           </label>
           {saveMutation.isError && (

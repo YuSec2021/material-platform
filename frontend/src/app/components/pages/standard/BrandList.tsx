@@ -11,6 +11,7 @@ import { SearchPanel } from "./standardPageUtils";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Textarea } from "@/app/components/ui/textarea";
+import { Switch } from "@/app/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,7 +55,6 @@ function formToPayload(form: BrandFormState): BrandPayload {
     name: form.name.trim(),
     description: form.description.trim(),
     logo: form.logo,
-    enabled: true,
   };
 }
 
@@ -115,6 +115,19 @@ export function BrandList() {
     onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      apiClient.updateBrandStatus(id, enabled),
+    onSuccess: async (brand) => {
+      toast.success(`品牌“${brand.name}”已${brand.enabled ? "启用" : "停用"}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["brands"] }),
+        queryClient.invalidateQueries({ queryKey: ["attributes"] }),
+      ]);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const data = useMemo(() => {
     const term = searchTerm.trim();
     const brands = query.data ?? [];
@@ -170,7 +183,15 @@ export function BrandList() {
     { header: "描述", accessor: "description" as keyof Brand },
     {
       header: "状态",
-      accessor: (row: Brand) => (row.enabled ? "启用" : "停用"),
+      accessor: (row: Brand) => (
+        <Switch
+          checked={row.enabled}
+          aria-label={`${row.name}当前${row.enabled ? "启用" : "停用"}，点击${row.enabled ? "停用" : "启用"}`}
+          disabled={statusMutation.isPending}
+          onCheckedChange={(enabled) => statusMutation.mutate({ id: row.id, enabled })}
+          className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-red-600"
+        />
+      ),
     },
     {
       header: "操作",

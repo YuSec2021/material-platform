@@ -106,7 +106,7 @@ test.afterAll(async () => {
 
 async function pageForTest(user = superAdminUser, language = "zh-CN") {
   test.skip(Boolean(browserUnavailable), `Chromium launch unavailable in this sandbox: ${browserUnavailable}`);
-  const context = await browser!.newContext({ baseURL: "http://localhost:24333" });
+  const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
   await (context as any).addInitScript(
     ({ currentUser, lng }: { currentUser: typeof superAdminUser; lng: string }) => {
       window.localStorage.setItem(
@@ -304,7 +304,7 @@ test("AI management routes are localized and blocked for non-super_admin users",
   expect(await (regular.page.getByText("AI管理") as any).count()).toEqual(0);
   await regular.page.goto("/ai/providers");
   await expect(regular.page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
-  expect((regular.page as any).url()).toEqual("http://localhost:24333/");
+  expect((regular.page as any).url()).toEqual("http://localhost:24434/");
   expect(await (regular.page.getByRole("heading", { name: "模型提供商管理" }) as any).count()).toEqual(0);
   await regular.context.close();
 });

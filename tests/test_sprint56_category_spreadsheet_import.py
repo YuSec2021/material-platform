@@ -9,14 +9,17 @@ os.environ.setdefault("MATERIAL_RETRIEVAL_TEST", "1")
 
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
+from backend.app.main import app, parse_xlsx_category_import
 
 
 client = TestClient(app)
 SUPER_ADMIN = {"X-User-Role": "super_admin"}
 
 
-def xlsx_workbook(rows: list[list[str]]) -> bytes:
+def xlsx_workbook(
+    rows: list[list[str]],
+    worksheet_target: str = "worksheets/sheet1.xml",
+) -> bytes:
     sheet_rows = []
     for row_index, row in enumerate(rows, start=1):
         cells = []
@@ -63,7 +66,7 @@ def xlsx_workbook(rows: list[list[str]]) -> bytes:
             "xl/_rels/workbook.xml.rels",
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            f'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="{escape(worksheet_target)}"/>'
             "</Relationships>",
         )
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
@@ -128,6 +131,29 @@ class Sprint56CategorySpreadsheetImportTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["success_count"], 3)
         self.assert_categories_created(library["id"], names)
+
+    def test_xlsx_import_accepts_package_absolute_worksheet_target(self):
+        token = self.unique_token()
+        names = [f"S56Absolute1{token}", f"S56Absolute2{token}", f"S56Absolute3{token}"]
+        content = xlsx_workbook(
+            [["一级类目", "二级类目", "三级类目"], names],
+            worksheet_target="/xl/worksheets/sheet1.xml",
+        )
+
+        rows = parse_xlsx_category_import(content)
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "一级类目": names[0],
+                    "二级类目": names[1],
+                    "三级类目": names[2],
+                    "四级类目": "",
+                    "五级类目": "",
+                }
+            ],
+        )
 
     def test_xls_import_creates_categories(self):
         token = self.unique_token()

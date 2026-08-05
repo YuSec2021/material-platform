@@ -12,6 +12,47 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class ApplicationVersion(Base):
+    __tablename__ = "application_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(160), default="")
+    release_notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MeasurementUnit(Base):
+    __tablename__ = "measurement_units"
+    __table_args__ = (
+        CheckConstraint(
+            "decimal_places >= 0 AND decimal_places <= 12",
+            name="ck_measurement_units_decimal_places",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    unit_type: Mapped[str] = mapped_column(String(40), default="general", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    decimal_places: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    product_names: Mapped[list["ProductName"]] = relationship(back_populates="measurement_unit")
+    attributes: Mapped[list["Attribute"]] = relationship(back_populates="measurement_unit")
+    materials: Mapped[list["Material"]] = relationship(back_populates="measurement_unit")
+
+
 class ProductName(Base):
     __tablename__ = "product_names"
 
@@ -20,6 +61,17 @@ class ProductName(Base):
     product_name_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     unit: Mapped[str] = mapped_column(String(40), default="")
+    unit_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("measurement_units.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     category: Mapped[str] = mapped_column(String(160), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -27,6 +79,8 @@ class ProductName(Base):
         back_populates="product_name",
         cascade="all, delete-orphan",
     )
+    measurement_unit: Mapped[MeasurementUnit | None] = relationship(back_populates="product_names")
+    category_ref: Mapped["Category | None"] = relationship()
 
 
 class ProductNameCodeSequence(Base):
@@ -46,6 +100,18 @@ class Attribute(Base):
     name: Mapped[str] = mapped_column(String(160), index=True)
     data_type: Mapped[str] = mapped_column(String(40), default="text")
     unit: Mapped[str] = mapped_column(String(80), default="")
+    unit_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("measurement_units.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    brand_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("brands.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     required: Mapped[bool] = mapped_column(Boolean, default=False)
     default_value: Mapped[str] = mapped_column(String(240), default="")
     options: Mapped[str] = mapped_column(Text, default="")
@@ -57,6 +123,8 @@ class Attribute(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     product_name: Mapped[ProductName] = relationship(back_populates="attributes")
+    measurement_unit: Mapped[MeasurementUnit | None] = relationship(back_populates="attributes")
+    brand: Mapped["Brand | None"] = relationship()
     changes: Mapped[list["AttributeChange"]] = relationship(
         back_populates="attribute",
         cascade="all, delete-orphan",
@@ -228,6 +296,12 @@ class Material(Base):
     material_library_id: Mapped[int] = mapped_column(ForeignKey("material_libraries.id"), index=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
     unit: Mapped[str] = mapped_column(String(40), default="")
+    unit_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("measurement_units.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(40), default="normal", index=True)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -249,6 +323,7 @@ class Material(Base):
     material_library: Mapped[MaterialLibrary] = relationship(back_populates="materials")
     category: Mapped[Category] = relationship(back_populates="materials")
     brand: Mapped[Brand | None] = relationship()
+    measurement_unit: Mapped[MeasurementUnit | None] = relationship(back_populates="materials")
     code_rule_version: Mapped["MaterialCodeRuleVersion | None"] = relationship(
         foreign_keys=[code_rule_version_id],
     )

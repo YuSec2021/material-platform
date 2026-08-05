@@ -21,7 +21,7 @@ flowchart LR
     User --> Nginx["Nginx 私有化入口<br/>nginx.conf"]
     Nginx --> ReactUI
     ReactUI --> API["FastAPI API<br/>backend/app/main.py"]
-    API --> DB[("SQLite 本地默认<br/>PostgreSQL Compose")]
+    API --> DB[("PostgreSQL 17+")]
     API --> Qdrant[("Qdrant 向量库")]
     API --> LLM["统一模型网关<br/>DashScope / Azure / OpenAI / vLLM / Ollama / DeepSeek / Moonshot / Custom"]
     API --> Audit[("审计日志 / Trace Span")]
@@ -38,7 +38,7 @@ flowchart LR
 | `frontend/` | 唯一业务管理台，React 18 + TypeScript + Vite，同时用于本地开发和 Docker Compose 私有化部署。 |
 | `tests/` | 后端 API 测试与根级 Playwright 冒烟测试。 |
 | `frontend/tests/` | 前端专项 Playwright 测试。 |
-| `docker-compose.yml` | PostgreSQL、Qdrant、后端、前端、Nginx 私有化编排。 |
+| `docker-compose.yml` | Qdrant、后端、前端、Nginx 私有化编排；PostgreSQL 由 `aios-infra` 提供。 |
 | `nginx.conf` | 统一 HTTP 入口，代理 `/api`、`/docs`、`/health` 和前端路由。 |
 | `prd/` | PRD、TDD 和架构图资料。 |
 
@@ -123,8 +123,7 @@ flowchart LR
 
 ### 数据与部署
 
-- 本地默认数据库：SQLite，位于 `backend/app/material_retrieval.db`。
-- 私有化数据库：PostgreSQL 15。
+- 关系型数据库：由 `aios-infra` 管理的 PostgreSQL 17+。
 - 向量检索：Qdrant 1.12.6。
 - 容器编排：Docker Compose。
 - 统一入口：Nginx。
@@ -139,19 +138,19 @@ flowchart LR
 bash init.sh
 ```
 
-脚本会检查 Python、Node、Docker、Git，安装依赖，初始化数据库表，并启动：
+脚本会检查 Python、Node、Git 和 `aios-infra` PostgreSQL 连接，按需启动 Qdrant，安装依赖，初始化数据库表，并启动：
 
-- 后端 API：`http://localhost:24334`
-- API 文档：`http://localhost:24334/docs`
-- React/Vite 管理台：`http://localhost:24333`
+- 后端 API：`http://localhost:24435`
+- API 文档：`http://localhost:24435/docs`
+- React/Vite 管理台：`http://localhost:24434`
 
-如果 Docker daemon 未运行，脚本会跳过 PostgreSQL 和 Qdrant 容器，本地默认使用 SQLite。
+PostgreSQL 是必需依赖，并且只使用 `DATABASE_URL` 指向的 `aios-infra` 实例。脚本不会启动、停止或创建 PostgreSQL；连接不可用时会直接失败并提示从 `aios-infra` 处理。Docker 只用于本项目的 Qdrant 等容器。
 
 单独启动主前端：
 
 ```bash
 cd frontend
-npm run dev -- --port 24333
+npm run dev -- --port 24434
 ```
 
 停止本地进程：
@@ -169,11 +168,12 @@ docker compose up -d --build
 
 Compose 服务：
 
-- `postgres`：`localhost:5432`
 - `qdrant`：`localhost:6333` / `localhost:6334`
-- `backend`：`http://localhost:24334`
-- `frontend`：`http://localhost:24333`
+- `backend`：`http://localhost:24435`
+- `frontend`：`http://localhost:24434`
 - `nginx`：`http://localhost`
+
+启动 Compose 前必须提供可从后端容器访问的 `DATABASE_URL`，并指向 `aios-infra` PostgreSQL。在 macOS 上如果通过宿主机映射端口连接，主机名通常应使用 `host.docker.internal`，不能使用容器自身的 `127.0.0.1`。
 
 Nginx 路由：
 
@@ -193,7 +193,7 @@ docker compose down -v
 后端冒烟：
 
 ```bash
-curl -fsS http://localhost:24334/docs >/dev/null
+curl -fsS http://localhost:24435/docs >/dev/null
 ```
 
 主前端构建：
@@ -219,14 +219,14 @@ pytest -q
 
 | 变量 | 说明 |
 | --- | --- |
-| `DATABASE_URL` | SQLAlchemy 数据库连接；未设置时使用本地 SQLite。 |
+| `DATABASE_URL` | 必填；必须指向由 `aios-infra` 管理的 PostgreSQL，本项目不会创建数据库服务。 |
 | `QDRANT_URL` | Qdrant 地址；Compose 中为 `http://qdrant:6333`。 |
 | `LLM_GATEWAY_AES_KEY` | 模型 API Key 加密使用的 AES key 种子。 |
 | `AI_DEBUG` | 设置为 `true` 时允许访问 AI trace 调试能力。 |
-| `BACKEND_PORT` | `init.sh` 启动后端的端口，默认 `24334`。 |
-| `FRONTEND_PORT` | `init.sh` 启动前端的端口，默认 `24333`。 |
-| `E2E_BASE_URL` | Playwright 前端地址，默认 `http://localhost:24333`。 |
-| `E2E_API_URL` | Playwright 后端地址，默认 `http://localhost:24334`。 |
+| `BACKEND_PORT` | `init.sh` 启动后端的端口，默认 `24435`。 |
+| `FRONTEND_PORT` | `init.sh` 启动前端的端口，默认 `24434`。 |
+| `E2E_BASE_URL` | Playwright 前端地址，默认 `http://localhost:24434`。 |
+| `E2E_API_URL` | Playwright 后端地址，默认 `http://localhost:24435`。 |
 
 ## 当前说明
 

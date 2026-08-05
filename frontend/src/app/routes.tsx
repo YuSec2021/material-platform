@@ -18,6 +18,7 @@ import { CategoryList } from "./components/pages/standard/CategoryList";
 import { ProductNameList } from "./components/pages/standard/ProductNameList";
 import { AttributeList } from "./components/pages/standard/AttributeList";
 import { BrandList } from "./components/pages/standard/BrandList";
+import { MeasurementUnitList } from "./components/pages/standard/MeasurementUnitList";
 
 // 物料管理
 import { MaterialLibraryList } from "./components/pages/material/MaterialLibraryList";
@@ -37,6 +38,7 @@ import { PermissionConfig } from "./components/pages/system/PermissionConfig";
 import { SystemInfo } from "./components/pages/system/SystemInfo";
 import { ReasonOptions } from "./components/pages/system/ReasonOptions";
 import { ApprovalMode } from "./components/pages/system/ApprovalMode";
+import { VersionManagement } from "./components/pages/system/VersionManagement";
 
 export const router = createBrowserRouter([
   {
@@ -61,6 +63,7 @@ export const router = createBrowserRouter([
           { path: "standard/attributes", Component: AttributeList },
           { path: "standard/brand", Component: BrandList },
           { path: "standard/brands", Component: BrandList },
+          { path: "standard/measurement-unit", Component: MeasurementUnitList },
 
           // 物料管理
           { path: "material/library", Component: MaterialLibraryList },
@@ -100,6 +103,13 @@ export const router = createBrowserRouter([
           { path: "system/info", Component: SystemInfo },
           { path: "system/reason-options", Component: ReasonOptions },
           { path: "system/approval-mode", Component: ApprovalMode },
+          {
+            path: "system",
+            Component: SuperAdminRoute,
+            children: [
+              { path: "versions", Component: VersionManagement },
+            ],
+          },
 
           // AI管理
           { path: "ai/models", Component: AiModelGatewayPage },

@@ -18,7 +18,6 @@ import { toast } from "sonner";
 import {
   apiClient,
   type Attribute,
-  type Brand,
   type Category,
   type CategoryAttribute,
   type Material,
@@ -31,6 +30,7 @@ import {
 import { useAuth } from "@/app/auth/AuthContext";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
+import { Switch } from "@/app/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,6 +43,7 @@ import {
 } from "@/app/components/ui/alert-dialog";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import { SearchableSelect } from "../../common/SearchableSelect";
 import { MaterialAIModal, type AiModalType } from "./MaterialAIModal";
 
 type MaterialFormState = {
@@ -50,8 +51,6 @@ type MaterialFormState = {
   material_library_id: number | "";
   category_id: number | "";
   product_name_id: number | "";
-  unit: string;
-  brand_id: number | "";
   description: string;
   attributes: Record<string, string>;
   images: File[];
@@ -77,8 +76,6 @@ const emptyForm: MaterialFormState = {
   material_library_id: "",
   category_id: "",
   product_name_id: "",
-  unit: "",
-  brand_id: "",
   description: "",
   attributes: {},
   images: [],
@@ -127,8 +124,6 @@ function materialToForm(material: Material): MaterialFormState {
     material_library_id: material.material_library_id,
     category_id: material.category_id,
     product_name_id: material.product_name_id,
-    unit: material.unit,
-    brand_id: material.brand_id ?? "",
     description: material.description,
     attributes,
     images: [],
@@ -257,8 +252,9 @@ function toPayload(form: MaterialFormState, attributes: Attribute[], categoryPro
     material_library_id: Number(form.material_library_id),
     category_id: Number(form.category_id),
     product_name_id: Number(form.product_name_id),
-    unit: form.unit.trim(),
-    brand_id: form.brand_id === "" ? null : Number(form.brand_id),
+    unit: "",
+    unit_id: null,
+    brand_id: null,
     description: form.description.trim(),
     status: "normal",
     attributes: {
@@ -419,12 +415,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     retry: false,
   });
 
-  const brandsQuery = useQuery({
-    queryKey: ["brands"],
-    queryFn: apiClient.brands,
-    retry: false,
-  });
-
   const selectedProductNameId = form.product_name_id === "" ? null : Number(form.product_name_id);
   const selectedCategoryIdForProperties = form.category_id === "" ? null : Number(form.category_id);
   const attributesQuery = useQuery({
@@ -461,13 +451,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   }, [fixedLibraryId, librariesQuery.data, selectedLibraryId]);
 
   useEffect(() => {
-    const selectedProduct = productNamesQuery.data?.find((item) => item.id === selectedProductNameId);
-    if (selectedProduct && !form.unit) {
-      setForm((current) => ({ ...current, unit: selectedProduct.unit }));
-    }
-  }, [form.unit, productNamesQuery.data, selectedProductNameId]);
-
-  useEffect(() => {
     if (!isFormOpen || !categoryPropertiesQuery.data) {
       return;
     }
@@ -494,9 +477,38 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const materialRows = useMemo(() => materialsQuery.data ?? [], [materialsQuery.data]);
   const libraries = librariesQuery.data ?? [];
   const categories = categoriesQuery.data ?? [];
-  const productNames = productNamesQuery.data ?? [];
-  const brands = brandsQuery.data ?? [];
-  const dynamicAttributes = attributesQuery.data ?? [];
+  const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
+  const linkedCategoryLibraryIds = useMemo(() => {
+    const ids = selectedLibrary?.category_library_ids?.length
+      ? selectedLibrary.category_library_ids
+      : selectedLibrary?.category_library_id
+        ? [selectedLibrary.category_library_id]
+        : [];
+    return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
+  }, [selectedLibrary]);
+  const availableCategories = categories.filter(
+    (category) =>
+      linkedCategoryLibraryIds.length === 0 ||
+      category.id === form.category_id ||
+      (
+        category.category_library_id !== null &&
+        linkedCategoryLibraryIds.includes(category.category_library_id)
+      ),
+  );
+  const selectedCategory = categories.find((category) => category.id === form.category_id);
+  const productNames = (productNamesQuery.data ?? []).filter(
+    (productName) =>
+      productName.status === "active" &&
+      (
+        !selectedCategory ||
+        (
+          typeof productName.category_id === "number"
+            ? productName.category_id === selectedCategory.id
+            : !productName.category || productName.category === selectedCategory.name
+        )
+      ),
+  );
+  const dynamicAttributes = (attributesQuery.data ?? []).filter((attribute) => attribute.enabled);
   const inheritedCategoryProperties = useMemo(
     () => sortedCategoryAttributes(categoryPropertiesQuery.data?.inherited ?? []),
     [categoryPropertiesQuery.data?.inherited],
@@ -515,16 +527,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     }
     return !String(form.attributes[property.name] ?? "").trim();
   });
-  const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
-  const selectedCategory = categories.find((category) => category.id === form.category_id);
-  const linkedCategoryLibraryIds = useMemo(() => {
-    const ids = selectedLibrary?.category_library_ids?.length
-      ? selectedLibrary.category_library_ids
-      : selectedLibrary?.category_library_id
-        ? [selectedLibrary.category_library_id]
-        : [];
-    return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
-  }, [selectedLibrary]);
   const canUseAiCategoryMatch = !editingMaterial && linkedCategoryLibraryIds.length > 0;
 
   const currentRuleQuery = useQuery({
@@ -563,7 +565,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     mutationFn: () =>
       apiClient.matchMaterialCategory({
         material_name: form.name.trim(),
-        brand: selectedName<Brand>(brands, form.brand_id),
+        brand: "",
         description: form.description.trim(),
         category_library_ids: linkedCategoryLibraryIds,
       }),
@@ -599,6 +601,16 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
       await queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
     onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
+  });
+
+  const enabledMutation = useMutation({
+    mutationFn: ({ material, enabled }: { material: Material; enabled: boolean }) =>
+      apiClient.updateMaterial(material.id, { enabled }),
+    onSuccess: async () => {
+      toast.success("物料启停状态已更新");
+      await queryClient.invalidateQueries({ queryKey: ["materials"] });
+    },
+    onError: (error) => toast.error(error.message),
   });
 
   const lifecycleMutation = useMutation({
@@ -865,6 +877,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                       t("field.brand"),
                       t("field.attributes"),
                       t("field.status"),
+                      "启用状态",
                       t("action.operations"),
                     ].map((header) => (
                       <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
@@ -897,6 +910,15 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                           <Badge variant="outline" className={meta.className}>
                             {meta.label}
                           </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Switch
+                            checked={material.enabled}
+                            aria-label={`${material.name}${material.enabled ? "启用" : "停用"}`}
+                            disabled={enabledMutation.isPending}
+                            onCheckedChange={(enabled) => enabledMutation.mutate({ material, enabled })}
+                            className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-red-600"
+                          />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-2">
@@ -977,6 +999,38 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         }
       >
         <div className="space-y-5">
+          <section className="rounded-lg border border-border bg-muted/20 p-3">
+            <p className="mb-3 text-xs text-muted-foreground">
+              请按顺序选择物料库、类目和品名，后续选项会根据上一步自动筛选。
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[
+                { number: 1, label: "物料库", complete: form.material_library_id !== "" },
+                { number: 2, label: "类目", complete: form.category_id !== "" },
+                { number: 3, label: "品名", complete: form.product_name_id !== "" },
+              ].map((step) => (
+                <div
+                  key={step.number}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                    step.complete
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  <span
+                    className={`flex size-5 items-center justify-center rounded-full text-xs ${
+                      step.complete
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {step.number}
+                  </span>
+                  {step.label}
+                </div>
+              ))}
+            </div>
+          </section>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.materialName")}</span>
@@ -1005,85 +1059,75 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             </label>
             <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.library")}</span>
-              <select
-                value={form.material_library_id}
-                onChange={(event) => {
+              <SearchableSelect
+                ariaLabel={t("field.library")}
+                value={form.material_library_id === "" ? "" : String(form.material_library_id)}
+                onValueChange={(value) => {
                   resetCategoryMatchState();
                   setForm((current) => ({
                     ...current,
-                    material_library_id: event.target.value ? Number(event.target.value) : "",
+                    material_library_id: value ? Number(value) : "",
                     category_id: "",
+                    product_name_id: "",
+                    attributes: {},
                   }));
                 }}
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
-              >
-                <option value="">请选择物料库</option>
-                {libraries.map((library) => (
-                  <option key={library.id} value={library.id}>
-                    {library.name}
-                  </option>
-                ))}
-              </select>
+                options={libraries.map((library) => ({
+                  value: String(library.id),
+                  label: library.name,
+                  keywords: library.code,
+                }))}
+                placeholder="请选择物料库"
+                searchPlaceholder="搜索物料库名称或编码..."
+                emptyText="暂无匹配物料库"
+              />
             </label>
             <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.category")}</span>
-              <select
-                value={form.category_id}
-                onChange={(event) => {
+              <SearchableSelect
+                ariaLabel={t("field.category")}
+                value={form.category_id === "" ? "" : String(form.category_id)}
+                onValueChange={(value) => {
                   setSelectedAiCategoryId(null);
-                  setForm((current) => ({ ...current, category_id: event.target.value ? Number(event.target.value) : "" }))
+                  setForm((current) => ({
+                    ...current,
+                    category_id: value ? Number(value) : "",
+                    product_name_id: "",
+                    attributes: {},
+                  }));
                 }}
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
-              >
-                <option value="">请选择类目</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name} ({category.code})
-                  </option>
-                ))}
-              </select>
+                options={availableCategories.map((category) => ({
+                  value: String(category.id),
+                  label: `${category.name} (${category.code})`,
+                  keywords: category.code,
+                }))}
+                placeholder={form.material_library_id === "" ? "请先选择物料库" : "请选择类目"}
+                searchPlaceholder="搜索类目名称或编码..."
+                emptyText="当前物料库下暂无匹配类目"
+                disabled={form.material_library_id === ""}
+              />
             </label>
             <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.productName")}</span>
-              <select
-                value={form.product_name_id}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, product_name_id: event.target.value ? Number(event.target.value) : "", attributes: {} }))
+              <SearchableSelect
+                ariaLabel={t("field.productName")}
+                value={form.product_name_id === "" ? "" : String(form.product_name_id)}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    product_name_id: value ? Number(value) : "",
+                    attributes: {},
+                  }))
                 }
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
-              >
-                <option value="">请选择品名</option>
-                {productNames.map((productName) => (
-                  <option key={productName.id} value={productName.id}>
-                    {productName.name} / {productName.category}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1 text-sm text-foreground">
-              <span>{t("field.brand")}</span>
-              <select
-                value={form.brand_id}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, brand_id: event.target.value ? Number(event.target.value) : "" }))
-                }
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
-              >
-                <option value="">无品牌</option>
-                {brands.map((brand: Brand) => (
-                  <option key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1 text-sm text-foreground">
-              <span>{t("field.unit")}</span>
-              <input
-                type="text"
-                value={form.unit}
-                onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
-                className="w-full rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
+                options={productNames.map((productName) => ({
+                  value: String(productName.id),
+                  label: productName.name,
+                  keywords: `${productName.product_name_code} ${productName.category}`,
+                }))}
+                placeholder={form.category_id === "" ? "请先选择类目" : "请选择品名"}
+                searchPlaceholder="搜索品名或品名编码..."
+                emptyText="当前类目下暂无可用品名"
+                disabled={form.category_id === ""}
               />
             </label>
             <label className="space-y-1 text-sm text-foreground">
