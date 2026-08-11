@@ -134,18 +134,35 @@ cmd_start() {
     warn "DATABASE_URL not set; backend will fall back to SQLite (see backend/app/database.py)."
   fi
 
-  # Launch detached, log -> LOG_FILE, stdio detached from the terminal.
-  local -a cmd_env=(PYTHONPATH="$BACKEND_DIR")
+  # Launch in a new session so the backend survives the terminal or automation
+  # process that invoked this restart script.
   if [[ -n "$DATABASE_URL" ]]; then
-    cmd_env+=("DATABASE_URL=$DATABASE_URL")
+    export DATABASE_URL
   fi
-  nohup env "${cmd_env[@]}" \
-      "$VENV_PY" -m uvicorn app.main:app \
-        --host 0.0.0.0 --port "$BACKEND_PORT" \
-        >> "$LOG_FILE" 2>&1 &
-  local new_pid=$!
+  local new_pid
+  new_pid=$("$VENV_PY" - "$BACKEND_DIR" "$BACKEND_PORT" "$LOG_FILE" <<'PY'
+import os
+import subprocess
+import sys
+
+backend_dir, port, log_path = sys.argv[1:]
+env = os.environ.copy()
+env["PYTHONPATH"] = backend_dir
+log_file = open(log_path, "ab", buffering=0)
+process = subprocess.Popen(
+    [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", port],
+    cwd=backend_dir,
+    env=env,
+    stdin=subprocess.DEVNULL,
+    stdout=log_file,
+    stderr=subprocess.STDOUT,
+    start_new_session=True,
+    close_fds=True,
+)
+print(process.pid)
+PY
+)
   echo "$new_pid" > "$PID_FILE"
-  disown "$new_pid" 2>/dev/null || true
 
   if wait_for_ready; then
     info "Backend ready (pid $new_pid). Health: $HEALTH_URL"

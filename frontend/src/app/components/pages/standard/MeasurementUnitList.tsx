@@ -11,6 +11,7 @@ import {
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { Modal } from "../../common/Modal";
+import { SearchableSelect } from "../../common/SearchableSelect";
 import { SearchPanel } from "./standardPageUtils";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
@@ -56,7 +57,6 @@ const labels = {
     usage: "使用数量",
     status: "状态",
     description: "描述",
-    sortOrder: "排序",
     enabled: "启用",
     disabled: "停用",
     system: "系统预置",
@@ -100,7 +100,6 @@ const labels = {
     usage: "Usage",
     status: "Status",
     description: "Description",
-    sortOrder: "Sort Order",
     enabled: "Enabled",
     disabled: "Disabled",
     system: "System",
@@ -345,38 +344,14 @@ export function MeasurementUnitList() {
           </label>
           <label className="space-y-1 text-sm text-foreground">
             <span>{text.type}</span>
-            <select
-              aria-label={text.type}
+            <SearchableSelect
+              ariaLabel={text.type}
               value={form.unit_type}
-              onChange={(event) => setForm((current) => ({ ...current, unit_type: event.target.value }))}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-            >
-              {UNIT_TYPES.map((type) => (
-                <option key={type} value={type}>{text.unitTypes[type]}</option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1 text-sm text-foreground">
-            <span>{text.decimalPlaces}</span>
-            <Input
-              aria-label={text.decimalPlaces}
-              type="number"
-              min={0}
-              max={12}
-              value={form.decimal_places}
-              onChange={(event) => setForm((current) => ({
-                ...current,
-                decimal_places: Math.max(0, Math.min(12, Number(event.target.value))),
-              }))}
-            />
-          </label>
-          <label className="space-y-1 text-sm text-foreground">
-            <span>{text.sortOrder}</span>
-            <Input
-              aria-label={text.sortOrder}
-              type="number"
-              value={form.sort_order}
-              onChange={(event) => setForm((current) => ({ ...current, sort_order: Number(event.target.value) }))}
+              onValueChange={(value) => setForm((current) => ({ ...current, unit_type: value || current.unit_type }))}
+              options={UNIT_TYPES.map((type) => ({ value: type, label: text.unitTypes[type] }))}
+              placeholder={text.type}
+              searchPlaceholder={i18n.language === "en-US" ? "Search unit types..." : "搜索单位类型..."}
+              emptyText={i18n.language === "en-US" ? "No matching unit types" : "暂无匹配单位类型"}
             />
           </label>
           <label className="space-y-1 text-sm text-foreground md:col-span-2">

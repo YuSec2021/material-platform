@@ -1,5 +1,5 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,6 +12,7 @@ import {
   Search,
   Sparkles,
   Trash2,
+  UploadCloud,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -44,7 +45,7 @@ import {
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
 import { SearchableSelect } from "../../common/SearchableSelect";
-import { MaterialAIModal, type AiModalType } from "./MaterialAIModal";
+import { MaterialBulkImportModal } from "./MaterialBulkImportModal";
 
 type MaterialFormState = {
   name: string;
@@ -63,12 +64,6 @@ type SegmentType = "fixed" | "category_path" | "attribute_code" | "date" | "seri
 type CodePreview = {
   code: string;
   error: string | null;
-};
-
-const aiActionLabels: Record<AiModalType, string> = {
-  治理: "AI物料治理",
-  添加: "AI自然语言添加",
-  匹配: "AI向量匹配",
 };
 
 const emptyForm: MaterialFormState = {
@@ -123,7 +118,7 @@ function materialToForm(material: Material): MaterialFormState {
     name: material.name,
     material_library_id: material.material_library_id,
     category_id: material.category_id,
-    product_name_id: material.product_name_id,
+    product_name_id: material.product_name_id ?? "",
     description: material.description,
     attributes,
     images: [],
@@ -133,6 +128,15 @@ function materialToForm(material: Material): MaterialFormState {
 
 function selectedName<T extends { id: number; name: string }>(items: T[] | undefined, id: number | "") {
   return items?.find((item) => item.id === id)?.name ?? "";
+}
+
+function categoryLibraryIdsForMaterialLibrary(library: MaterialLibrary | undefined): number[] {
+  const ids = library?.category_library_ids?.length
+    ? library.category_library_ids
+    : library?.category_library_id
+      ? [library.category_library_id]
+      : [];
+  return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
 }
 
 function categoryAttributeLabel(attribute: CategoryAttribute, language: string) {
@@ -251,7 +255,7 @@ function toPayload(form: MaterialFormState, attributes: Attribute[], categoryPro
     name: form.name.trim(),
     material_library_id: Number(form.material_library_id),
     category_id: Number(form.category_id),
-    product_name_id: Number(form.product_name_id),
+    product_name_id: form.product_name_id === "" ? null : Number(form.product_name_id),
     unit: "",
     unit_id: null,
     brand_id: null,
@@ -266,7 +270,7 @@ function toPayload(form: MaterialFormState, attributes: Attribute[], categoryPro
   };
 }
 
-function TreeCategory({
+function MaterialCategoryNode({
   category,
   selectedCategoryId,
   expandedCategoryIds,
@@ -281,6 +285,13 @@ function TreeCategory({
 }) {
   const expanded = expandedCategoryIds.includes(category.id);
   const selected = selectedCategoryId === category.id;
+  const childrenQuery = useQuery({
+    queryKey: ["material-category-children", category.id],
+    queryFn: () => apiClient.categoriesByParams({ parent_id: category.id, limit: 500 }),
+    enabled: expanded,
+    retry: false,
+  });
+  const children = childrenQuery.data ?? [];
 
   return (
     <div>
@@ -294,9 +305,71 @@ function TreeCategory({
           selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent"
         }`}
       >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <span className="truncate">{category.name}</span>
       </button>
+      {expanded && children.length > 0 && (
+        <div className="mt-1 space-y-1 pl-3">
+          {children.map((child) => (
+            <MaterialCategoryNode
+              key={child.id}
+              category={child}
+              selectedCategoryId={selectedCategoryId}
+              expandedCategoryIds={expandedCategoryIds}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MaterialLibraryCategoryRoots({
+  categoryLibraryIds,
+  selectedCategoryId,
+  expandedCategoryIds,
+  onToggle,
+  onSelect,
+}: {
+  categoryLibraryIds: number[];
+  selectedCategoryId: number | "";
+  expandedCategoryIds: number[];
+  onToggle: (id: number) => void;
+  onSelect: (id: number) => void;
+}) {
+  const rootQueries = useQueries({
+    queries: categoryLibraryIds.map((categoryLibraryId) => ({
+      queryKey: ["material-category-roots", categoryLibraryId],
+      queryFn: () => apiClient.categoriesByParams({ category_library_id: categoryLibraryId, level: 1, limit: 500 }),
+      retry: false,
+    })),
+  });
+  const isLoading = rootQueries.some((query) => query.isLoading);
+  const roots = rootQueries.flatMap((query) => query.data ?? []);
+
+  if (categoryLibraryIds.length === 0) {
+    return <p className="pl-3 py-1.5 text-xs text-muted-foreground">该物料库未关联类目库</p>;
+  }
+  if (isLoading) {
+    return <p className="pl-3 py-1.5 text-xs text-muted-foreground">加载中...</p>;
+  }
+  if (roots.length === 0) {
+    return <p className="pl-3 py-1.5 text-xs text-muted-foreground">该类目库暂无类目</p>;
+  }
+  return (
+    <div className="mt-1 space-y-1 pl-3">
+      {roots.map((category) => (
+        <MaterialCategoryNode
+          key={category.id}
+          category={category}
+          selectedCategoryId={selectedCategoryId}
+          expandedCategoryIds={expandedCategoryIds}
+          onToggle={onToggle}
+          onSelect={onSelect}
+        />
+      ))}
     </div>
   );
 }
@@ -349,7 +422,7 @@ function CategoryPropertyField({
         </select>
       ) : (
         <input
-          type={property.attr_type === "number" ? "number" : property.attr_type === "date" ? "date" : "text"}
+          type={property.attr_type === "number" ? "number" : "text"}
           value={value}
           placeholder={property.default_value ?? t("categoryProperties.defaultPlaceholder")}
           onChange={(event) => onChange(event.target.value)}
@@ -374,8 +447,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [form, setForm] = useState<MaterialFormState>(emptyForm);
   const [imageFeedback, setImageFeedback] = useState("");
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [aiModalType, setAiModalType] = useState<AiModalType>("治理");
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [lifecycleMaterial, setLifecycleMaterial] = useState<Material | null>(null);
   const [lifecycleAction, setLifecycleAction] = useState<LifecycleAction>("stop_purchase");
   const [lifecycleReason, setLifecycleReason] = useState("");
@@ -387,12 +459,13 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const categoryPropertiesSectionRef = useRef<HTMLElement | null>(null);
 
   const materialsQuery = useQuery({
-    queryKey: ["materials", searchTerm, statusFilter, selectedLibraryId],
+    queryKey: ["materials", searchTerm, statusFilter, selectedLibraryId, selectedCategoryId],
     queryFn: () =>
       apiClient.materials({
         search: searchTerm.trim(),
         status: statusFilter,
         material_library_id: selectedLibraryId === "" ? null : selectedLibraryId,
+        category_id: selectedCategoryId === "" ? null : selectedCategoryId,
       }),
     retry: false,
   });
@@ -476,16 +549,28 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
 
   const materialRows = useMemo(() => materialsQuery.data ?? [], [materialsQuery.data]);
   const libraries = librariesQuery.data ?? [];
-  const categories = categoriesQuery.data ?? [];
   const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
-  const linkedCategoryLibraryIds = useMemo(() => {
-    const ids = selectedLibrary?.category_library_ids?.length
-      ? selectedLibrary.category_library_ids
-      : selectedLibrary?.category_library_id
-        ? [selectedLibrary.category_library_id]
-        : [];
-    return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
-  }, [selectedLibrary]);
+  const linkedCategoryLibraryIds = useMemo(
+    () => categoryLibraryIdsForMaterialLibrary(selectedLibrary),
+    [selectedLibrary],
+  );
+  const linkedCategoryQueries = useQueries({
+    queries: linkedCategoryLibraryIds.map((categoryLibraryId) => ({
+      queryKey: ["categories", "by-library", categoryLibraryId],
+      queryFn: () => apiClient.categoriesByParams({ category_library_id: categoryLibraryId, limit: 1000 }),
+      retry: false,
+    })),
+  });
+  const categories = useMemo(() => {
+    if (linkedCategoryLibraryIds.length === 0) {
+      return categoriesQuery.data ?? [];
+    }
+    const merged = new Map<number, Category>();
+    linkedCategoryQueries.forEach((query) => {
+      (query.data ?? []).forEach((category) => merged.set(category.id, category));
+    });
+    return Array.from(merged.values());
+  }, [categoriesQuery.data, linkedCategoryLibraryIds, linkedCategoryQueries]);
   const availableCategories = categories.filter(
     (category) =>
       linkedCategoryLibraryIds.length === 0 ||
@@ -723,6 +808,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
 
   const toggleLibrary = (id: number) => {
     setExpandedLibraryIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+    setSelectedCategoryId("");
     setSelectedLibraryId(id);
   };
 
@@ -733,8 +819,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const formReady =
     form.name.trim() &&
     form.material_library_id !== "" &&
-    form.category_id !== "" &&
-    form.product_name_id !== "";
+    form.category_id !== "";
   const emptyLibraryLabel = auth.user?.is_super_admin ? t("state.emptyLibraries") : t("material.noAccessibleLibraries");
   const emptyMaterialLabel = auth.user?.is_super_admin ? t("state.emptyMaterials") : t("material.noAccessibleMaterials");
 
@@ -760,26 +845,21 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                   <button
                     type="button"
                     onClick={() => toggleLibrary(library.id)}
-                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm ${
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm ${
                       selectedLibraryId === library.id ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent"
                     }`}
                   >
+                    {expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
                     <span className="truncate">{library.name}</span>
-                    {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   </button>
                   {expanded && (
-                    <div className="mt-1 space-y-1 pl-3">
-                      {categories.map((category) => (
-                        <TreeCategory
-                          key={`${library.id}-${category.id}`}
-                          category={category}
-                          selectedCategoryId={selectedCategoryId}
-                          expandedCategoryIds={expandedCategoryIds}
-                          onToggle={toggleCategory}
-                          onSelect={setSelectedCategoryId}
-                        />
-                      ))}
-                    </div>
+                    <MaterialLibraryCategoryRoots
+                      categoryLibraryIds={categoryLibraryIdsForMaterialLibrary(library)}
+                      selectedCategoryId={selectedCategoryId}
+                      expandedCategoryIds={expandedCategoryIds}
+                      onToggle={toggleCategory}
+                      onSelect={setSelectedCategoryId}
+                    />
                   )}
                 </div>
               );
@@ -795,21 +875,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             <p className="mt-1 text-sm text-muted-foreground">{t("page.materialsHelp")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {(["治理", "添加", "匹配"] as AiModalType[]).map((label) => (
-              <button
-                key={label}
-                type="button"
-                aria-label={aiActionLabels[label]}
-                onClick={() => {
-                  setAiModalType(label);
-                  setIsAIModalOpen(true);
-                }}
-                className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-3 py-2 text-sm text-primary hover:bg-primary/10"
-              >
-                <Sparkles className="h-4 w-4" />
-                {label === "治理" ? t("action.aiGovernance") : label === "添加" ? t("action.aiAdd") : t("action.aiMatch")}
-              </button>
-            ))}
             <button
               type="button"
               onClick={exportCsv}
@@ -817,6 +882,15 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
             >
               <Download className="h-4 w-4" />
               {t("action.export")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBulkImportOpen(true)}
+              disabled={libraries.length === 0}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <UploadCloud className="h-4 w-4" />
+              批量添加物料
             </button>
             <Button
               type="button"
@@ -841,17 +915,24 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                 className="flex-1 outline-none"
               />
             </label>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as "" | "normal" | "stop_purchase" | "stop_use")}
-              className="rounded-md border border-border px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40"
-              aria-label="状态筛选"
-            >
-              <option value="">{t("status.all")}</option>
-              <option value="normal">{t("status.normal")}</option>
-              <option value="stop_purchase">{t("status.stopPurchase")}</option>
-              <option value="stop_use">{t("status.stopUse")}</option>
-            </select>
+            <div className="w-full md:w-48">
+              <SearchableSelect
+                ariaLabel="状态筛选"
+                value={statusFilter}
+                onValueChange={(value) =>
+                  setStatusFilter(value as "" | "normal" | "stop_purchase" | "stop_use")
+                }
+                options={[
+                  { value: "normal", label: t("status.normal") },
+                  { value: "stop_purchase", label: t("status.stopPurchase") },
+                  { value: "stop_use", label: t("status.stopUse") },
+                ]}
+                placeholder={t("status.all")}
+                clearLabel={t("status.all")}
+                searchPlaceholder="搜索状态..."
+                emptyText="暂无匹配状态"
+              />
+            </div>
           </div>
         </div>
 
@@ -864,24 +945,26 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         >
           <div className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px]">
+              <table className="w-full min-w-[1200px]">
                 <thead className="border-b border-border bg-muted/40">
                   <tr>
                     {[
-                      t("field.materialCode"),
-                      t("field.materialName"),
-                      t("field.category"),
-                      t("field.productName"),
-                      t("field.library"),
-                      t("field.unit"),
-                      t("field.brand"),
-                      t("field.attributes"),
-                      t("field.status"),
-                      "启用状态",
-                      t("action.operations"),
+                      { label: t("field.materialCode") },
+                      { label: t("field.materialName") },
+                      { label: t("field.category") },
+                      { label: t("field.productName") },
+                      { label: t("field.unit") },
+                      { label: t("field.brand") },
+                      { label: t("field.attributes"), className: "min-w-[220px]" },
+                      { label: t("field.status") },
+                      { label: "启用状态" },
+                      { label: t("action.operations") },
                     ].map((header) => (
-                      <th key={header} className="px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground">
-                        {header}
+                      <th
+                        key={header.label}
+                        className={`whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase text-muted-foreground ${header.className ?? ""}`}
+                      >
+                        {header.label}
                       </th>
                     ))}
                   </tr>
@@ -892,14 +975,13 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                     const meta = statusMeta(material.status);
                     return (
                       <tr key={material.id} className="hover:bg-muted/40">
-                        <td className="px-4 py-3 font-mono text-sm text-foreground">{material.code}</td>
-                        <td className="px-4 py-3 text-sm font-medium text-foreground">{material.name}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{material.category}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{material.product_name}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{material.material_library}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{material.unit || "-"}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{material.brand || "-"}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">
+                        <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-foreground">{material.code}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-foreground">{material.name}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-foreground">{material.category}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-foreground">{material.product_name}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-foreground">{material.unit || "-"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-sm text-foreground">{material.brand || "-"}</td>
+                        <td className="max-w-xs whitespace-normal break-words px-4 py-3 text-sm text-foreground">
                           {Object.entries(material.attributes ?? {})
                             .filter(([key]) => !key.startsWith("_"))
                             .slice(0, 2)
@@ -1001,13 +1083,13 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         <div className="space-y-5">
           <section className="rounded-lg border border-border bg-muted/20 p-3">
             <p className="mb-3 text-xs text-muted-foreground">
-              请按顺序选择物料库、类目和品名，后续选项会根据上一步自动筛选。
+              请按顺序选择物料库和类目，后续选项会根据上一步自动筛选；品名可选，物料默认按类目管理。
             </p>
             <div className="grid gap-2 sm:grid-cols-3">
               {[
                 { number: 1, label: "物料库", complete: form.material_library_id !== "" },
                 { number: 2, label: "类目", complete: form.category_id !== "" },
-                { number: 3, label: "品名", complete: form.product_name_id !== "" },
+                { number: 3, label: "品名（可选）", complete: form.product_name_id !== "" },
               ].map((step) => (
                 <div
                   key={step.number}
@@ -1108,7 +1190,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
               />
             </label>
             <label className="space-y-1 text-sm text-foreground">
-              <span>{t("field.productName")}</span>
+              <span>{t("field.productName")}（可选）</span>
               <SearchableSelect
                 ariaLabel={t("field.productName")}
                 value={form.product_name_id === "" ? "" : String(form.product_name_id)}
@@ -1124,10 +1206,11 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                   label: productName.name,
                   keywords: `${productName.product_name_code} ${productName.category}`,
                 }))}
-                placeholder={form.category_id === "" ? "请先选择类目" : "请选择品名"}
+                placeholder={form.category_id === "" ? "请先选择类目" : "请选择品名（可不选）"}
                 searchPlaceholder="搜索品名或品名编码..."
                 emptyText="当前类目下暂无可用品名"
                 disabled={form.category_id === ""}
+                clearLabel="不选择品名"
               />
             </label>
             <label className="space-y-1 text-sm text-foreground">
@@ -1421,13 +1504,11 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
         </div>
       </Modal>
 
-      <MaterialAIModal
-        isOpen={isAIModalOpen}
-        type={aiModalType}
-        selectedLibraryId={selectedLibraryId}
-        selectedCategoryId={selectedCategoryId}
-        onClose={() => setIsAIModalOpen(false)}
-        queryClient={queryClient}
+      <MaterialBulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        libraries={libraries}
+        defaultLibraryId={selectedLibraryId}
       />
     </div>
   );

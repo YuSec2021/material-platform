@@ -11,9 +11,11 @@ import {
   FileText,
   Inbox,
   Loader2,
+  Lock,
   Plus,
   Search,
   Trash2,
+  Upload,
   UploadCloud,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -23,12 +25,14 @@ import {
   type Category,
   type CategoryBulkImportResult,
   type CategoryImportRow,
+  type CategoryListParams,
   type CategoryLibrary,
   type CategoryPayload,
 } from "@/app/api/client";
 import { useAuth } from "@/app/auth/AuthContext";
 import { ApiState } from "../../common/ApiState";
 import { Modal } from "../../common/Modal";
+import { SearchableSelect } from "../../common/SearchableSelect";
 import { CategoryPropertiesPanel } from "./CategoryPropertiesPanel";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
@@ -65,6 +69,7 @@ type CategoryTreeSelection =
   | null;
 
 const CATEGORY_PAGE_SIZE = 10;
+const CATEGORY_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 const CATEGORY_TREE_BATCH_SIZE = 200;
 const CATEGORY_TREE_FULL_BATCH_SIZE = 1000;
 const CATEGORY_TREE_WINDOW_SIZE = 240;
@@ -312,6 +317,26 @@ const VirtualizedCategoryTree = memo(function VirtualizedCategoryTree({
     setWindowStart((current) => Math.min(current, Math.max(0, rows.length - CATEGORY_TREE_WINDOW_SIZE)));
   }, [rows.length]);
 
+  // When a node is expanded (or selected), its row is marked `selected`. If that row
+  // falls outside the currently rendered window, the freshly loaded children appended
+  // right after it in the flattened list would otherwise be silently clipped from view
+  // until the user manually scrolls. Bring the acted-on row into the visible window.
+  useEffect(() => {
+    if (rows.length <= CATEGORY_TREE_WINDOW_SIZE) {
+      return;
+    }
+    const selectedIndex = rows.findIndex((row) => "selected" in row && row.selected);
+    if (selectedIndex < 0) {
+      return;
+    }
+    setWindowStart((current) => {
+      if (selectedIndex >= current && selectedIndex < current + CATEGORY_TREE_WINDOW_SIZE) {
+        return current;
+      }
+      return Math.max(0, Math.min(rows.length - CATEGORY_TREE_WINDOW_SIZE, selectedIndex));
+    });
+  }, [rows]);
+
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     if (rows.length <= CATEGORY_TREE_WINDOW_SIZE) {
       return;
@@ -509,18 +534,40 @@ export function CategoryList() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const isSuperAdmin = Boolean(user?.is_super_admin);
+  const canManageAttributes = Boolean(
+    isSuperAdmin ||
+      user?.username === "super_admin" ||
+      user?.roles?.some((role) => role.code === "super_admin" || role.name === "超级管理员" || role.name === "Super Admin"),
+  );
   const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const categoryRequestsRef = useRef(new Map<string, Promise<Category[]>>());
+  const fetchCategoriesOnce = useCallback((key: string, params: CategoryListParams) => {
+    const activeRequest = categoryRequestsRef.current.get(key);
+    if (activeRequest) {
+      return activeRequest;
+    }
+    const request = apiClient.categoriesByParams(params).finally(() => {
+      if (categoryRequestsRef.current.get(key) === request) {
+        categoryRequestsRef.current.delete(key);
+      }
+    });
+    categoryRequestsRef.current.set(key, request);
+    return request;
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedTree, setSelectedTree] = useState<CategoryTreeSelection>(null);
   const [expandedLibraryIds, setExpandedLibraryIds] = useState<number[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<number[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [categoryPageSize, setCategoryPageSize] = useState<number>(CATEGORY_PAGE_SIZE);
   const [form, setForm] = useState<CategoryFormState>(emptyForm);
+  const [parentCategoryLocked, setParentCategoryLocked] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isBulkOpen, setIsBulkOpen] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
+  const [isAttributeImportOpen, setIsAttributeImportOpen] = useState(false);
   const [importLibraryId, setImportLibraryId] = useState("");
   const [importRows, setImportRows] = useState<PreviewRow[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -541,7 +588,8 @@ export function CategoryList() {
 
   const query = useQuery({
     queryKey: ["categories"],
-    queryFn: () => apiClient.categoriesByParams({ level: 1, limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 }),
+    queryFn: () =>
+      fetchCategoriesOnce("roots:all:0", { level: 1, limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 }),
     retry: false,
   });
 
@@ -551,8 +599,14 @@ export function CategoryList() {
     retry: false,
   });
 
-  const categories = query.data ?? [];
+  const allCategories = query.data ?? [];
   const libraries = librariesQuery.data ?? [];
+  const enabledLibraries = useMemo(() => libraries.filter((library) => library.enabled), [libraries]);
+  const enabledLibraryIds = useMemo(() => new Set(enabledLibraries.map((library) => library.id)), [enabledLibraries]);
+  const categories = useMemo(
+    () => allCategories.filter((category) => category.category_library_id === null || enabledLibraryIds.has(category.category_library_id)),
+    [allCategories, enabledLibraryIds],
+  );
   const rootCategoriesByLibraryId = useMemo(() => {
     const rootMap = new Map<number, Category[]>();
     loadedRootLibraryIds.forEach((libraryId) => {
@@ -605,7 +659,15 @@ export function CategoryList() {
   const isRootTable = selectedTree === null;
   const tableQuery = useQuery({
     queryKey: ["categories", "table", tableCategoryParams],
-    queryFn: () => apiClient.categoriesByParams({ ...(tableCategoryParams ?? {}), limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 }),
+    queryFn: () => {
+      const params = { ...(tableCategoryParams ?? {}), limit: CATEGORY_TREE_BATCH_SIZE, offset: 0 };
+      const requestKey = selectedTree?.type === "library"
+        ? `roots:library:${selectedTree.id}:0`
+        : selectedTree?.type === "category"
+          ? `children:${selectedTree.id}:0`
+          : "roots:all:0";
+      return fetchCategoriesOnce(requestKey, params);
+    },
     enabled: !isRootTable,
     retry: false,
   });
@@ -629,18 +691,18 @@ export function CategoryList() {
       })
       .sort((left, right) => (pathByCategoryId.get(left.id) ?? left.name).localeCompare(pathByCategoryId.get(right.id) ?? right.name));
   }, [pathByCategoryId, searchTerm, tableCategories]);
-  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CATEGORY_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / categoryPageSize));
   const paginatedCategories = filteredCategories.slice(
-    (currentPage - 1) * CATEGORY_PAGE_SIZE,
-    currentPage * CATEGORY_PAGE_SIZE,
+    (currentPage - 1) * categoryPageSize,
+    currentPage * categoryPageSize,
   );
 
   useEffect(() => {
-    const firstLibrary = libraries[0];
+    const firstLibrary = enabledLibraries[0];
     if (!importLibraryId && firstLibrary) {
       setImportLibraryId(String(firstLibrary.id));
     }
-  }, [importLibraryId, libraries]);
+  }, [importLibraryId, enabledLibraries]);
 
   useEffect(() => {
     if (isAiOpen) {
@@ -650,20 +712,20 @@ export function CategoryList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedTree]);
+  }, [searchTerm, selectedTree, categoryPageSize]);
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
 
   useEffect(() => {
-    if (selectedTree?.type === "library" && !libraries.some((library) => library.id === selectedTree.id)) {
+    if (selectedTree?.type === "library" && !enabledLibraries.some((library) => library.id === selectedTree.id)) {
       setSelectedTree(null);
     }
     if (selectedTree?.type === "category" && !knownCategories.some((category) => category.id === selectedTree.id)) {
       setSelectedTree(null);
     }
-  }, [knownCategories, libraries, selectedTree]);
+  }, [knownCategories, enabledLibraries, selectedTree]);
 
   const expandCategoryAncestors = (category: Category) => {
     const ancestorIds: number[] = [];
@@ -708,7 +770,7 @@ export function CategoryList() {
       }
       setLoadingLibraryIds((current) => Array.from(new Set([...current, libraryId])));
       try {
-        const rootCategories = await apiClient.categoriesByParams({
+        const rootCategories = await fetchCategoriesOnce(`roots:library:${libraryId}:${nextOffset}`, {
           category_library_id: libraryId,
           level: 1,
           limit: CATEGORY_TREE_BATCH_SIZE,
@@ -731,7 +793,7 @@ export function CategoryList() {
         setLoadingLibraryIds((current) => current.filter((id) => id !== libraryId));
       }
     },
-    [queryClient],
+    [fetchCategoriesOnce, queryClient],
   );
 
   const loadChildren = useCallback(
@@ -743,7 +805,7 @@ export function CategoryList() {
       }
       setLoadingCategoryIds((current) => Array.from(new Set([...current, parentId])));
       try {
-        const childCategories = await apiClient.categoriesByParams({
+        const childCategories = await fetchCategoriesOnce(`children:${parentId}:${nextOffset}`, {
           parent_id: parentId,
           limit: CATEGORY_TREE_BATCH_SIZE,
           offset: nextOffset,
@@ -765,7 +827,7 @@ export function CategoryList() {
         setLoadingCategoryIds((current) => current.filter((id) => id !== parentId));
       }
     },
-    [queryClient],
+    [fetchCategoriesOnce, queryClient],
   );
 
   const loadMoreLibraryRoots = useCallback(
@@ -800,7 +862,7 @@ export function CategoryList() {
       const allCategories: Category[] = [];
       let offset = 0;
       while (true) {
-        const batch = await apiClient.categoriesByParams({
+        const batch = await fetchCategoriesOnce(`all:library:${libraryId}:${offset}`, {
           category_library_id: libraryId,
           limit: CATEGORY_TREE_FULL_BATCH_SIZE,
           offset,
@@ -833,7 +895,7 @@ export function CategoryList() {
       });
       return allCategories;
     },
-    [queryClient],
+    [fetchCategoriesOnce, queryClient],
   );
 
   const selectLibrary = (library: CategoryLibrary) => {
@@ -885,9 +947,9 @@ export function CategoryList() {
     if (isExpandingAll) {
       return;
     }
-    const libraryIds = libraries.map((library) => library.id);
+    const libraryIds = enabledLibraries.map((library) => library.id);
     setIsExpandingAll(true);
-    setExpandedLibraryIds(libraries.map((library) => library.id));
+    setExpandedLibraryIds(enabledLibraries.map((library) => library.id));
     setLoadingLibraryIds(libraryIds);
     try {
       const allCategories = (await Promise.all(libraryIds.map(loadEntireLibraryTree))).flat();
@@ -926,6 +988,7 @@ export function CategoryList() {
       setIsFormOpen(false);
       setEditingCategory(null);
       setForm(emptyForm);
+      setParentCategoryLocked(false);
       clearCategoryChildrenCache();
       selectCategory(savedCategory);
       toast.success(t("toast.saveSuccess"));
@@ -1032,15 +1095,42 @@ export function CategoryList() {
     !importMutation.isPending &&
     (importFile ? true : importRows.length > 0 && invalidImportRows.length === 0);
 
+  const followedLibraryId = () =>
+    selectedLibrary && enabledLibraries.some((library) => library.id === selectedLibrary.id)
+      ? String(selectedLibrary.id)
+      : "";
+
   const openCreateForm = () => {
     setEditingCategory(null);
-    setForm({ ...emptyForm, categoryLibraryId: defaultLibraryId(libraries) });
+    setForm({
+      ...emptyForm,
+      categoryLibraryId: followedLibraryId() || defaultLibraryId(enabledLibraries),
+      parentCategoryId: selectedCategory ? String(selectedCategory.id) : "",
+    });
+    setParentCategoryLocked(Boolean(selectedCategory));
     setIsFormOpen(true);
+  };
+
+  const openBulkImport = () => {
+    const libraryId = followedLibraryId();
+    if (libraryId) {
+      setImportLibraryId(libraryId);
+    }
+    setIsBulkOpen(true);
+  };
+
+  const openAiImport = () => {
+    const libraryId = followedLibraryId();
+    if (libraryId) {
+      setImportLibraryId(libraryId);
+    }
+    setIsAiOpen(true);
   };
 
   const openEditForm = (category: Category) => {
     setEditingCategory(category);
     setForm(categoryToForm(category));
+    setParentCategoryLocked(false);
     setIsFormOpen(true);
   };
 
@@ -1101,6 +1191,8 @@ export function CategoryList() {
   const isError = query.isError || librariesQuery.isError;
   const isTableLoading = isLoading || (!isRootTable && tableQuery.isLoading);
   const isTableError = isError || (!isRootTable && tableQuery.isError);
+  const isLeafCategorySelection =
+    selectedTree?.type === "category" && !isTableLoading && !isTableError && tableCategories.length === 0;
   const emptyCategoryTitle = t("state.emptyCategories");
   const emptyCategoryHint = t("categoryImport.emptyHint");
   const selectedContext = selectedCategory
@@ -1110,7 +1202,7 @@ export function CategoryList() {
       : t("categoryImport.noSelection");
   const treeRows = useMemo(() => {
     const rows: CategoryTreeRow[] = [];
-    libraries.forEach((library) => {
+    enabledLibraries.forEach((library) => {
       const expanded = expandedLibraryIds.includes(library.id);
       const rootCategories = rootCategoriesByLibraryId.get(library.id) ?? [];
       rows.push({
@@ -1153,9 +1245,9 @@ export function CategoryList() {
   }, [
     childParentsWithMore,
     childrenByParentId,
+    enabledLibraries,
     expandedCategoryIds,
     expandedLibraryIds,
-    libraries,
     loadedRootLibraryIds,
     loadingCategoryIds,
     loadingLibraryIds,
@@ -1207,7 +1299,7 @@ export function CategoryList() {
         <ApiState
           isLoading={isLoading}
           isError={isError}
-          isEmpty={!isLoading && !isError && libraries.length === 0}
+          isEmpty={!isLoading && !isError && enabledLibraries.length === 0}
           emptyLabel={t("categoryImport.treeEmpty")}
           onRetry={() => {
             void query.refetch();
@@ -1232,39 +1324,56 @@ export function CategoryList() {
               <h1 className="text-2xl text-foreground">{t("page.categories")}</h1>
               <p className="mt-1 text-sm text-muted-foreground">{t("page.categoriesHelp")}</p>
             </div>
-            {isSuperAdmin && (
+            {(isSuperAdmin || canManageAttributes) && (
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsBulkOpen(true)}
-                  disabled={libraries.length === 0}
-                  className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
-                >
-                  <UploadCloud className="h-4 w-4" />
-                  {t("categoryImport.bulkImport")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsAiOpen(true)}
-                  disabled={libraries.length === 0}
-                  className="inline-flex items-center gap-2 rounded-md border border-emerald-200 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
-                >
-                  <Bot className="h-4 w-4" />
-                  {t("categoryImport.aiImport")}
-                </button>
-                <button
-                  type="button"
-                  onClick={openCreateForm}
-                  disabled={libraries.length === 0}
-                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                >
-                  <Plus className="h-4 w-4" />
-                  {t("action.addCategory")}
-                </button>
+                {canManageAttributes && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAttributeImportOpen(true)}
+                    disabled={!selectedLibrary}
+                    data-testid="category-attribute-import-button"
+                    className="inline-flex items-center gap-2 rounded-md border border-purple-200 px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
+                  >
+                    <Upload className="h-4 w-4" />
+                    {t("categoryProperties.bulkImport")}
+                  </button>
+                )}
+                {isSuperAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={openBulkImport}
+                      disabled={enabledLibraries.length === 0}
+                      className="inline-flex items-center gap-2 rounded-md border border-blue-200 px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
+                    >
+                      <UploadCloud className="h-4 w-4" />
+                      {t("categoryImport.bulkImport")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openAiImport}
+                      disabled={enabledLibraries.length === 0}
+                      className="inline-flex items-center gap-2 rounded-md border border-emerald-200 px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground"
+                    >
+                      <Bot className="h-4 w-4" />
+                      {t("categoryImport.aiImport")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openCreateForm}
+                      disabled={enabledLibraries.length === 0}
+                      className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {t("action.addCategory")}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
 
+          {!isLeafCategorySelection && (
           <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-4">
               <label className="flex min-w-64 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-ring/40">
@@ -1281,7 +1390,9 @@ export function CategoryList() {
               </label>
             </div>
           </div>
+          )}
 
+          {!isLeafCategorySelection && (
           <ApiState
             isLoading={isTableLoading}
             isError={isTableError}
@@ -1384,12 +1495,29 @@ export function CategoryList() {
                 </table>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-                <div className="text-sm text-muted-foreground">
-                  {t("categoryImport.paginationSummary", {
-                    page: currentPage,
-                    totalPages,
-                    total: filteredCategories.length,
-                  })}
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="text-sm text-muted-foreground">
+                    {t("categoryImport.paginationSummary", {
+                      page: currentPage,
+                      totalPages,
+                      total: filteredCategories.length,
+                    })}
+                  </span>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>{t("categoryImport.pageSizeLabel")}</span>
+                    <select
+                      aria-label={t("categoryImport.pageSizeLabel")}
+                      value={categoryPageSize}
+                      onChange={(event) => setCategoryPageSize(Number(event.target.value))}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
+                    >
+                      {CATEGORY_PAGE_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {size} {t("categoryImport.pageSizeUnit")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1412,9 +1540,16 @@ export function CategoryList() {
               </div>
             </div>
           </ApiState>
+          )}
         </div>
 
-        <CategoryPropertiesPanel selectedCategory={selectedCategory} isSuperAdmin={isSuperAdmin} />
+        <CategoryPropertiesPanel
+          selectedCategory={selectedCategory}
+          selectedLibrary={selectedLibrary}
+          isSuperAdmin={isSuperAdmin}
+          isImportOpen={isAttributeImportOpen}
+          onImportOpenChange={setIsAttributeImportOpen}
+        />
 
       <Modal
         isOpen={isFormOpen}
@@ -1463,39 +1598,50 @@ export function CategoryList() {
           </label>
           <label className="space-y-1 text-sm text-foreground">
             <span>{t("field.categoryLibrary")}</span>
-            <select
+            <SearchableSelect
+              ariaLabel={t("field.categoryLibrary")}
               value={form.categoryLibraryId}
-              onChange={(event) => setForm((current) => ({ ...current, categoryLibraryId: event.target.value }))}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-            >
-              <option value="">{t("field.selectCategoryLibrary")}</option>
-              {libraries.map((library) => (
-                <option key={library.id} value={library.id}>
-                  {library.name} ({library.code})
-                </option>
-              ))}
-            </select>
+              onValueChange={(value) =>
+                setForm((current) => ({ ...current, categoryLibraryId: value, parentCategoryId: "" }))
+              }
+              options={enabledLibraries.map((library) => ({
+                value: String(library.id),
+                label: `${library.name} (${library.code})`,
+                keywords: library.code,
+              }))}
+              placeholder={t("field.selectCategoryLibrary")}
+              searchPlaceholder={t("categoryImport.searchCategoryLibraries")}
+              emptyText={t("categoryImport.noCategoryLibraryMatch")}
+            />
           </label>
           <label className="space-y-1 text-sm text-foreground">
-            <span>{t("categoryImport.parentCategory")}</span>
-            <select
+            <span className="flex items-center gap-1.5">
+              {t("categoryImport.parentCategory")}
+              {parentCategoryLocked && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+            </span>
+            <SearchableSelect
+              ariaLabel={t("categoryImport.parentCategory")}
               value={form.parentCategoryId}
-              onChange={(event) => setForm((current) => ({ ...current, parentCategoryId: event.target.value }))}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-            >
-              <option value="">{t("categoryImport.noParent")}</option>
-              {knownCategories
+              onValueChange={(value) => setForm((current) => ({ ...current, parentCategoryId: value }))}
+              options={knownCategories
                 .filter(
                   (category) =>
                     String(category.category_library_id ?? "") === form.categoryLibraryId &&
                     (!editingCategory || category.id !== editingCategory.id),
                 )
-                .map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {pathByCategoryId.get(category.id) ?? category.name}
-                  </option>
-                ))}
-            </select>
+                .map((category) => ({
+                  value: String(category.id),
+                  label: pathByCategoryId.get(category.id) ?? category.name,
+                }))}
+              placeholder={t("categoryImport.noParent")}
+              searchPlaceholder={t("categoryImport.searchParentCategory")}
+              emptyText={t("categoryImport.noParentCategoryMatch")}
+              clearLabel={t("categoryImport.noParent")}
+              disabled={!form.categoryLibraryId || parentCategoryLocked}
+            />
+            {parentCategoryLocked && (
+              <span className="block text-xs text-muted-foreground">{t("categoryImport.parentCategoryLockedHint")}</span>
+            )}
           </label>
           <label className="space-y-1 text-sm text-foreground md:col-span-2">
             <span>{t("field.description")}</span>
@@ -1539,17 +1685,19 @@ export function CategoryList() {
           <div className="grid gap-3 md:grid-cols-[1fr_auto]">
             <label className="space-y-1 text-sm text-foreground">
               <span>{t("field.categoryLibrary")}</span>
-              <select
+              <SearchableSelect
+                ariaLabel={t("field.categoryLibrary")}
                 value={importLibraryId}
-                onChange={(event) => setImportLibraryId(event.target.value)}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-              >
-                {libraries.map((library) => (
-                  <option key={library.id} value={library.id}>
-                    {library.name}
-                  </option>
-                ))}
-              </select>
+                onValueChange={(value) => setImportLibraryId(value)}
+                options={enabledLibraries.map((library) => ({
+                  value: String(library.id),
+                  label: library.name,
+                  keywords: library.code,
+                }))}
+                placeholder={t("field.selectCategoryLibrary")}
+                searchPlaceholder={t("categoryImport.searchCategoryLibraries")}
+                emptyText={t("categoryImport.noCategoryLibraryMatch")}
+              />
             </label>
             <button
               type="button"
@@ -1639,17 +1787,19 @@ export function CategoryList() {
         <div className="space-y-4">
           <label className="space-y-1 text-sm text-foreground">
             <span>{t("field.categoryLibrary")}</span>
-            <select
+            <SearchableSelect
+              ariaLabel={t("field.categoryLibrary")}
               value={importLibraryId}
-              onChange={(event) => setImportLibraryId(event.target.value)}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-blue-500 focus:ring-2 focus:ring-ring/40"
-            >
-              {libraries.map((library) => (
-                <option key={library.id} value={library.id}>
-                  {library.name}
-                </option>
-              ))}
-            </select>
+              onValueChange={(value) => setImportLibraryId(value)}
+              options={enabledLibraries.map((library) => ({
+                value: String(library.id),
+                label: library.name,
+                keywords: library.code,
+              }))}
+              placeholder={t("field.selectCategoryLibrary")}
+              searchPlaceholder={t("categoryImport.searchCategoryLibraries")}
+              emptyText={t("categoryImport.noCategoryLibraryMatch")}
+            />
           </label>
           <label className="space-y-1 text-sm text-foreground">
             <span>{t("categoryImport.aiDescription")}</span>
