@@ -149,6 +149,7 @@ from .schemas import (
     ModelTestResult,
     ModelUpdate,
     MaterialIn,
+    MaterialImportConfirmIn,
     MaterialCodeRuleVersionIn,
     MaterialCodeRuleVersionListOut,
     MaterialCodeRuleVersionOut,
@@ -649,6 +650,9 @@ PERMISSION_CATALOG = [
     {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/ai-add/preview", "label": "POST /api/v1/materials/ai-add/preview"},
     {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/ai-add/confirm", "label": "POST /api/v1/materials/ai-add/confirm"},
     {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/match", "label": "POST /api/v1/materials/match"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.GET./api/v1/materials/import-template", "label": "GET /api/v1/materials/import-template"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/import/preview", "label": "POST /api/v1/materials/import/preview"},
+    {"module": "material_archives", "permission_type": "api", "permission_key": "api.POST./api/v1/materials/import/confirm", "label": "POST /api/v1/materials/import/confirm"},
     {"module": "attribute_management", "permission_type": "api", "permission_key": "api.GET./api/v1/attributes", "label": "GET /api/v1/attributes"},
     {"module": "attribute_management", "permission_type": "api", "permission_key": "api.POST./api/v1/attributes", "label": "POST /api/v1/attributes"},
     {"module": "attribute_management", "permission_type": "api", "permission_key": "api.PUT./api/v1/attributes/{attribute_id}", "label": "PUT /api/v1/attributes/{attribute_id}"},
@@ -761,6 +765,7 @@ def startup() -> None:
     ensure_material_library_association_schema()
     ensure_product_name_schema()
     ensure_measurement_unit_schema()
+    ensure_material_schema()
     db = next(get_db())
     try:
         ensure_product_name_code_sequence(db)
@@ -830,6 +835,16 @@ def ensure_category_attribute_schema() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_attribute_name "
             "ON category_attributes (category_id, name)"
         )
+        has_definition_column = connection.exec_driver_sql(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'category_attributes'
+              AND column_name = 'definition'
+            """
+        ).fetchone()
+        if not has_definition_column:
+            connection.exec_driver_sql("ALTER TABLE category_attributes ADD COLUMN definition TEXT DEFAULT ''")
 
 
 def ensure_material_library_association_schema() -> None:
@@ -940,6 +955,12 @@ def ensure_measurement_unit_schema() -> None:
                 f"CREATE INDEX IF NOT EXISTS ix_{table_name}_unit_id "
                 f"ON {table_name} (unit_id)"
             )
+
+
+def ensure_material_schema() -> None:
+    """Materials no longer require a product name; drop the legacy NOT NULL constraint."""
+    with engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE materials ALTER COLUMN product_name_id DROP NOT NULL")
 
 
 def ensure_seed_product(db: Session) -> ProductName:
@@ -2604,6 +2625,9 @@ LIBRARY_ADMIN_PERMISSIONS = {
     "api.POST./api/v1/materials/ai-add/preview",
     "api.POST./api/v1/materials/ai-add/confirm",
     "api.POST./api/v1/materials/match",
+    "api.GET./api/v1/materials/import-template",
+    "api.POST./api/v1/materials/import/preview",
+    "api.POST./api/v1/materials/import/confirm",
     "api.PUT./api/v1/material-libraries/{library_id}",
     "button.material_archives.create",
     "button.material_archives.edit",
@@ -3150,6 +3174,12 @@ def product_name_to_out(product: ProductName) -> ProductNameOut:
         measurement_unit=measurement_unit_summary(product.measurement_unit),
         category_id=product.category_id,
         category=product.category_ref.name if product.category_ref else product.category,
+        category_library_id=product.category_ref.category_library_id if product.category_ref else None,
+        category_library=(
+            product.category_ref.category_library.name
+            if product.category_ref and product.category_ref.category_library
+            else ""
+        ),
     )
 
 
@@ -3662,7 +3692,7 @@ def category_to_out(category: Category) -> CategoryOut:
     )
 
 
-CATEGORY_ATTRIBUTE_TYPES = {"string", "number", "enum", "date"}
+CATEGORY_ATTRIBUTE_TYPES = {"string", "number", "enum"}
 
 
 def validate_category_attribute_requiredness(required: bool, allow_empty: bool) -> None:
@@ -3718,6 +3748,22 @@ def validate_category_attribute_payload(
             duplicate = duplicate.filter(CategoryAttribute.id != existing.id)
         if duplicate.first():
             raise HTTPException(status_code=409, detail="Attribute name already exists for this category")
+        ancestor_owner = next(
+            (
+                ancestor
+                for ancestor in category_ancestor_chain(db, category)
+                if ancestor.id != category.id
+                and db.query(CategoryAttribute)
+                .filter(CategoryAttribute.category_id == ancestor.id, CategoryAttribute.name == name)
+                .first()
+            ),
+            None,
+        )
+        if ancestor_owner is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"属性“{name}”已存在于上级类目“{ancestor_owner.name}”，将自动继承，无需重复创建",
+            )
         values["name"] = name
     attr_type = normalize_category_attribute_type(payload)
     if attr_type is not None:
@@ -3725,7 +3771,7 @@ def validate_category_attribute_payload(
     elif isinstance(payload, CategoryAttributeCreate):
         values["attr_type"] = "string"
 
-    for field in ["display_name_zh", "display_name_en", "default_value"]:
+    for field in ["display_name_zh", "display_name_en", "default_value", "definition"]:
         if isinstance(payload, CategoryAttributeCreate) or field in fields_set:
             value = getattr(payload, field)
             values[field] = None if value is None else str(value).strip()
@@ -3767,6 +3813,7 @@ def category_attribute_to_read(
         data_type=attribute.attr_type,
         display_name_zh=attribute.display_name_zh,
         display_name_en=attribute.display_name_en,
+        definition=attribute.definition,
         options=category_attribute_options(attribute.options),
         required=attribute.required,
         allow_empty=attribute.allow_empty,
@@ -4514,7 +4561,7 @@ def material_to_out(material: Material) -> MaterialOut:
         code=material.code,
         name=material.name,
         product_name_id=material.product_name_id,
-        product_name=material.product_name.name,
+        product_name=material.product_name.name if material.product_name else "",
         material_library_id=material.material_library_id,
         material_library=material.material_library.name,
         category_id=material.category_id,
@@ -4659,7 +4706,7 @@ def material_summary(material: Material) -> dict[str, Any]:
         "category_id": material.category_id,
         "category": material.category.name,
         "product_name_id": material.product_name_id,
-        "product_name": material.product_name.name,
+        "product_name": material.product_name.name if material.product_name else "",
         "current_material_status": material.status,
     }
 
@@ -4921,8 +4968,14 @@ def material_context_by_payload(
     product_name_id: int | None,
     material_library_id: int | None,
     category_id: int | None,
-) -> tuple[ProductName, MaterialLibrary, Category]:
-    product = product_by_payload(db, product_name_id, None)
+    *,
+    require_product: bool = True,
+) -> tuple[ProductName | None, MaterialLibrary, Category]:
+    product: ProductName | None
+    if product_name_id or require_product:
+        product = product_by_payload(db, product_name_id, None)
+    else:
+        product = None
     library, category = ensure_seed_material_context(db)
     if material_library_id:
         library = db.get(MaterialLibrary, material_library_id)
@@ -4932,7 +4985,7 @@ def material_context_by_payload(
         raise HTTPException(status_code=404, detail="Material library not found")
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-    if product.status != "active":
+    if product is not None and product.status != "active":
         raise HTTPException(status_code=422, detail="停用的品名不能用于创建物料")
     if not library.enabled:
         raise HTTPException(status_code=422, detail="停用的物料库不能用于创建物料")
@@ -4944,7 +4997,7 @@ def material_context_by_payload(
         and category.category_library_id not in linked_library_ids
     ):
         raise HTTPException(status_code=422, detail="所选类目不属于该物料库绑定的类目体系")
-    if product.category_id is not None and product.category_id != category.id:
+    if product is not None and product.category_id is not None and product.category_id != category.id:
         raise HTTPException(status_code=422, detail="所选品名不属于该类目")
     return product, library, category
 
@@ -7579,14 +7632,16 @@ CATEGORY_ATTRIBUTE_IMPORT_HEADERS = [
     "中文名称",
     "英文名称",
     "属性类型",
+    "属性定义",
     "枚举选项",
     "是否必填",
     "是否允许为空",
     "默认值",
     "排序值",
 ]
-CATEGORY_ATTRIBUTE_IMPORT_REQUIRED_HEADERS = ["类目编码", "属性名称", "属性类型"]
-CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS = 5000
+CATEGORY_ATTRIBUTE_IMPORT_REQUIRED_HEADERS = ["类目路径", "属性名称", "属性类型"]
+CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS = 50_000
+CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_MAX_ROWS = 5_000
 
 
 def parse_category_attribute_import_csv(text_value: str) -> list[dict[str, str]]:
@@ -7694,23 +7749,71 @@ def validate_category_attribute_import_semantics(attribute: CategoryAttributeCre
             float(attribute.default_value)
         except ValueError:
             errors.append("数字属性的默认值必须是数字")
-    if attr_type == "date" and attribute.default_value:
-        try:
-            datetime.fromisoformat(attribute.default_value)
-        except ValueError:
-            errors.append("日期属性的默认值必须是 ISO 日期，例如 2026-07-31")
     return errors
 
 
-def normalize_category_attribute_import_row(raw: Any, row_number: int) -> tuple[str, CategoryAttributeCreate | None, list[str]]:
+def parse_category_path_value(value: str) -> tuple[str, ...]:
+    # Split only on "/" surrounded by whitespace (the exact separator category paths are
+    # generated with, e.g. "化学类仪器设备 / 腐蚀/老化试验"). A bare "/" with no
+    # surrounding space is treated as part of the category's own name rather than a
+    # level separator, so names like "腐蚀/老化试验" are not mis-split into two levels.
+    return tuple(segment for segment in (compact_space(part) for part in re.split(r"\s+[/／]\s+", value)) if segment)
+
+
+def build_category_path_lookup(
+    categories: list[Category],
+    categories_by_id: dict[int, Category],
+) -> tuple[dict[tuple[str, ...], Category], set[tuple[str, ...]]]:
+    counts: dict[tuple[str, ...], int] = {}
+    lookup: dict[tuple[str, ...], Category] = {}
+    for category in categories:
+        path_key = tuple(category_path_for(category, categories_by_id))
+        if not path_key:
+            continue
+        counts[path_key] = counts.get(path_key, 0) + 1
+        lookup[path_key] = category
+    ambiguous = {path for path, count in counts.items() if count > 1}
+    return lookup, ambiguous
+
+
+def resolve_category_attribute_import_category(
+    category_path_raw: str,
+    category_code: str,
+    categories_by_path: dict[tuple[str, ...], Category],
+    ambiguous_paths: set[tuple[str, ...]],
+    categories_by_code: dict[str, Category],
+) -> tuple[Category | None, str | None]:
+    # 类目路径 (name-based path) takes priority so attribute templates stay portable
+    # across systems whose 类目编码 values differ; 类目编码 is only a fallback for
+    # older files that predate the 类目路径 column.
+    if category_path_raw:
+        path_key = parse_category_path_value(category_path_raw)
+        if not path_key:
+            return None, "类目路径格式无效"
+        if path_key in ambiguous_paths:
+            return None, "类目路径匹配到多个类目，请使用更精确的路径或改用类目编码"
+        category = categories_by_path.get(path_key)
+        if not category:
+            return None, "类目路径不存在或不属于当前类目库"
+        return category, None
+    if category_code:
+        category = categories_by_code.get(category_code)
+        if not category:
+            return None, "类目编码不存在或不属于当前类目库"
+        return category, None
+    return None, None
+
+
+def normalize_category_attribute_import_row(raw: Any, row_number: int) -> tuple[str, str, CategoryAttributeCreate | None, list[str]]:
     if not isinstance(raw, dict):
-        return "", None, ["Row must be an object"]
+        return "", "", None, ["Row must be an object"]
     errors: list[str] = []
+    category_path_raw = compact_space(str(raw.get("类目路径") or ""))
     category_code = compact_space(str(raw.get("类目编码") or ""))
     name = compact_space(str(raw.get("属性名称") or ""))
     raw_type = compact_space(str(raw.get("属性类型") or "")).lower()
-    if not category_code:
-        errors.append("类目编码 is required")
+    if not category_path_raw and not category_code:
+        errors.append("类目路径或类目编码至少填写一项")
     if not name:
         errors.append("属性名称 is required")
     if not raw_type:
@@ -7734,6 +7837,7 @@ def normalize_category_attribute_import_row(raw: Any, row_number: int) -> tuple[
                 attr_type=normalized_type,
                 display_name_zh=compact_space(str(raw.get("中文名称") or "")),
                 display_name_en=compact_space(str(raw.get("英文名称") or "")),
+                definition=compact_space(str(raw.get("属性定义") or "")),
                 options=category_attribute_import_options(raw.get("枚举选项")),
                 required=required,
                 allow_empty=allow_empty,
@@ -7743,7 +7847,7 @@ def normalize_category_attribute_import_row(raw: Any, row_number: int) -> tuple[
             errors.extend(validate_category_attribute_import_semantics(attribute))
         except (HTTPException, ValueError) as exc:
             errors.append(str(exc.detail if isinstance(exc, HTTPException) else exc))
-    return category_code, attribute, errors
+    return category_path_raw, category_code, attribute, errors
 
 
 def preview_category_attribute_import(
@@ -7760,6 +7864,7 @@ def preview_category_attribute_import(
     categories = db.query(Category).filter(Category.category_library_id == category_library_id).all()
     categories_by_code = {category.code: category for category in categories}
     categories_by_id = {category.id: category for category in categories}
+    categories_by_path, ambiguous_paths = build_category_path_lookup(categories, categories_by_id)
     existing_attributes = (
         db.query(CategoryAttribute)
         .join(Category, CategoryAttribute.category_id == Category.id)
@@ -7769,18 +7874,22 @@ def preview_category_attribute_import(
     existing_by_key = {(attribute.category_id, attribute.name): attribute for attribute in existing_attributes}
     declared_keys: set[tuple[int, str]] = set()
     for row_number, raw in enumerate(raw_rows, start=2):
-        category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
-        category = categories_by_code.get(category_code)
+        category_path_raw, category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
+        category, _resolution_error = resolve_category_attribute_import_category(
+            category_path_raw, category_code, categories_by_path, ambiguous_paths, categories_by_code
+        )
         if category and attribute and not errors:
             declared_keys.add((category.id, attribute.name))
     available_keys = set(existing_by_key) | declared_keys
     seen_keys: set[tuple[int, str]] = set()
     items: list[dict[str, Any]] = []
     for row_number, raw in enumerate(raw_rows, start=2):
-        category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
-        category = categories_by_code.get(category_code)
-        if category_code and not category:
-            errors.append("类目编码不存在或不属于当前类目库")
+        category_path_raw, category_code, attribute, errors = normalize_category_attribute_import_row(raw, row_number)
+        category, resolution_error = resolve_category_attribute_import_category(
+            category_path_raw, category_code, categories_by_path, ambiguous_paths, categories_by_code
+        )
+        if resolution_error:
+            errors.append(resolution_error)
         action = "create"
         existing: CategoryAttribute | None = None
         if category and attribute:
@@ -7812,7 +7921,7 @@ def preview_category_attribute_import(
             {
                 "row_number": row_number,
                 "category_id": category.id if category else None,
-                "category_code": category_code,
+                "category_code": category.code if category else category_code,
                 "category_name": category.name if category else "",
                 "category_path": category_path,
                 "attribute": attribute.model_dump() if attribute else None,
@@ -8483,8 +8592,8 @@ def download_category_attribute_import_template(
     del auth
     rows: list[list[Any]] = [
         CATEGORY_ATTRIBUTE_IMPORT_HEADERS,
-        ["CAT-001", "办公设备 / 打印设备", "打印速度", "打印速度", "Print Speed", "number", "", "是", "否", "30", "10"],
-        ["CAT-001", "办公设备 / 打印设备", "颜色模式", "颜色模式", "Color Mode", "enum", "黑白|彩色", "否", "是", "彩色", "20"],
+        ["", "办公设备 / 打印设备", "打印速度", "打印速度", "Print Speed", "number", "设备每分钟可打印的页数", "", "是", "否", "30", "10"],
+        ["", "办公设备 / 打印设备", "颜色模式", "颜色模式", "Color Mode", "enum", "打印输出的颜色模式", "黑白|彩色", "否", "是", "彩色", "20"],
     ]
     output = build_audit_workbook(rows, sheet_name="类目属性导入模板")
     return StreamingResponse(
@@ -8523,8 +8632,14 @@ def confirm_category_attribute_import(
     require_button_permission(auth, "button.category_management.edit")
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one valid attribute row is required")
-    if len(payload.items) > CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS:
-        raise HTTPException(status_code=422, detail=f"At most {CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS} attribute rows can be imported at once")
+    if len(payload.items) > CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_MAX_ROWS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"At most {CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_MAX_ROWS} attribute rows "
+                "can be confirmed in one batch"
+            ),
+        )
     library = db.get(CategoryLibrary, payload.category_library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Category library not found")
@@ -9072,6 +9187,82 @@ def build_audit_workbook(rows: list[list[Any]], sheet_name: str = "Audit Logs") 
   <sheetData>{sheet_rows}</sheetData>
 </worksheet>""",
         )
+    output.seek(0)
+    return output
+
+
+def build_xlsx_workbook(sheets: list[tuple[str, list[list[Any]]]]) -> BytesIO:
+    used_names: set[str] = set()
+    prepared: list[tuple[str, list[list[Any]]]] = []
+    for name, rows in sheets:
+        safe_name = re.sub(r"[\\/*?:\[\]]", " ", compact_space(name))[:31] or "Sheet"
+        candidate = safe_name
+        suffix = 2
+        while candidate in used_names:
+            candidate = f"{safe_name[:28]}-{suffix}"
+            suffix += 1
+        used_names.add(candidate)
+        prepared.append((candidate, rows))
+
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        overrides = "\n".join(
+            f'  <Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            for index in range(1, len(prepared) + 1)
+        )
+        archive.writestr(
+            "[Content_Types].xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+{overrides}
+</Types>""",
+        )
+        archive.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        )
+        sheet_entries = "\n".join(
+            f'    <sheet name="{xml_escape(name, {chr(34): "&quot;"})}" sheetId="{index}" r:id="rId{index}"/>'
+            for index, (name, _rows) in enumerate(prepared, start=1)
+        )
+        archive.writestr(
+            "xl/workbook.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+{sheet_entries}
+  </sheets>
+</workbook>""",
+        )
+        rels_entries = "\n".join(
+            f'  <Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>'
+            for index in range(1, len(prepared) + 1)
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+{rels_entries}
+</Relationships>""",
+        )
+        for index, (_name, rows) in enumerate(prepared, start=1):
+            sheet_rows = "\n".join(
+                f'<row r="{row_index}">' + "".join(xlsx_cell(value) for value in row) + "</row>"
+                for row_index, row in enumerate(rows, start=1)
+            )
+            archive.writestr(
+                f"xl/worksheets/sheet{index}.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>{sheet_rows}</sheetData>
+</worksheet>""",
+            )
     output.seek(0)
     return output
 
@@ -9740,19 +9931,37 @@ def reject_workflow_application(
     return workflow_to_out(application)
 
 
+def category_subtree_ids(db: Session, category_id: int) -> list[int] | None:
+    category = db.get(Category, category_id)
+    if not category:
+        return None
+    categories = db.query(Category).filter(Category.category_library_id == category.category_library_id).all()
+    child_ids_by_parent: dict[int | None, list[int]] = {}
+    for item in categories:
+        child_ids_by_parent.setdefault(item.parent_category_id, []).append(item.id)
+    pending = [category.id]
+    collected: list[int] = []
+    while pending:
+        current_id = pending.pop()
+        collected.append(current_id)
+        pending.extend(child_ids_by_parent.get(current_id, []))
+    return collected
+
+
 @app.get("/api/v1/materials", response_model=list[MaterialOut])
 def list_materials(
     search: str = "",
     status: str = "",
     product_name_id: int | None = None,
     material_library_id: int | None = None,
+    category_id: int | None = None,
     db: Session = Depends(get_db),
     auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials")),
 ) -> list[MaterialOut]:
     ensure_seed_material_context(db)
     query = (
         db.query(Material)
-        .join(ProductName)
+        .outerjoin(ProductName)
         .join(MaterialLibrary)
         .join(Category, Material.category_id == Category.id)
     )
@@ -9762,6 +9971,11 @@ def list_materials(
         query = query.filter(Material.material_library_id == material_library_id)
     elif not auth.is_super_admin:
         query = query.filter(Material.material_library_id.in_(auth.library_scope_ids or {-1}))
+    if category_id:
+        subtree_ids = category_subtree_ids(db, category_id)
+        if not subtree_ids:
+            return []
+        query = query.filter(Material.category_id.in_(subtree_ids))
     if product_name_id:
         query = query.filter(Material.product_name_id == product_name_id)
     if status:
@@ -9798,15 +10012,24 @@ def create_material(
         payload.product_name_id,
         payload.material_library_id,
         payload.category_id,
+        require_product=False,
     )
     validate_required_category_properties(db, library, category, payload.attributes)
-    validate_required_product_attributes(db, product, payload.attributes)
-    existing = db.query(Material).filter(Material.product_name_id == product.id, Material.name == payload.name).first()
+    if product is not None:
+        validate_required_product_attributes(db, product, payload.attributes)
+    duplicate_query = db.query(Material).filter(Material.name == payload.name)
+    duplicate_query = (
+        duplicate_query.filter(Material.product_name_id == product.id)
+        if product is not None
+        else duplicate_query.filter(Material.category_id == category.id, Material.product_name_id.is_(None))
+    )
+    existing = duplicate_query.first()
     if existing:
         raise HTTPException(status_code=409, detail="Material already exists for this product name")
-    unit = product.measurement_unit
+    unit = product.measurement_unit if product is not None else None
     active_rule = active_rule_for_library(db, library) if library.auto_code_enabled else None
-    material_code = next_unique_code(db, Material, "MAT", f"{product.id}:{payload.name}:{now().isoformat()}")
+    code_seed = f"{product.id if product is not None else category.id}:{payload.name}:{now().isoformat()}"
+    material_code = next_unique_code(db, Material, "MAT", code_seed)
     code_status = "manual"
     if library.auto_code_enabled:
         if not active_rule:
@@ -9822,10 +10045,10 @@ def create_material(
     material = Material(
         code=material_code,
         name=payload.name,
-        product_name_id=product.id,
+        product_name_id=product.id if product is not None else None,
         material_library_id=library.id,
         category_id=category.id,
-        unit=unit.symbol if unit else (payload.unit or product.unit),
+        unit=unit.symbol if unit else (payload.unit or (product.unit if product is not None else "")),
         unit_id=unit.id if unit else None,
         brand_id=None,
         status=status,
@@ -9840,6 +10063,399 @@ def create_material(
     db.commit()
     db.refresh(material)
     return material_to_out(material)
+
+
+MATERIAL_IMPORT_MAX_ROWS = 2000
+MATERIAL_IMPORT_ATTRIBUTE_HEADER_RE = re.compile(r"^属性(\d+)$")
+
+
+def leaf_categories_for_libraries(db: Session, category_library_ids: set[int] | list[int]) -> list[Category]:
+    if not category_library_ids:
+        return []
+    categories = (
+        db.query(Category)
+        .filter(Category.category_library_id.in_(category_library_ids), Category.enabled.is_(True))
+        .all()
+    )
+    parent_ids = {category.parent_category_id for category in categories if category.parent_category_id is not None}
+    return [category for category in categories if category.id not in parent_ids]
+
+
+def missing_required_category_properties(db: Session, category: Category, attributes: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for prop in compute_category_properties(db, category.id):
+        if not (prop.required or not prop.allow_empty):
+            continue
+        value = attributes.get(prop.name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(prop.name)
+    return missing
+
+
+def parse_material_import_category_path(row: dict[str, str]) -> tuple[list[str], str | None]:
+    values = [compact_space(row.get(level_key, "")) for level_key in CATEGORY_IMPORT_HEADERS]
+    filled = [bool(value) for value in values]
+    if not any(filled):
+        return [], "类目层级不能为空，至少填写一级类目"
+    last_filled_index = max(index for index, value in enumerate(filled) if value)
+    if any(not filled[index] for index in range(last_filled_index + 1)):
+        return [], "类目层级填写不连续，请从一级类目开始依次填写，不要跳级"
+    return values[: last_filled_index + 1], None
+
+
+def resolve_material_import_category(
+    category_path: list[str],
+    categories_by_path: dict[tuple[str, ...], Category],
+    ambiguous_paths: set[tuple[str, ...]],
+) -> tuple[Category | None, str | None]:
+    path_key = tuple(category_path)
+    if path_key in ambiguous_paths:
+        return None, "类目路径匹配到多个末级类目，请检查类目名称是否重复"
+    category = categories_by_path.get(path_key)
+    if not category:
+        return None, "未找到匹配的末级类目，请检查类目层级填写是否与模板一致"
+    return category, None
+
+
+def extract_material_import_attributes(row: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    attributes: dict[str, str] = {}
+    errors: list[str] = []
+    max_index = 0
+    for header in row:
+        match = MATERIAL_IMPORT_ATTRIBUTE_HEADER_RE.match(header)
+        if match:
+            max_index = max(max_index, int(match.group(1)))
+    for index in range(1, max_index + 1):
+        name = compact_space(row.get(f"属性{index}", ""))
+        value = compact_space(row.get(f"属性值{index}", ""))
+        if name:
+            if name in attributes:
+                errors.append(f"属性“{name}”重复填写")
+            attributes[name] = value
+        elif value:
+            errors.append(f"第{index}组属性值已填写但属性名为空")
+    return attributes, errors
+
+
+def material_import_table_from_bytes(content: bytes, filename: str, content_type: str) -> list[list[str]]:
+    lowered = filename.lower()
+    if lowered.endswith(".csv") or "text/csv" in content_type:
+        try:
+            return list(csv.reader(StringIO(content.decode("utf-8-sig"))))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV material import file: {exc}") from exc
+    if lowered.endswith(".xlsx") or "spreadsheetml.sheet" in content_type or zipfile.is_zipfile(BytesIO(content)):
+        try:
+            return parse_xlsx_table(content)
+        except (KeyError, ValueError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLSX material import file: {exc}") from exc
+    if lowered.endswith(".xls") or "application/vnd.ms-excel" in content_type:
+        try:
+            stripped = content.lstrip()
+            return parse_xml_xls_table(content) if stripped.startswith(b"<") else parse_biff_xls_table(content)
+        except (UnicodeDecodeError, ValueError, ElementTree.ParseError) as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse XLS material import file: {exc}") from exc
+    raise HTTPException(status_code=422, detail="Unsupported material import file type. Upload CSV, XLSX, or XLS.")
+
+
+async def material_import_table_from_request(request: Request) -> list[list[str]]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        upload = form.get("file") or form.get("csv") or form.get("upload")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=422, detail="Material import file is required")
+        content = await upload.read()
+        filename = compact_space(str(getattr(upload, "filename", "") or ""))
+        upload_content_type = compact_space(str(getattr(upload, "content_type", "") or ""))
+        return material_import_table_from_bytes(content, filename, upload_content_type)
+    if "text/csv" in content_type:
+        content = await request.body()
+        try:
+            return list(csv.reader(StringIO(content.decode("utf-8-sig"))))
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"Unable to parse CSV material import file: {exc}") from exc
+    raise HTTPException(status_code=422, detail="Expected a multipart file upload or CSV body")
+
+
+def material_import_rows_from_table(table_rows: list[list[str]]) -> list[dict[str, str]]:
+    non_empty_rows = [
+        [compact_space(str(cell or "")) for cell in row]
+        for row in table_rows
+        if any(compact_space(str(cell or "")) for cell in row)
+    ]
+    if not non_empty_rows:
+        raise HTTPException(status_code=422, detail="导入文件为空")
+    headers = [cell.strip() for cell in non_empty_rows[0]]
+    if not headers or headers[0] != "物料名称":
+        raise HTTPException(status_code=422, detail="导入文件表头缺失或格式不正确，请先点击导出模板")
+    rows: list[dict[str, str]] = []
+    for raw_row in non_empty_rows[1:]:
+        rows.append({header: (raw_row[index] if index < len(raw_row) else "") for index, header in enumerate(headers)})
+    return rows
+
+
+@app.get("/api/v1/materials/import-template")
+def download_material_import_template(
+    material_library_id: int = Query(...),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.GET./api/v1/materials/import-template")),
+) -> StreamingResponse:
+    library = db.get(MaterialLibrary, material_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    category_library_ids = linked_category_library_ids(library)
+    leaves = leaf_categories_for_libraries(db, category_library_ids)
+    if not leaves:
+        raise HTTPException(status_code=422, detail="该物料库未关联类目库或类目库下暂无末级类目，无法生成导入模板")
+    by_id = {
+        category.id: category
+        for category in db.query(Category).filter(Category.category_library_id.in_(category_library_ids)).all()
+    }
+    leaf_paths: dict[int, list[str]] = {leaf.id: category_path_for(leaf, by_id) for leaf in leaves}
+    leaf_properties: dict[int, list[CategoryAttributeRead]] = {
+        leaf.id: compute_category_properties(db, leaf.id) for leaf in leaves
+    }
+    max_levels = max(3, min(5, max(len(path) for path in leaf_paths.values())))
+    max_attrs = max((len(props) for props in leaf_properties.values()), default=0)
+
+    header: list[Any] = ["物料名称"] + CATEGORY_IMPORT_HEADERS[:max_levels]
+    for index in range(1, max_attrs + 1):
+        header += [f"属性{index}", f"属性值{index}"]
+
+    template_rows: list[list[Any]] = [header]
+    sample_leaves = sorted(leaves, key=lambda item: item.id)[:3]
+    for leaf in sample_leaves:
+        path = leaf_paths[leaf.id]
+        row: list[Any] = ["示例物料名称"] + path + [""] * (max_levels - len(path))
+        props = leaf_properties[leaf.id]
+        for prop in props:
+            row += [prop.name, prop.default_value or ""]
+        row += [""] * ((max_attrs - len(props)) * 2)
+        template_rows.append(row)
+
+    reference_rows: list[list[Any]] = [["类目路径", "必填属性", "全部属性"]]
+    for leaf in sorted(leaves, key=lambda item: leaf_paths[item.id]):
+        props = leaf_properties[leaf.id]
+        required_names = "、".join(prop.name for prop in props if prop.required or not prop.allow_empty)
+        all_names = "、".join(prop.name for prop in props)
+        reference_rows.append([" / ".join(leaf_paths[leaf.id]), required_names, all_names])
+
+    output = build_xlsx_workbook(
+        [
+            ("导入模板", template_rows),
+            ("类目属性参考", reference_rows),
+        ]
+    )
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="material-import-template.xlsx"'},
+    )
+
+
+@app.post("/api/v1/materials/import/preview")
+async def preview_material_import_file(
+    request: Request,
+    material_library_id: int = Query(...),
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/import/preview")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.material_archives.import")
+    library = db.get(MaterialLibrary, material_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    if not library.enabled:
+        raise HTTPException(status_code=422, detail="停用的物料库不能导入物料")
+    try:
+        table_rows = await material_import_table_from_request(request)
+        raw_rows = material_import_rows_from_table(table_rows)
+        if len(raw_rows) > MATERIAL_IMPORT_MAX_ROWS:
+            raise HTTPException(status_code=422, detail=f"单次最多导入 {MATERIAL_IMPORT_MAX_ROWS} 条物料")
+
+        category_library_ids = linked_category_library_ids(library)
+        all_categories = (
+            db.query(Category).filter(Category.category_library_id.in_(category_library_ids)).all()
+            if category_library_ids
+            else []
+        )
+        by_id = {category.id: category for category in all_categories}
+        leaves = leaf_categories_for_libraries(db, category_library_ids)
+        categories_by_path, ambiguous_paths = build_category_path_lookup(leaves, by_id)
+        leaf_ids = {leaf.id for leaf in leaves}
+
+        existing_names: set[tuple[int, str]] = {
+            (category_id, name)
+            for category_id, name in db.query(Material.category_id, Material.name)
+            .filter(Material.material_library_id == library.id, Material.product_name_id.is_(None))
+            .all()
+        }
+
+        items: list[dict[str, Any]] = []
+        seen_in_file: set[tuple[int, str]] = set()
+        for row_number, row in enumerate(raw_rows, start=2):
+            material_name = compact_space(row.get("物料名称", ""))
+            category_path, path_error = parse_material_import_category_path(row)
+            errors: list[str] = []
+            if not material_name:
+                errors.append("物料名称不能为空")
+            category: Category | None = None
+            if path_error:
+                errors.append(path_error)
+            else:
+                category, resolve_error = resolve_material_import_category(category_path, categories_by_path, ambiguous_paths)
+                if resolve_error:
+                    errors.append(resolve_error)
+                elif category and category.id not in leaf_ids:
+                    errors.append("匹配到的类目不是末级类目，物料只能挂在末级类目下")
+            attributes, attribute_errors = extract_material_import_attributes(row)
+            errors.extend(attribute_errors)
+            if category and material_name:
+                missing = missing_required_category_properties(db, category, attributes)
+                if missing:
+                    errors.append(f"缺少必填属性：{'、'.join(missing)}")
+                key = (category.id, material_name)
+                if key in existing_names:
+                    errors.append("该类目下已存在同名物料")
+                if key in seen_in_file:
+                    errors.append("文件中同一类目下存在重复的物料名称")
+                seen_in_file.add(key)
+            items.append(
+                {
+                    "row_number": row_number,
+                    "material_name": material_name,
+                    "category_path": category_path,
+                    "category_id": category.id if category else None,
+                    "category_name": " / ".join(category_path) if category_path else "",
+                    "attributes": attributes,
+                    "errors": errors,
+                }
+            )
+        valid_count = sum(1 for item in items if not item["errors"])
+        return {
+            "material_library_id": library.id,
+            "total_rows": len(items),
+            "valid_count": valid_count,
+            "error_count": len(items) - valid_count,
+            "items": items,
+        }
+    finally:
+        # The preview is read-only. Release its PostgreSQL transaction before
+        # the response is serialized so a subsequent import cannot be blocked
+        # by an idle-in-transaction connection.
+        if db.in_transaction():
+            db.rollback()
+
+
+@app.post("/api/v1/materials/import/confirm")
+def confirm_material_import(
+    payload: MaterialImportConfirmIn,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_api_permission("api.POST./api/v1/materials/import/confirm")),
+) -> dict[str, Any]:
+    require_button_permission(auth, "button.material_archives.import")
+    library = db.get(MaterialLibrary, payload.material_library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Material library not found")
+    require_library_scope(auth, library.id)
+    if not payload.items:
+        raise HTTPException(status_code=422, detail="至少需要一条有效的物料记录")
+    if len(payload.items) > MATERIAL_IMPORT_MAX_ROWS:
+        raise HTTPException(status_code=422, detail=f"单次最多导入 {MATERIAL_IMPORT_MAX_ROWS} 条物料")
+
+    category_library_ids = linked_category_library_ids(library)
+    leaf_ids = {category.id for category in leaf_categories_for_libraries(db, category_library_ids)}
+    categories_by_id = {
+        category.id: category
+        for category in db.query(Category)
+        .filter(Category.id.in_({item.category_id for item in payload.items}))
+        .all()
+    }
+
+    active_rule = active_rule_for_library(db, library) if library.auto_code_enabled else None
+    if library.auto_code_enabled and not active_rule:
+        raise HTTPException(status_code=422, detail="Active code rule is required for auto-code material library")
+
+    success: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    seen_in_batch: set[tuple[int, str]] = set()
+    for item in payload.items:
+        name = compact_space(item.material_name)
+        try:
+            category = categories_by_id.get(item.category_id)
+            if not category or category.id not in leaf_ids:
+                raise HTTPException(status_code=422, detail="类目无效或不是末级类目")
+            if not name:
+                raise HTTPException(status_code=422, detail="物料名称不能为空")
+            key = (category.id, name)
+            if key in seen_in_batch:
+                raise HTTPException(status_code=409, detail="本次导入中存在重复的物料名称")
+            attributes: dict[str, Any] = dict(item.attributes)
+            validate_required_category_properties(db, library, category, attributes)
+            duplicate = (
+                db.query(Material)
+                .filter(Material.category_id == category.id, Material.product_name_id.is_(None), Material.name == name)
+                .first()
+            )
+            if duplicate:
+                raise HTTPException(status_code=409, detail="该类目下已存在同名物料")
+            material_code = next_unique_code(db, Material, "MAT", f"{category.id}:{name}:{now().isoformat()}")
+            code_status = "manual"
+            if library.auto_code_enabled and active_rule:
+                material_code = generate_material_code(
+                    db,
+                    "default",
+                    library.id,
+                    {"product": None, "library": library, "category": category, "attributes": attributes},
+                    active_rule,
+                )
+                code_status = "active"
+            material = Material(
+                code=material_code,
+                name=name,
+                product_name_id=None,
+                material_library_id=library.id,
+                category_id=category.id,
+                unit="",
+                unit_id=None,
+                brand_id=None,
+                status="normal",
+                description="",
+                attributes=json.dumps(attributes, ensure_ascii=False),
+                code_rule_version_id=active_rule.id if (library.auto_code_enabled and active_rule) else None,
+                code_change_count=0,
+                code_status=code_status,
+                enabled=True,
+            )
+            db.add(material)
+            db.flush()
+            seen_in_batch.add(key)
+            success.append({"row_number": item.row_number, "id": material.id, "code": material.code, "name": material.name})
+        except HTTPException as exc:
+            errors.append({"row_number": item.row_number, "material_name": name, "error": str(exc.detail)})
+
+    if success:
+        add_audit_log(
+            db,
+            auth,
+            "material",
+            "bulk_import",
+            {},
+            {"material_library_id": library.id, "success_count": len(success), "error_count": len(errors)},
+            "human",
+        )
+        db.commit()
+    else:
+        db.rollback()
+    return {
+        "material_library_id": library.id,
+        "success_count": len(success),
+        "error_count": len(errors),
+        "success": success,
+        "errors": errors,
+    }
 
 
 def build_ai_material_preview(payload: AiMaterialAddPreviewIn, db: Session) -> dict[str, Any]:
@@ -11017,8 +11633,9 @@ def update_material(
             payload.product_name_id or material.product_name_id,
             payload.material_library_id or material.material_library_id,
             payload.category_id or material.category_id,
+            require_product=False,
         )
-        material.product_name_id = product.id
+        material.product_name_id = product.id if product is not None else None
         material.material_library_id = library.id
         material.category_id = category.id
     if payload.name is not None and payload.name != material.name:
@@ -11062,11 +11679,12 @@ def update_material(
             category,
             payload.attributes,
         )
-        validate_required_product_attributes(
-            db,
-            product,
-            payload.attributes,
-        )
+        if product is not None:
+            validate_required_product_attributes(
+                db,
+                product,
+                payload.attributes,
+            )
         existing_history = material_attributes(material.attributes).get("_lifecycle_history")
         attributes = dict(payload.attributes)
         if existing_history and "_lifecycle_history" not in attributes:

@@ -1,6 +1,6 @@
-import { useMemo, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Edit, GripVertical, Loader2, Lock, Plus, Trash2, Upload } from "lucide-react";
+import { Download, Edit, GripVertical, Loader2, Lock, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -11,11 +11,13 @@ import {
   type CategoryAttributeImportPreview,
   type CategoryAttributePayload,
   type CategoryAttributeType,
+  type CategoryLibrary,
 } from "@/app/api/client";
 import { useAuth } from "@/app/auth/AuthContext";
 import { Modal } from "../../common/Modal";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
+import { Textarea } from "@/app/components/ui/textarea";
 import { Checkbox } from "@/app/components/ui/checkbox";
 import { Badge } from "@/app/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/app/components/ui/select";
@@ -35,6 +37,7 @@ type AttributeFormState = {
   display_name_zh: string;
   display_name_en: string;
   attr_type: CategoryAttributeType;
+  definition: string;
   options: string[];
   optionDraft: string;
   required: boolean;
@@ -47,6 +50,7 @@ const emptyAttributeForm: AttributeFormState = {
   display_name_zh: "",
   display_name_en: "",
   attr_type: "string",
+  definition: "",
   options: [],
   optionDraft: "",
   required: false,
@@ -54,7 +58,8 @@ const emptyAttributeForm: AttributeFormState = {
   default_value: "",
 };
 
-const attributeTypes: CategoryAttributeType[] = ["string", "number", "enum", "date"];
+const attributeTypes: CategoryAttributeType[] = ["string", "number", "enum"];
+const importPreviewDisplayLimit = 500;
 
 function attributeToForm(attribute: CategoryAttribute): AttributeFormState {
   return {
@@ -62,6 +67,7 @@ function attributeToForm(attribute: CategoryAttribute): AttributeFormState {
     display_name_zh: attribute.display_name_zh,
     display_name_en: attribute.display_name_en,
     attr_type: attribute.attr_type,
+    definition: attribute.definition,
     options: attribute.options,
     optionDraft: "",
     required: attribute.required,
@@ -76,6 +82,7 @@ function formToPayload(form: AttributeFormState, sortOrder?: number): CategoryAt
     attr_type: form.attr_type,
     display_name_zh: form.display_name_zh.trim(),
     display_name_en: form.display_name_en.trim(),
+    definition: form.definition.trim(),
     options: form.attr_type === "enum" ? form.options : [],
     required: form.required,
     allow_empty: form.required ? false : form.allow_empty,
@@ -110,12 +117,209 @@ function reorderAttributes(attributes: CategoryAttribute[], draggedId: number, t
   return next;
 }
 
+function CategoryAttributeImportModal({
+  selectedLibrary,
+  isOpen,
+  onOpenChange,
+}: {
+  selectedLibrary: CategoryLibrary | null;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importStrategy, setImportStrategy] = useState<CategoryAttributeImportConflictStrategy>("skip");
+  const [importPreview, setImportPreview] = useState<CategoryAttributeImportPreview | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setImportFile(null);
+      setImportPreview(null);
+      setImportStrategy("skip");
+    }
+  }, [isOpen]);
+
+  const importPreviewMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedLibrary || !importFile) {
+        throw new Error(t("categoryProperties.importFileRequired"));
+      }
+      return apiClient.previewCategoryAttributeImport(selectedLibrary.id, importFile, importStrategy);
+    },
+    onSuccess: (preview) => setImportPreview(preview),
+    onError: (error) => toast.error(`${t("categoryProperties.importPreviewFailed")}: ${error.message}`),
+  });
+
+  const importConfirmMutation = useMutation({
+    mutationFn: () => {
+      if (!importPreview) {
+        throw new Error(t("categoryProperties.importPreviewRequired"));
+      }
+      return apiClient.confirmCategoryAttributeImport(importPreview);
+    },
+    onSuccess: async (result) => {
+      toast.success(
+        t("categoryProperties.importComplete", {
+          created: result.created_count,
+          updated: result.updated_count,
+        }),
+      );
+      onOpenChange(false);
+      setImportFile(null);
+      setImportPreview(null);
+      await queryClient.invalidateQueries({ queryKey: ["category-properties"] });
+    },
+    onError: (error) => toast.error(`${t("categoryProperties.importFailed")}: ${error.message}`),
+  });
+
+  const downloadImportTemplate = async () => {
+    try {
+      const blob = await apiClient.downloadCategoryAttributeImportTemplate();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "category-attribute-import-template.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(`${t("categoryProperties.templateDownloadFailed")}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen && selectedLibrary !== null}
+      onClose={() => onOpenChange(false)}
+      title={t("categoryProperties.bulkImport")}
+      size="xl"
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t("action.cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => importPreviewMutation.mutate()}
+            disabled={!importFile || importPreviewMutation.isPending}
+          >
+            {importPreviewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("categoryProperties.previewImport")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => importConfirmMutation.mutate()}
+            disabled={!importPreview?.valid_count || importConfirmMutation.isPending}
+          >
+            {importConfirmMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t("categoryProperties.confirmImport")}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+          {t("categoryProperties.importHint", { library: selectedLibrary?.name ?? "" })}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Button type="button" variant="outline" onClick={downloadImportTemplate}>
+            <Download className="h-4 w-4" />
+            {t("categoryProperties.downloadTemplate")}
+          </Button>
+          <label className="min-w-56 flex-1 space-y-1 text-sm text-foreground">
+            <span>{t("categoryProperties.importFile")}</span>
+            <Input
+              type="file"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              onChange={(event) => {
+                setImportFile(event.target.files?.[0] ?? null);
+                setImportPreview(null);
+              }}
+            />
+          </label>
+          <label className="w-48 space-y-1 text-sm text-foreground">
+            <span>{t("categoryProperties.conflictStrategy")}</span>
+            <Select
+              value={importStrategy}
+              onValueChange={(value) => {
+                setImportStrategy(value as CategoryAttributeImportConflictStrategy);
+                setImportPreview(null);
+              }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="skip">{t("categoryProperties.conflictSkip")}</SelectItem>
+                <SelectItem value="update">{t("categoryProperties.conflictUpdate")}</SelectItem>
+                <SelectItem value="error">{t("categoryProperties.conflictError")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        {importPreview && (
+          <div className="space-y-3" data-testid="category-attribute-import-preview">
+            <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+              <ImportSummary label={t("categoryProperties.importTotal")} value={importPreview.total_count} />
+              <ImportSummary label={t("categoryProperties.importCreate")} value={importPreview.create_count} />
+              <ImportSummary label={t("categoryProperties.importUpdate")} value={importPreview.update_count} />
+              <ImportSummary label={t("categoryProperties.importSkipped")} value={importPreview.skipped_count} />
+              <ImportSummary label={t("categoryProperties.importErrors")} value={importPreview.error_count} />
+            </div>
+            <div className="max-h-80 overflow-auto rounded-md border border-border">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="sticky top-0 bg-muted text-muted-foreground">
+                  <tr>
+                    <th className="p-2">{t("categoryProperties.importRow")}</th>
+                    <th className="p-2">{t("categoryProperties.importCategory")}</th>
+                    <th className="p-2">{t("categoryProperties.name")}</th>
+                    <th className="p-2">{t("categoryProperties.type")}</th>
+                    <th className="p-2">{t("categoryProperties.importAction")}</th>
+                    <th className="p-2">{t("categoryProperties.importMessage")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.items.slice(0, importPreviewDisplayLimit).map((item) => (
+                    <tr key={item.row_number} className="border-t border-border">
+                      <td className="p-2">{item.row_number}</td>
+                      <td className="p-2">{item.category_path || item.category_code}</td>
+                      <td className="p-2">{item.attribute?.name ?? "-"}</td>
+                      <td className="p-2">{item.attribute?.attr_type ?? "-"}</td>
+                      <td className="p-2">{t(`categoryProperties.importActions.${item.action}`)}</td>
+                      <td className={`p-2 ${item.errors.length ? "text-red-600" : "text-muted-foreground"}`}>
+                        {item.errors.join("；") || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {importPreview.items.length > importPreviewDisplayLimit && (
+              <p className="text-xs text-muted-foreground">
+                {t("categoryProperties.importPreviewLimited", {
+                  shown: importPreviewDisplayLimit,
+                  total: importPreview.items.length,
+                })}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function CategoryPropertiesPanel({
   selectedCategory,
+  selectedLibrary,
   isSuperAdmin,
+  isImportOpen,
+  onImportOpenChange,
 }: {
   selectedCategory: Category | null;
+  selectedLibrary: CategoryLibrary | null;
   isSuperAdmin: boolean;
+  isImportOpen: boolean;
+  onImportOpenChange: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -125,10 +329,6 @@ export function CategoryPropertiesPanel({
   const [form, setForm] = useState<AttributeFormState>(emptyAttributeForm);
   const [draggedAttributeId, setDraggedAttributeId] = useState<number | null>(null);
   const [attributeToDelete, setAttributeToDelete] = useState<CategoryAttribute | null>(null);
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importStrategy, setImportStrategy] = useState<CategoryAttributeImportConflictStrategy>("skip");
-  const [importPreview, setImportPreview] = useState<CategoryAttributeImportPreview | null>(null);
   const canManageAttributes = Boolean(
     isSuperAdmin ||
       user?.is_super_admin ||
@@ -184,58 +384,6 @@ export function CategoryPropertiesPanel({
     },
     onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
-
-  const importPreviewMutation = useMutation({
-    mutationFn: () => {
-      const categoryLibraryId = selectedCategory?.category_library_id;
-      if (!categoryLibraryId || !importFile) {
-        throw new Error(t("categoryProperties.importFileRequired"));
-      }
-      return apiClient.previewCategoryAttributeImport(
-        categoryLibraryId,
-        importFile,
-        importStrategy,
-      );
-    },
-    onSuccess: (preview) => setImportPreview(preview),
-    onError: (error) => toast.error(`${t("categoryProperties.importPreviewFailed")}: ${error.message}`),
-  });
-
-  const importConfirmMutation = useMutation({
-    mutationFn: () => {
-      if (!importPreview) {
-        throw new Error(t("categoryProperties.importPreviewRequired"));
-      }
-      return apiClient.confirmCategoryAttributeImport(importPreview);
-    },
-    onSuccess: async (result) => {
-      toast.success(
-        t("categoryProperties.importComplete", {
-          created: result.created_count,
-          updated: result.updated_count,
-        }),
-      );
-      setIsImportOpen(false);
-      setImportFile(null);
-      setImportPreview(null);
-      await queryClient.invalidateQueries({ queryKey: ["category-properties"] });
-    },
-    onError: (error) => toast.error(`${t("categoryProperties.importFailed")}: ${error.message}`),
-  });
-
-  const downloadImportTemplate = async () => {
-    try {
-      const blob = await apiClient.downloadCategoryAttributeImportTemplate();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "category-attribute-import-template.xlsx";
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      toast.error(`${t("categoryProperties.templateDownloadFailed")}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
 
   const reorderMutation = useMutation({
     mutationFn: async (orderedAttributes: CategoryAttribute[]) => {
@@ -310,14 +458,23 @@ export function CategoryPropertiesPanel({
 
   if (!selectedCategory) {
     return (
-      <section
-        data-testid="category-attributes-panel"
-        data-selected-category-id=""
-        className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground"
-      >
-        <h3 className="mb-1 font-medium text-foreground">{t("categoryProperties.title")}</h3>
-        {t("categoryProperties.emptySelection")}
-      </section>
+      <>
+        <section
+          data-testid="category-attributes-panel"
+          data-selected-category-id=""
+          className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm text-muted-foreground"
+        >
+          <h3 className="mb-1 font-medium text-foreground">{t("categoryProperties.title")}</h3>
+          {selectedLibrary
+            ? t("categoryProperties.librarySelection", { library: selectedLibrary.name })
+            : t("categoryProperties.emptySelection")}
+        </section>
+        <CategoryAttributeImportModal
+          selectedLibrary={selectedLibrary}
+          isOpen={isImportOpen}
+          onOpenChange={onImportOpenChange}
+        />
+      </>
     );
   }
 
@@ -340,21 +497,6 @@ export function CategoryPropertiesPanel({
         </div>
         {canManageAttributes && (
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={() => {
-                setImportFile(null);
-                setImportPreview(null);
-                setImportStrategy("skip");
-                setIsImportOpen(true);
-              }}
-              aria-label={t("categoryProperties.bulkImport")}
-              size="sm"
-              variant="outline"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              {t("categoryProperties.bulkImport")}
-            </Button>
             <Button
               type="button"
               onClick={openCreateForm}
@@ -453,6 +595,16 @@ export function CategoryPropertiesPanel({
               </SelectContent>
             </Select>
           </label>
+          <label className="space-y-1 text-sm text-foreground md:col-span-2">
+            <span>{t("categoryProperties.definition")}</span>
+            <Textarea
+              aria-label={t("categoryProperties.definition")}
+              value={form.definition}
+              onChange={(event) => setForm((current) => ({ ...current, definition: event.target.value }))}
+              placeholder={t("categoryProperties.definitionPlaceholder")}
+              rows={2}
+            />
+          </label>
           <label className="space-y-1 text-sm text-foreground">
             <span>{t("categoryProperties.displayZh")}</span>
             <Input
@@ -526,7 +678,7 @@ export function CategoryPropertiesPanel({
             ) : (
               <Input
                 aria-label={t("categoryProperties.defaultValue")}
-                type={form.attr_type === "number" ? "number" : form.attr_type === "date" ? "date" : "text"}
+                type={form.attr_type === "number" ? "number" : "text"}
                 value={form.default_value}
                 onChange={(event) => setForm((current) => ({ ...current, default_value: event.target.value }))}
                 placeholder={t("categoryProperties.defaultPlaceholder")}
@@ -572,115 +724,11 @@ export function CategoryPropertiesPanel({
           )}
         </div>
       </Modal>
-      <Modal
+      <CategoryAttributeImportModal
+        selectedLibrary={selectedLibrary}
         isOpen={isImportOpen}
-        onClose={() => setIsImportOpen(false)}
-        title={t("categoryProperties.bulkImport")}
-        size="xl"
-        footer={
-          <>
-            <Button type="button" variant="outline" onClick={() => setIsImportOpen(false)}>
-              {t("action.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => importPreviewMutation.mutate()}
-              disabled={!importFile || importPreviewMutation.isPending}
-            >
-              {importPreviewMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("categoryProperties.previewImport")}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => importConfirmMutation.mutate()}
-              disabled={!importPreview?.valid_count || importConfirmMutation.isPending}
-            >
-              {importConfirmMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("categoryProperties.confirmImport")}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-5">
-          <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-            {t("categoryProperties.importHint", { library: selectedCategory.category_library })}
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <Button type="button" variant="outline" onClick={downloadImportTemplate}>
-              <Download className="h-4 w-4" />
-              {t("categoryProperties.downloadTemplate")}
-            </Button>
-            <label className="min-w-56 flex-1 space-y-1 text-sm text-foreground">
-              <span>{t("categoryProperties.importFile")}</span>
-              <Input
-                type="file"
-                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                onChange={(event) => {
-                  setImportFile(event.target.files?.[0] ?? null);
-                  setImportPreview(null);
-                }}
-              />
-            </label>
-            <label className="w-48 space-y-1 text-sm text-foreground">
-              <span>{t("categoryProperties.conflictStrategy")}</span>
-              <Select
-                value={importStrategy}
-                onValueChange={(value) => {
-                  setImportStrategy(value as CategoryAttributeImportConflictStrategy);
-                  setImportPreview(null);
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="skip">{t("categoryProperties.conflictSkip")}</SelectItem>
-                  <SelectItem value="update">{t("categoryProperties.conflictUpdate")}</SelectItem>
-                  <SelectItem value="error">{t("categoryProperties.conflictError")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-          </div>
-          {importPreview && (
-            <div className="space-y-3" data-testid="category-attribute-import-preview">
-              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
-                <ImportSummary label={t("categoryProperties.importTotal")} value={importPreview.total_count} />
-                <ImportSummary label={t("categoryProperties.importCreate")} value={importPreview.create_count} />
-                <ImportSummary label={t("categoryProperties.importUpdate")} value={importPreview.update_count} />
-                <ImportSummary label={t("categoryProperties.importSkipped")} value={importPreview.skipped_count} />
-                <ImportSummary label={t("categoryProperties.importErrors")} value={importPreview.error_count} />
-              </div>
-              <div className="max-h-80 overflow-auto rounded-md border border-border">
-                <table className="w-full min-w-[760px] text-left text-xs">
-                  <thead className="sticky top-0 bg-muted text-muted-foreground">
-                    <tr>
-                      <th className="p-2">{t("categoryProperties.importRow")}</th>
-                      <th className="p-2">{t("categoryProperties.importCategory")}</th>
-                      <th className="p-2">{t("categoryProperties.name")}</th>
-                      <th className="p-2">{t("categoryProperties.type")}</th>
-                      <th className="p-2">{t("categoryProperties.importAction")}</th>
-                      <th className="p-2">{t("categoryProperties.importMessage")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importPreview.items.map((item) => (
-                      <tr key={item.row_number} className="border-t border-border">
-                        <td className="p-2">{item.row_number}</td>
-                        <td className="p-2">{item.category_path || item.category_code}</td>
-                        <td className="p-2">{item.attribute?.name ?? "-"}</td>
-                        <td className="p-2">{item.attribute?.attr_type ?? "-"}</td>
-                        <td className="p-2">{t(`categoryProperties.importActions.${item.action}`)}</td>
-                        <td className={`p-2 ${item.errors.length ? "text-red-600" : "text-muted-foreground"}`}>
-                          {item.errors.join("；") || "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
+        onOpenChange={onImportOpenChange}
+      />
       <AlertDialog open={Boolean(attributeToDelete)} onOpenChange={(open) => !open && setAttributeToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -782,6 +830,9 @@ function AttributeSection({
                     </Badge>
                   </div>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">{attribute.name}</p>
+                  {attribute.definition && (
+                    <p className="mt-1 text-xs text-muted-foreground">{attribute.definition}</p>
+                  )}
                   {isInherited && (
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("categoryProperties.inheritedFrom", { name: attribute.inherited_from_category_name ?? attribute.source_category_name })}

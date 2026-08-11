@@ -15,6 +15,10 @@ class RecordingQuery:
         self.joins.append(args)
         return self
 
+    def outerjoin(self, *args: Any) -> RecordingQuery:
+        self.joins.append(args)
+        return self
+
     def order_by(self, *args: Any) -> RecordingQuery:
         return self
 

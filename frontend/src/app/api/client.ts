@@ -29,6 +29,8 @@ export type ProductName = {
   measurement_unit: MeasurementUnitSummary | null;
   category_id: number | null;
   category: string;
+  category_library_id: number | null;
+  category_library: string;
 };
 
 export type ProductNamePayload = {
@@ -216,7 +218,7 @@ export type Material = {
   id: number;
   code: string;
   name: string;
-  product_name_id: number;
+  product_name_id: number | null;
   product_name: string;
   material_library_id: number;
   material_library: string;
@@ -266,7 +268,7 @@ export type CategoryPayload = {
   enabled?: boolean;
 };
 
-export type CategoryAttributeType = "string" | "number" | "enum" | "date";
+export type CategoryAttributeType = "string" | "number" | "enum";
 
 export type CategoryAttribute = {
   id: number;
@@ -276,6 +278,7 @@ export type CategoryAttribute = {
   data_type: CategoryAttributeType;
   display_name_zh: string;
   display_name_en: string;
+  definition: string;
   options: string[];
   required: boolean;
   allow_empty: boolean;
@@ -299,6 +302,7 @@ export type CategoryAttributePayload = {
   attr_type?: CategoryAttributeType;
   display_name_zh?: string;
   display_name_en?: string;
+  definition?: string;
   options?: string[];
   required?: boolean;
   allow_empty?: boolean;
@@ -342,6 +346,8 @@ export type CategoryAttributeImportResult = {
   updated_ids: number[];
   skipped: Array<Record<string, unknown>>;
 };
+
+const CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_BATCH_SIZE = 1000;
 
 export type CategoryPropertyList = {
   category_id: number;
@@ -494,7 +500,7 @@ export type CodeMappingQueryParams = {
 
 export type MaterialPayload = {
   name: string;
-  product_name_id: number;
+  product_name_id: number | null;
   material_library_id: number;
   category_id: number;
   unit: string;
@@ -511,6 +517,49 @@ export type MaterialQueryParams = {
   status?: "" | "normal" | "stop_purchase" | "stop_use";
   product_name_id?: number | null;
   material_library_id?: number | null;
+  category_id?: number | null;
+};
+
+export type MaterialImportPreviewItem = {
+  row_number: number;
+  material_name: string;
+  category_path: string[];
+  category_id: number | null;
+  category_name: string;
+  attributes: Record<string, string>;
+  errors: string[];
+};
+
+export type MaterialImportPreviewResult = {
+  material_library_id: number;
+  total_rows: number;
+  valid_count: number;
+  error_count: number;
+  items: MaterialImportPreviewItem[];
+};
+
+export type MaterialImportConfirmItem = {
+  row_number: number;
+  material_name: string;
+  category_id: number;
+  attributes: Record<string, string>;
+};
+
+export type MaterialImportResultRow = {
+  row_number: number;
+  id?: number;
+  code?: string;
+  name?: string;
+  material_name?: string;
+  error?: string;
+};
+
+export type MaterialImportResult = {
+  material_library_id: number;
+  success_count: number;
+  error_count: number;
+  success: MaterialImportResultRow[];
+  errors: MaterialImportResultRow[];
 };
 
 export type MaterialGovernancePreviewPayload = {
@@ -1371,21 +1420,40 @@ export const apiClient = {
       { method: "POST", body: formData },
     );
   },
-  confirmCategoryAttributeImport(preview: CategoryAttributeImportPreview) {
-    return request<CategoryAttributeImportResult>("/category-attributes/import/confirm", {
-      method: "POST",
-      body: {
-        category_library_id: preview.category_library_id,
-        conflict_strategy: preview.conflict_strategy,
-        items: preview.items
-          .filter((item) => item.selectable && item.category_id !== null && item.attribute !== null)
-          .map((item) => ({
-            row_number: item.row_number,
-            category_id: item.category_id,
-            attribute: item.attribute,
-          })),
-      },
-    });
+  async confirmCategoryAttributeImport(preview: CategoryAttributeImportPreview) {
+    const items = preview.items
+      .filter((item) => item.selectable && item.category_id !== null && item.attribute !== null)
+      .map((item) => ({
+        row_number: item.row_number,
+        category_id: item.category_id as number,
+        attribute: item.attribute as CategoryAttributePayload,
+      }));
+    const aggregate: CategoryAttributeImportResult = {
+      category_library_id: preview.category_library_id,
+      created_count: 0,
+      updated_count: 0,
+      skipped_count: 0,
+      created_ids: [],
+      updated_ids: [],
+      skipped: [],
+    };
+    for (let offset = 0; offset < items.length; offset += CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_BATCH_SIZE) {
+      const result = await request<CategoryAttributeImportResult>("/category-attributes/import/confirm", {
+        method: "POST",
+        body: {
+          category_library_id: preview.category_library_id,
+          conflict_strategy: preview.conflict_strategy,
+          items: items.slice(offset, offset + CATEGORY_ATTRIBUTE_IMPORT_CONFIRM_BATCH_SIZE),
+        },
+      });
+      aggregate.created_count += result.created_count;
+      aggregate.updated_count += result.updated_count;
+      aggregate.skipped_count += result.skipped_count;
+      aggregate.created_ids.push(...result.created_ids);
+      aggregate.updated_ids.push(...result.updated_ids);
+      aggregate.skipped.push(...result.skipped);
+    }
+    return aggregate;
   },
   downloadCategoryTemplate() {
     return download("/categories/template");
@@ -1421,6 +1489,9 @@ export const apiClient = {
   },
   updateCategoryLibrary(id: number, payload: Partial<CategoryLibraryPayload>) {
     return request<CategoryLibrary>(`/category-libraries/${id}`, { method: "PUT", body: payload });
+  },
+  updateCategoryLibraryStatus(id: number, enabled: boolean) {
+    return request<CategoryLibrary>(`/category-libraries/${id}`, { method: "PUT", body: { enabled } });
   },
   deleteCategoryLibrary(id: number) {
     return request<{ deleted: boolean; id: number }>(`/category-libraries/${id}`, { method: "DELETE" });
@@ -1532,6 +1603,23 @@ export const apiClient = {
   },
   deleteMaterial(id: number) {
     return request<{ deleted: boolean; id: number }>(`/materials/${id}`, { method: "DELETE" });
+  },
+  downloadMaterialImportTemplate(materialLibraryId: number) {
+    return download(withQuery("/materials/import-template", { material_library_id: materialLibraryId }));
+  },
+  previewMaterialImport(materialLibraryId: number, file: File) {
+    const formData = new FormData();
+    formData.set("file", file);
+    return request<MaterialImportPreviewResult>(
+      withQuery("/materials/import/preview", { material_library_id: materialLibraryId }),
+      { method: "POST", body: formData },
+    );
+  },
+  confirmMaterialImport(materialLibraryId: number, items: MaterialImportConfirmItem[]) {
+    return request<MaterialImportResult>("/materials/import/confirm", {
+      method: "POST",
+      body: { material_library_id: materialLibraryId, items },
+    });
   },
   stopPurchaseMaterial(id: number, reason: string) {
     return request<Material>(`/materials/${id}/stop-purchase`, {

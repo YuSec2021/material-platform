@@ -94,6 +94,16 @@ class ConfirmSession(PreviewSession):
         self.rollback_count += 1
 
 
+class JsonImportRequest:
+    headers = {"content-type": "application/json"}
+
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self.rows = rows
+
+    async def json(self) -> list[dict[str, str]]:
+        return self.rows
+
+
 def sample_context() -> tuple[PreviewSession, Category]:
     library = CategoryLibrary(id=1, code="LIB-001", name="测试类目库")
     category = Category(
@@ -116,7 +126,7 @@ def sample_context() -> tuple[PreviewSession, Category]:
 def test_category_attribute_xlsx_template_round_trip() -> None:
     rows = [
         main.CATEGORY_ATTRIBUTE_IMPORT_HEADERS,
-        ["CAT-001", "办公设备 / 打印设备", "颜色模式", "颜色模式", "Color Mode", "enum", "黑白|彩色", "否", "是", "彩色", "20"],
+        ["CAT-001", "办公设备 / 打印设备", "颜色模式", "颜色模式", "Color Mode", "enum", "打印输出的颜色模式", "黑白|彩色", "否", "是", "彩色", "20"],
     ]
     content = main.build_audit_workbook(rows).getvalue()
 
@@ -127,6 +137,7 @@ def test_category_attribute_xlsx_template_round_trip() -> None:
     )
 
     assert parsed[0]["类目编码"] == "CAT-001"
+    assert parsed[0]["属性定义"] == "打印输出的颜色模式"
     assert parsed[0]["枚举选项"] == "黑白|彩色"
 
 
@@ -173,6 +184,92 @@ def test_category_attribute_preview_supports_skip_and_update_conflicts() -> None
     assert updated["update_count"] == 1
     assert updated["create_count"] == 1
     assert updated["valid_count"] == 2
+
+
+def test_category_attribute_preview_matches_category_by_path_without_code() -> None:
+    session, _category = sample_context()
+    rows = [
+        {
+            "类目路径": "打印设备",
+            "属性名称": "打印速度",
+            "属性类型": "number",
+            "是否必填": "是",
+            "是否允许为空": "否",
+            "默认值": "30",
+        },
+    ]
+
+    preview = main.preview_category_attribute_import(session, 1, rows, "skip")
+
+    assert preview["error_count"] == 0
+    assert preview["create_count"] == 1
+    assert preview["items"][0]["category_id"] == _category.id
+    assert preview["items"][0]["category_code"] == _category.code
+
+
+def test_category_attribute_preview_path_takes_priority_over_mismatched_code() -> None:
+    session, _category = sample_context()
+    rows = [
+        {
+            "类目编码": "CODE-FROM-ANOTHER-SYSTEM",
+            "类目路径": "打印设备",
+            "属性名称": "打印速度",
+            "属性类型": "number",
+        },
+    ]
+
+    preview = main.preview_category_attribute_import(session, 1, rows, "skip")
+
+    assert preview["error_count"] == 0
+    assert preview["items"][0]["category_id"] == _category.id
+
+
+def test_category_attribute_preview_flags_ambiguous_duplicate_paths() -> None:
+    library = CategoryLibrary(id=1, code="LIB-001", name="测试类目库")
+    first = Category(id=10, code="CAT-A", name="打印设备", category_library_id=1, parent_category_id=None)
+    second = Category(id=11, code="CAT-B", name="打印设备", category_library_id=1, parent_category_id=None)
+    session = PreviewSession(library, [first, second], [])
+
+    preview = main.preview_category_attribute_import(
+        session,
+        1,
+        [{"类目路径": "打印设备", "属性名称": "打印速度", "属性类型": "number"}],
+        "skip",
+    )
+
+    assert preview["error_count"] == 1
+    assert "类目路径匹配到多个类目" in preview["items"][0]["errors"][0]
+
+
+def test_category_attribute_preview_matches_category_whose_name_contains_slash() -> None:
+    library = CategoryLibrary(id=1, code="LIB-001", name="中检类目库")
+    parent = Category(id=10, code="CAT-PARENT", name="化学类仪器设备", category_library_id=1, parent_category_id=None)
+    child = Category(
+        id=11,
+        code="CAT-CHILD",
+        name="腐蚀/老化试验",
+        category_library_id=1,
+        parent_category_id=parent.id,
+    )
+    session = PreviewSession(library, [parent, child], [])
+
+    preview = main.preview_category_attribute_import(
+        session,
+        1,
+        [
+            {
+                "类目路径": "化学类仪器设备 / 腐蚀/老化试验",
+                "属性名称": "名称",
+                "属性类型": "string",
+            },
+        ],
+        "skip",
+    )
+
+    assert preview["error_count"] == 0
+    assert preview["items"][0]["errors"] == []
+    assert preview["items"][0]["category_id"] == child.id
+    assert preview["create_count"] == 1
 
 
 def test_category_attribute_preview_skips_attributes_inherited_from_ancestor() -> None:
@@ -277,6 +374,29 @@ def test_category_attribute_preview_endpoint_releases_read_transaction(monkeypat
     assert preview["error_count"] == 0
     assert session.rollback_count == 1
     assert session.transaction_active is False
+
+
+def test_category_attribute_import_accepts_more_than_legacy_5000_rows() -> None:
+    rows = [
+        {"类目路径": "打印设备", "属性名称": f"属性-{index}", "属性类型": "string"}
+        for index in range(5001)
+    ]
+
+    parsed = asyncio.run(main.category_attribute_import_rows_from_request(JsonImportRequest(rows)))
+
+    assert len(parsed) == 5001
+
+
+def test_category_attribute_import_keeps_a_large_file_safety_limit() -> None:
+    rows = [{}] * (main.CATEGORY_ATTRIBUTE_IMPORT_MAX_ROWS + 1)
+
+    try:
+        asyncio.run(main.category_attribute_import_rows_from_request(JsonImportRequest(rows)))
+    except main.HTTPException as exc:
+        assert exc.status_code == 422
+        assert "50000" in str(exc.detail)
+    else:
+        raise AssertionError("oversized category attribute imports must be rejected")
 
 
 def test_category_attribute_validation_does_not_run_schema_ddl(monkeypatch: Any) -> None:

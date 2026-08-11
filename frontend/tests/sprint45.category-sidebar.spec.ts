@@ -70,7 +70,10 @@ const initialCategories = [
   },
 ];
 
-async function mockBackend(page: Page) {
+async function mockBackend(
+  page: Page,
+  options: { officeRootDelayMs?: number; onOfficeRootRequest?: () => void } = {},
+) {
   let categories = [...initialCategories];
   let nextCategoryId = 100;
 
@@ -127,6 +130,12 @@ async function mockBackend(page: Page) {
     const parentId = url.searchParams.get("parent_id");
     const libraryId = url.searchParams.get("category_library_id");
     const level = url.searchParams.get("level");
+    if (libraryId === "1" && level === "1") {
+      options.onOfficeRootRequest?.();
+      if (options.officeRootDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.officeRootDelayMs));
+      }
+    }
     await route.fulfill({
       json: categories.filter((category) =>
         parentId !== null
@@ -186,60 +195,81 @@ test("expand all loads and displays category descendants that were not cached", 
   await expect(page.getByRole("button", { name: /收起 Paper|Collapse Paper/ })).toBeVisible();
 });
 
+test("selecting a large category library shares the tree and table root request", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  let officeRootRequests = 0;
+  await mockBackend(page, {
+    officeRootDelayMs: 250,
+    onOfficeRootRequest: () => {
+      officeRootRequests += 1;
+    },
+  });
+  await login(page);
+  await page.goto("/standard/category");
+
+  await page.getByRole("button", { name: /Office Library/ }).click();
+
+  await expect(page.locator('aside :text("Office Supplies")').first()).toBeVisible();
+  await expect(page.locator('main table :text("Office Supplies")').first()).toBeVisible();
+  expect(officeRootRequests).toBe(1);
+});
+
 test("category properties support spreadsheet preview and confirmed bulk import", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await mockBackend(page);
-  let confirmPayload: Record<string, unknown> | null = null;
+  const confirmPayloads: Record<string, unknown>[] = [];
   await page.route("**/api/v1/categories/*/properties", async (route) => {
     await route.fulfill({ json: { category_id: 1, own: [], inherited: [], attributes: [], properties: [] } });
   });
   await page.route("**/api/v1/category-attributes/import/preview**", async (route) => {
+    const items = Array.from({ length: 1001 }, (_value, index) => ({
+      row_number: index + 2,
+      category_id: 1,
+      category_code: "OFFICE",
+      category_name: "Office Supplies",
+      category_path: "Office Supplies",
+      attribute: {
+        name: index === 0 ? "paper_size" : `bulk_property_${index}`,
+        attr_type: "string",
+        display_name_zh: "",
+        display_name_en: "",
+        definition: "",
+        options: [],
+        required: false,
+        allow_empty: true,
+        default_value: null,
+        sort_order: (index + 1) * 10,
+      },
+      existing_attribute_id: null,
+      action: "create",
+      selectable: true,
+      errors: [],
+    }));
     await route.fulfill({
       json: {
         category_library_id: 1,
         conflict_strategy: "skip",
-        total_count: 1,
-        valid_count: 1,
-        create_count: 1,
+        total_count: items.length,
+        valid_count: items.length,
+        create_count: items.length,
         update_count: 0,
         skipped_count: 0,
         error_count: 0,
-        items: [
-          {
-            row_number: 2,
-            category_id: 1,
-            category_code: "OFFICE",
-            category_name: "Office Supplies",
-            category_path: "Office Supplies",
-            attribute: {
-              name: "paper_size",
-              attr_type: "enum",
-              display_name_zh: "纸张尺寸",
-              display_name_en: "Paper Size",
-              options: ["A4", "A3"],
-              required: false,
-              allow_empty: true,
-              default_value: "A4",
-              sort_order: 10,
-            },
-            existing_attribute_id: null,
-            action: "create",
-            selectable: true,
-            errors: [],
-          },
-        ],
+        items,
       },
     });
   });
   await page.route("**/api/v1/category-attributes/import/confirm", async (route) => {
-    confirmPayload = route.request().postDataJSON() as Record<string, unknown>;
+    const payload = route.request().postDataJSON() as Record<string, unknown>;
+    const items = payload.items as unknown[];
+    confirmPayloads.push(payload);
     await route.fulfill({
       json: {
         category_library_id: 1,
-        created_count: 1,
+        created_count: items.length,
         updated_count: 0,
         skipped_count: 0,
-        created_ids: [101],
+        created_ids: [],
         updated_ids: [],
         skipped: [],
       },
@@ -248,9 +278,12 @@ test("category properties support spreadsheet preview and confirmed bulk import"
   await login(page);
   await page.goto("/standard/category");
   await page.getByRole("button", { name: /Office Library/ }).click();
-  await page.getByRole("button", { name: /Office Supplies/ }).click();
 
-  await page.getByTestId("category-attributes-panel").getByRole("button", { name: /批量导入|Bulk Import/ }).click();
+  const attributeImportButton = page.getByTestId("category-attribute-import-button");
+  await expect(attributeImportButton).toBeEnabled();
+  await expect(page.getByTestId("category-attributes-panel")).toContainText(/Office Library/);
+  await attributeImportButton.click();
+  await expect(page.getByRole("dialog").getByText(/可导入类目库.Office Library|multiple categories in Office Library/)).toBeVisible();
   await expect(page.getByRole("button", { name: /下载模板|Download Template/ })).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles({
     name: "category-attributes.csv",
@@ -260,10 +293,11 @@ test("category properties support spreadsheet preview and confirmed bulk import"
   await page.getByRole("button", { name: /预览导入|Preview Import/ }).click();
 
   await expect(page.getByTestId("category-attribute-import-preview")).toContainText("paper_size");
+  await expect(page.getByTestId("category-attribute-import-preview")).toContainText(/前 500 行|first 500 rows/);
   await page.getByRole("button", { name: /确认导入|Confirm Import/ }).click();
-  await expect.poll(() => confirmPayload).not.toBeNull();
-  expect(confirmPayload?.conflict_strategy).toBe("skip");
-  expect((confirmPayload?.items as unknown[]).length).toBe(1);
+  await expect.poll(() => confirmPayloads.length).toBe(2);
+  expect(confirmPayloads.map((payload) => (payload.items as unknown[]).length)).toEqual([1000, 1]);
+  expect(confirmPayloads.every((payload) => payload.conflict_strategy === "skip")).toBe(true);
 });
 
 test("category create, edit, and delete refresh the sidebar tree and table together", async ({ page }) => {

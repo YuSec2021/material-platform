@@ -1,12 +1,4 @@
 services:
-  qdrant:
-    image: qdrant/qdrant:v1.12.6
-    ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
   backend:
     build:
       context: ./backend
@@ -15,12 +7,8 @@ services:
       # backend itself runs in Docker, use an address reachable from Docker
       # instead of 127.0.0.1 (for example host.docker.internal on macOS).
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must point to aios-infra PostgreSQL}
-      QDRANT_URL: http://qdrant:6333
       MILVUS_URI: ${MILVUS_URI:-http://192.168.100.100:19530}
       AI_DEBUG: "true"
-    depends_on:
-      qdrant:
-        condition: service_started
     ports:
       - "24435:24435"
     healthcheck:
@@ -60,6 +48,3 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
-volumes:
-  qdrant_data:

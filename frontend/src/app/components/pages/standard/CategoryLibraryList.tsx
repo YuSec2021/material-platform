@@ -11,7 +11,7 @@ import { SearchPanel } from "./standardPageUtils";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Textarea } from "@/app/components/ui/textarea";
-import { Checkbox } from "@/app/components/ui/checkbox";
+import { Switch } from "@/app/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,14 +27,12 @@ type CategoryLibraryFormState = {
   name: string;
   code: string;
   description: string;
-  qdrantEnabled: boolean;
 };
 
 const emptyForm: CategoryLibraryFormState = {
   name: "",
   code: "",
   description: "",
-  qdrantEnabled: false,
 };
 
 function libraryToForm(library: CategoryLibrary): CategoryLibraryFormState {
@@ -42,7 +40,6 @@ function libraryToForm(library: CategoryLibrary): CategoryLibraryFormState {
     name: library.name,
     code: library.code,
     description: library.description,
-    qdrantEnabled: library.qdrant_enabled,
   };
 }
 
@@ -52,7 +49,6 @@ function formToPayload(form: CategoryLibraryFormState): CategoryLibraryPayload {
     code: form.code.trim(),
     description: form.description.trim(),
     enabled: true,
-    qdrant_enabled: form.qdrantEnabled,
   };
 }
 
@@ -96,6 +92,16 @@ export function CategoryLibraryList() {
     onError: (error) => toast.error(`${t("toast.deleteFailed")}: ${error.message}`),
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      apiClient.updateCategoryLibraryStatus(id, enabled),
+    onSuccess: async (library) => {
+      toast.success(`${library.name}${library.enabled ? t("status.enabled") : t("status.disabled")}`);
+      await queryClient.invalidateQueries({ queryKey: ["category-libraries"] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const data = useMemo(() => {
     const term = searchTerm.trim();
     const libraries = query.data ?? [];
@@ -129,12 +135,16 @@ export function CategoryLibraryList() {
     { header: t("field.code"), accessor: "code" as keyof CategoryLibrary },
     { header: t("field.description"), accessor: "description" as keyof CategoryLibrary },
     {
-      header: t("field.qdrantEnabled"),
-      accessor: (row: CategoryLibrary) => (row.qdrant_enabled ? t("status.enabled") : t("status.disabled")),
-    },
-    {
       header: t("field.status"),
-      accessor: (row: CategoryLibrary) => (row.enabled ? t("status.enabled") : t("status.disabled")),
+      accessor: (row: CategoryLibrary) => (
+        <Switch
+          checked={row.enabled}
+          aria-label={`${row.name}${row.enabled ? t("status.enabled") : t("status.disabled")}`}
+          disabled={statusMutation.isPending}
+          onCheckedChange={(enabled) => statusMutation.mutate({ id: row.id, enabled })}
+          className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-red-600"
+        />
+      ),
     },
     {
       header: t("action.operations"),
@@ -247,14 +257,6 @@ export function CategoryLibraryList() {
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               rows={3}
             />
-          </label>
-          <label className="flex items-center gap-2 text-sm text-foreground md:col-span-2">
-            <Checkbox
-              checked={form.qdrantEnabled}
-              onCheckedChange={(checked) => setForm((current) => ({ ...current, qdrantEnabled: checked === true }))}
-              aria-label={t("field.qdrantEnabled")}
-            />
-            {t("field.qdrantEnabled")}
           </label>
         </div>
       </Modal>

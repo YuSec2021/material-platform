@@ -1,9 +1,9 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Edit, Plus, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Edit, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { apiClient, type ProductName, type ProductNamePayload } from "@/app/api/client";
+import { apiClient, type Category, type ProductName, type ProductNamePayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
 import { DataTable } from "../../common/DataTable";
 import { Modal } from "../../common/Modal";
@@ -23,7 +23,7 @@ import {
 } from "@/app/components/ui/alert-dialog";
 
 type StatusFilter = "active" | "inactive" | "all";
-type FormState = ProductNamePayload;
+type FormState = ProductNamePayload & { category_library_id: number | null };
 type PendingAction =
   | { type: "status"; product: ProductName; nextStatus: "active" | "inactive" }
   | { type: "delete"; product: ProductName }
@@ -35,6 +35,7 @@ const emptyForm: FormState = {
   unit_id: null,
   category_id: null,
   category: "",
+  category_library_id: null,
 };
 
 const labels = {
@@ -58,9 +59,18 @@ const labels = {
     setActive: "启用",
     setInactive: "禁用",
     search: "搜索品名",
-    searchPlaceholder: "搜索编码、品名、类目或单位...",
+    searchPlaceholder: "搜索编码、品名、类目库、类目或单位...",
     empty: "暂无匹配品名数据",
+    categoryLibrary: "所属类目库",
+    selectCategoryLibrary: "请选择类目库",
     selectCategory: "请选择类目",
+    selectCategoryLibraryFirst: "请先选择类目库",
+    selectedCategory: "已选类目",
+    noCategorySelected: "尚未选择类目",
+    categoryTreeEmpty: "该类目库暂无类目",
+    categoryTreeLoading: "正在加载类目...",
+    filterAllCategoryLibraries: "全部类目库",
+    filterCategoryLibrary: "按类目库筛选",
     currentStatus: "当前状态",
     cancel: "取消",
     confirm: "确认",
@@ -102,9 +112,18 @@ const labels = {
     setActive: "Activate",
     setInactive: "Deactivate",
     search: "Search product names",
-    searchPlaceholder: "Search code, name, category, or unit...",
+    searchPlaceholder: "Search code, name, category library, category, or unit...",
     empty: "No matching product names",
+    categoryLibrary: "Category Library",
+    selectCategoryLibrary: "Select a category library",
     selectCategory: "Select category",
+    selectCategoryLibraryFirst: "Select a category library first",
+    selectedCategory: "Selected category",
+    noCategorySelected: "No category selected",
+    categoryTreeEmpty: "No categories in this library",
+    categoryTreeLoading: "Loading categories...",
+    filterAllCategoryLibraries: "All Category Libraries",
+    filterCategoryLibrary: "Filter by category library",
     currentStatus: "Current status",
     cancel: "Cancel",
     confirm: "Confirm",
@@ -128,6 +147,108 @@ const labels = {
   },
 };
 
+function ProductNameCategoryNode({
+  category,
+  selectedCategoryId,
+  expandedCategoryIds,
+  onToggle,
+  onSelect,
+}: {
+  category: Category;
+  selectedCategoryId: number | null;
+  expandedCategoryIds: number[];
+  onToggle: (id: number) => void;
+  onSelect: (category: Category) => void;
+}) {
+  const expanded = expandedCategoryIds.includes(category.id);
+  const selected = selectedCategoryId === category.id;
+  const childrenQuery = useQuery({
+    queryKey: ["product-name-category-children", category.id],
+    queryFn: () => apiClient.categoriesByParams({ parent_id: category.id, limit: 500 }),
+    enabled: expanded,
+    retry: false,
+  });
+  const children = childrenQuery.data ?? [];
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => {
+          onToggle(category.id);
+          onSelect(category);
+        }}
+        className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm ${
+          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent"
+        }`}
+      >
+        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="truncate">{category.name}</span>
+      </button>
+      {expanded && children.length > 0 && (
+        <div className="mt-1 space-y-1 pl-4">
+          {children.map((child) => (
+            <ProductNameCategoryNode
+              key={child.id}
+              category={child}
+              selectedCategoryId={selectedCategoryId}
+              expandedCategoryIds={expandedCategoryIds}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductNameCategoryTree({
+  categoryLibraryId,
+  selectedCategoryId,
+  expandedCategoryIds,
+  onToggle,
+  onSelect,
+  emptyLabel,
+  loadingLabel,
+}: {
+  categoryLibraryId: number;
+  selectedCategoryId: number | null;
+  expandedCategoryIds: number[];
+  onToggle: (id: number) => void;
+  onSelect: (category: Category) => void;
+  emptyLabel: string;
+  loadingLabel: string;
+}) {
+  const rootsQuery = useQuery({
+    queryKey: ["product-name-category-roots", categoryLibraryId],
+    queryFn: () => apiClient.categoriesByParams({ category_library_id: categoryLibraryId, level: 1, limit: 500 }),
+    retry: false,
+  });
+  const roots = rootsQuery.data ?? [];
+
+  if (rootsQuery.isLoading) {
+    return <p className="p-2 text-xs text-muted-foreground">{loadingLabel}</p>;
+  }
+  if (roots.length === 0) {
+    return <p className="p-2 text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <div className="space-y-1">
+      {roots.map((category) => (
+        <ProductNameCategoryNode
+          key={category.id}
+          category={category}
+          selectedCategoryId={selectedCategoryId}
+          expandedCategoryIds={expandedCategoryIds}
+          onToggle={onToggle}
+          onSelect={onSelect}
+        />
+      ))}
+    </div>
+  );
+}
+
 function initialStatusFilter(): StatusFilter {
   const saved = window.localStorage.getItem("product-name-status-filter");
   return saved === "inactive" || saved === "all" ? saved : "active";
@@ -139,9 +260,11 @@ export function ProductNameList() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
+  const [categoryLibraryFilter, setCategoryLibraryFilter] = useState<number | "">("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductName | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<number[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const query = useQuery({
@@ -149,9 +272,9 @@ export function ProductNameList() {
     queryFn: () => apiClient.productNamesByStatus("all"),
     retry: false,
   });
-  const categoryQuery = useQuery({
-    queryKey: ["categories"],
-    queryFn: apiClient.categories,
+  const categoryLibrariesQuery = useQuery({
+    queryKey: ["category-libraries"],
+    queryFn: apiClient.categoryLibraries,
     retry: false,
   });
   const measurementUnitsQuery = useQuery({
@@ -160,7 +283,7 @@ export function ProductNameList() {
     retry: false,
   });
 
-  const categories = categoryQuery.data ?? [];
+  const categoryLibraries = categoryLibrariesQuery.data ?? [];
   const measurementUnits = measurementUnitsQuery.data ?? [];
 
   const filteredData = useMemo(() => {
@@ -171,24 +294,31 @@ export function ProductNameList() {
       if (!matchesStatus) {
         return false;
       }
+      const matchesCategoryLibrary =
+        categoryLibraryFilter === "" || item.category_library_id === categoryLibraryFilter;
+      if (!matchesCategoryLibrary) {
+        return false;
+      }
       if (!term) {
         return true;
       }
-      return [item.product_name_code, item.name, item.category, item.unit].some((value) =>
+      return [item.product_name_code, item.name, item.category_library, item.category, item.unit].some((value) =>
         value.toLowerCase().includes(term),
       );
     });
-  }, [query.data, searchTerm, statusFilter]);
+  }, [query.data, searchTerm, statusFilter, categoryLibraryFilter]);
 
   const invalidateProductNames = () => {
     void queryClient.invalidateQueries({ queryKey: ["product-names"] });
   };
 
   const saveMutation = useMutation({
-    mutationFn: (payload: FormState) =>
-      editingProduct
+    mutationFn: (formState: FormState) => {
+      const { category_library_id: _categoryLibraryId, ...payload } = formState;
+      return editingProduct
         ? apiClient.updateProductName(editingProduct.id, payload)
-        : apiClient.createProductName(payload),
+        : apiClient.createProductName(payload);
+    },
     onSuccess: () => {
       toast.success(text.saveSuccess);
       setIsFormOpen(false);
@@ -227,11 +357,8 @@ export function ProductNameList() {
 
   const openCreate = () => {
     setEditingProduct(null);
-    setForm({
-      ...emptyForm,
-      category_id: categories[0]?.id ?? null,
-      category: categories[0]?.name ?? "",
-    });
+    setForm(emptyForm);
+    setExpandedCategoryIds([]);
     setIsFormOpen(true);
   };
 
@@ -243,7 +370,9 @@ export function ProductNameList() {
       unit_id: product.unit_id,
       category_id: product.category_id,
       category: product.category,
+      category_library_id: product.category_library_id,
     });
+    setExpandedCategoryIds([]);
     setIsFormOpen(true);
   };
 
@@ -271,6 +400,7 @@ export function ProductNameList() {
       ),
     },
     { header: text.name, accessor: "name" as keyof ProductName },
+    { header: text.categoryLibrary, accessor: "category_library" as keyof ProductName },
     { header: text.category, accessor: "category" as keyof ProductName },
     { header: text.unit, accessor: "unit" as keyof ProductName },
     {
@@ -374,6 +504,23 @@ export function ProductNameList() {
               </button>
             ))}
           </div>
+          <div className="w-full md:w-56">
+            <span className="sr-only">{text.filterCategoryLibrary}</span>
+            <SearchableSelect
+              ariaLabel={text.filterCategoryLibrary}
+              value={categoryLibraryFilter === "" ? "" : String(categoryLibraryFilter)}
+              onValueChange={(value) => setCategoryLibraryFilter(value ? Number(value) : "")}
+              options={categoryLibraries.map((library) => ({
+                value: String(library.id),
+                label: library.name,
+                keywords: library.code,
+              }))}
+              placeholder={text.filterAllCategoryLibraries}
+              clearLabel={text.filterAllCategoryLibraries}
+              searchPlaceholder={i18n.language === "en-US" ? "Search category libraries..." : "搜索类目库..."}
+              emptyText={i18n.language === "en-US" ? "No matching category libraries" : "暂无匹配类目库"}
+            />
+          </div>
         </div>
       </div>
 
@@ -432,37 +579,58 @@ export function ProductNameList() {
             />
           </label>
           <label className="block space-y-1">
+            <span className="text-sm text-muted-foreground">{text.categoryLibrary}</span>
+            <SearchableSelect
+              ariaLabel={text.categoryLibrary}
+              value={form.category_library_id === null ? "" : String(form.category_library_id)}
+              onValueChange={(value) => {
+                const categoryLibraryId = value ? Number(value) : null;
+                setExpandedCategoryIds([]);
+                setForm((current) => ({
+                  ...current,
+                  category_library_id: categoryLibraryId,
+                  category_id: null,
+                  category: "",
+                }));
+              }}
+              options={categoryLibraries.map((library) => ({
+                value: String(library.id),
+                label: library.name,
+                keywords: library.code,
+              }))}
+              placeholder={text.selectCategoryLibrary}
+              searchPlaceholder={i18n.language === "en-US" ? "Search category libraries..." : "搜索类目库..."}
+              emptyText={i18n.language === "en-US" ? "No matching category libraries" : "暂无匹配类目库"}
+            />
+          </label>
+          <label className="block space-y-1 md:col-span-2">
             <span className="text-sm text-muted-foreground">{text.category}</span>
-            {categories.length > 0 ? (
-              <SearchableSelect
-                ariaLabel={text.category}
-                value={form.category_id === null ? "" : String(form.category_id)}
-                onValueChange={(value) => {
-                  const categoryId = value ? Number(value) : null;
-                  const category = categories.find((item) => item.id === categoryId);
-                  setForm((current) => ({
-                    ...current,
-                    category_id: categoryId,
-                    category: category?.name ?? "",
-                  }));
-                }}
-                options={categories.map((category) => ({
-                  value: String(category.id),
-                  label: `${category.name} (${category.code})`,
-                  keywords: category.code,
-                }))}
-                placeholder={text.selectCategory}
-                searchPlaceholder={i18n.language === "en-US" ? "Search categories..." : "搜索类目名称或编码..."}
-                emptyText={i18n.language === "en-US" ? "No matching categories" : "暂无匹配类目"}
-                clearLabel={i18n.language === "en-US" ? "No category" : "不选择类目"}
-              />
-            ) : (
-              <Input
-                aria-label={text.category}
-                value={form.category}
-                onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
-              />
-            )}
+            <div className="rounded-md border border-border bg-background p-2">
+              {form.category_library_id === null ? (
+                <p className="p-2 text-xs text-muted-foreground">{text.selectCategoryLibraryFirst}</p>
+              ) : (
+                <div className="max-h-56 overflow-y-auto">
+                  <ProductNameCategoryTree
+                    categoryLibraryId={form.category_library_id}
+                    selectedCategoryId={form.category_id ?? null}
+                    expandedCategoryIds={expandedCategoryIds}
+                    onToggle={(id) =>
+                      setExpandedCategoryIds((current) =>
+                        current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+                      )
+                    }
+                    onSelect={(category) =>
+                      setForm((current) => ({ ...current, category_id: category.id, category: category.name }))
+                    }
+                    emptyLabel={text.categoryTreeEmpty}
+                    loadingLabel={text.categoryTreeLoading}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {text.selectedCategory}: {form.category || text.noCategorySelected}
+            </p>
           </label>
           <label className="block space-y-1">
             <span className="text-sm text-muted-foreground">{text.unit}</span>

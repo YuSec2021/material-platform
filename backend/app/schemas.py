@@ -88,6 +88,8 @@ class ProductNameOut(BaseModel):
     measurement_unit: MeasurementUnitSummary | None = None
     category_id: int | None = None
     category: str
+    category_library_id: int | None = None
+    category_library: str = ""
 
 
 class ProductNameIn(BaseModel):
@@ -428,6 +430,7 @@ class CategoryAttributeCreate(BaseModel):
     data_type: str | None = None
     display_name_zh: str = ""
     display_name_en: str = ""
+    definition: str = ""
     options: list[str] = Field(default_factory=list)
     required: bool = False
     allow_empty: bool = True
@@ -441,6 +444,7 @@ class CategoryAttributeUpdate(BaseModel):
     data_type: str | None = None
     display_name_zh: str | None = None
     display_name_en: str | None = None
+    definition: str | None = None
     options: list[str] | None = None
     required: bool | None = None
     allow_empty: bool | None = None
@@ -468,6 +472,7 @@ class CategoryAttributeRead(BaseModel):
     data_type: str
     display_name_zh: str
     display_name_en: str
+    definition: str
     options: list[str]
     required: bool
     allow_empty: bool
@@ -494,9 +499,21 @@ class CategoryPropertyList(BaseModel):
     properties: list[CategoryAttributeRead]
 
 
+class MaterialImportConfirmItem(BaseModel):
+    row_number: int = Field(ge=2)
+    material_name: str
+    category_id: int
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class MaterialImportConfirmIn(BaseModel):
+    material_library_id: int
+    items: list[MaterialImportConfirmItem]
+
+
 class MaterialIn(BaseModel):
     name: str
-    product_name_id: int
+    product_name_id: int | None = None
     material_library_id: int
     category_id: int
     unit: str = ""
@@ -537,7 +554,7 @@ class MaterialOut(BaseModel):
     id: int
     code: str
     name: str
-    product_name_id: int
+    product_name_id: int | None = None
     product_name: str
     material_library_id: int
     material_library: str
