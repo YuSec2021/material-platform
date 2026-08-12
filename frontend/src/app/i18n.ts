@@ -523,10 +523,14 @@ const resources = {
         categoryLibraries: "类目库管理",
         categoryLibrariesHelp: "类目库数据来自后端 API，支持新增、编辑和空库删除。",
         categories: "类目管理",
-        categoriesHelp: "类目数据来自后端 API，支持按类目库新增、编辑和删除。",
+        categoriesHelp: "",
         brands: "品牌管理",
         brandsHelp: "品牌数据来自后端 API，支持生成编码、Logo 缩略图和 CRUD 操作。",
         applicationsHelp: "当前接口类型: {{type}}",
+        totalCategories: "总类目 {{count}}",
+        totalMaterials: "总物料 {{count}}",
+        categoryTotalColumn: "类目总数",
+        materialTotalColumn: "物料总数",
       },
       action: {
         addMaterial: "新增物料",
@@ -1363,10 +1367,14 @@ const resources = {
         categoryLibraries: "Category Libraries",
         categoryLibrariesHelp: "Backend-powered category libraries with create, edit, and empty-library delete actions.",
         categories: "Categories",
-        categoriesHelp: "Backend-powered categories with create, edit, delete, and category-library assignment.",
+        categoriesHelp: "",
         brands: "Brands",
         brandsHelp: "Backend-powered brand records with generated codes, logo thumbnails, and CRUD actions.",
         applicationsHelp: "Current API type: {{type}}",
+        totalCategories: "Total {{count}} categories",
+        totalMaterials: "Total {{count}} materials",
+        categoryTotalColumn: "Category Total",
+        materialTotalColumn: "Material Total",
       },
       action: {
         addMaterial: "New Material",
@@ -1684,18 +1692,11 @@ const resources = {
   },
 };
 
-// Persist language preference to localStorage
-const savedLang = localStorage.getItem("language");
 void i18n.use(initReactI18next).init({
   resources,
-  lng: savedLang ?? "zh-CN",
+  lng: "zh-CN",
   fallbackLng: "zh-CN",
   interpolation: { escapeValue: false },
-});
-
-// Sync language changes back to localStorage
-i18n.on("languageChanged", (lng) => {
-  localStorage.setItem("language", lng);
 });
 
 export default i18n;

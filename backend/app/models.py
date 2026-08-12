@@ -746,13 +746,19 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(160), index=True)
-    hcm_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     unit: Mapped[str] = mapped_column(String(160), default="", index=True)
     department: Mapped[str] = mapped_column(String(160), default="", index=True)
     team: Mapped[str] = mapped_column(String(160), default="", index=True)
     email: Mapped[str] = mapped_column(String(240), default="")
     account_ownership: Mapped[str] = mapped_column(String(40), default="local", index=True)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    # Authentication fields. password_hash stores a bcrypt hash; plain text
+    # passwords are never persisted. last_login_at is updated on every
+    # successful login. failed_login_count is incremented on bad password
+    # attempts and reset to 0 on a successful login.
+    password_hash: Mapped[str] = mapped_column(String(256), default="")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
     password_reset_token: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

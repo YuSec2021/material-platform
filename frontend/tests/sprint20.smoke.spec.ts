@@ -64,15 +64,13 @@ async function mockMaterialReferences(page: Page) {
   });
 }
 
-test("login, navigation, i18n switching, and responsive shell", async () => {
+test("login, navigation, and responsive shell", async () => {
   const { page, context } = await pageForTest();
   await login(page);
   await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
 
-  await page.getByRole("button", { name: /Language|语言/ }).click();
-  expect(await page.locator("html").getAttribute("lang")).toEqual("en-US");
   await page.goto("/materials");
-  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /物料管理|Materials/ })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: /Open navigation|打开导航/ })).toBeVisible();

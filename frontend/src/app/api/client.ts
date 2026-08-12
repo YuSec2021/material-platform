@@ -82,6 +82,7 @@ export type Category = {
   parent_category_id: number | null;
   description: string;
   enabled: boolean;
+  descendant_count?: number;
 };
 
 export type CategoryListParams = {
@@ -99,6 +100,7 @@ export type CategoryLibrary = {
   description: string;
   enabled: boolean;
   qdrant_enabled: boolean;
+  category_count?: number;
 };
 
 export type BrandLogo = {

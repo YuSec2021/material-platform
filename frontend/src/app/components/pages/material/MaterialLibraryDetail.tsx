@@ -1137,7 +1137,12 @@ export function MaterialLibraryDetail({
             <ArrowLeft />
           </Button>
           <div>
-            <h1 className="text-2xl text-foreground">{library.name}</h1>
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-2xl text-foreground">{library.name}</h1>
+              <span className="text-sm text-muted-foreground">
+                {t("page.totalMaterials", { count: library.material_count ?? 0 })}
+              </span>
+            </div>
             <p className="mt-1 font-mono text-sm text-muted-foreground">{library.code}</p>
           </div>
         </div>

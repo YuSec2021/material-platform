@@ -2,12 +2,10 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   BrainCircuit,
-  Bug,
   ChevronDown,
   Database,
   FileText,
   Info,
-  Languages,
   LayoutDashboard,
   Menu,
   Moon,
@@ -58,8 +56,6 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
       children: [
         { key: "categoryLibrary", title: t("nav.categoryLibrary"), path: "/standard/category-library" },
         { key: "category", title: t("nav.category"), path: "/standard/category" },
-        { key: "productName", title: t("nav.productName"), path: "/standard/product-name" },
-        { key: "attribute", title: t("nav.attribute"), path: "/standard/attribute" },
         { key: "brand", title: t("nav.brand"), path: "/standard/brand" },
         { key: "measurementUnit", title: t("nav.measurementUnit"), path: "/standard/measurement-unit" },
       ],
@@ -127,15 +123,6 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
     });
   }
 
-  if (import.meta.env.DEV) {
-    items.push({
-      key: "debug",
-      title: t("nav.debug"),
-      icon: <Bug className="h-5 w-5" />,
-      children: [{ key: "trace", title: t("nav.trace"), path: "/debug/trace" }],
-    });
-  }
-
   return items;
 }
 
@@ -150,23 +137,6 @@ function ThemeSwitcher({ isDark, onToggle }: { isDark: boolean; onToggle: () => 
       onClick={onToggle}
     >
       {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-    </Button>
-  );
-}
-
-function LanguageSwitcher() {
-  const { t, i18n } = useTranslation();
-  const nextLanguage = i18n.language === "en-US" ? "zh-CN" : "en-US";
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      aria-label={t("app.language")}
-      onClick={() => void i18n.changeLanguage(nextLanguage)}
-    >
-      <Languages className="h-4 w-4" />
-      {i18n.language === "en-US" ? t("app.chinese") : t("app.english")}
     </Button>
   );
 }
@@ -233,7 +203,7 @@ function NavigationTree({
 export function MainLayout() {
   const navigate = useNavigate();
   const auth = useAuth();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [expandedMenus, setExpandedMenus] = useState<string[]>([
     "standard",
     "material",
@@ -241,7 +211,6 @@ export function MainLayout() {
     "ai",
     "rules",
     "system",
-    "debug",
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -319,7 +288,6 @@ export function MainLayout() {
               <h2 className="truncate text-base font-semibold text-foreground md:text-lg">{t("app.system")}</h2>
             </div>
             <div className="flex shrink-0 items-center gap-2 md:gap-3">
-              <LanguageSwitcher />
               <ThemeSwitcher isDark={isDark} onToggle={toggleTheme} />
               <div className="hidden items-center gap-2 rounded-lg bg-muted px-3 py-2 sm:flex">
                 <User className="h-5 w-5 text-muted-foreground" />
@@ -377,10 +345,10 @@ export function MainLayout() {
                 {versionQuery.data?.released_at && (
                   <div>
                     {t("app.aboutReleasedAt")}{" "}
-                    {new Intl.DateTimeFormat(
-                      i18n.language === "en-US" ? "en-US" : "zh-CN",
-                      { dateStyle: "medium", timeStyle: "short" },
-                    ).format(new Date(versionQuery.data.released_at))}
+                    {new Intl.DateTimeFormat("zh-CN", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    }).format(new Date(versionQuery.data.released_at))}
                   </div>
                 )}
                 <div>{t("app.aboutDescription")}</div>

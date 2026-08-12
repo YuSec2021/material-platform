@@ -135,6 +135,12 @@ export function CategoryLibraryList() {
     { header: t("field.code"), accessor: "code" as keyof CategoryLibrary },
     { header: t("field.description"), accessor: "description" as keyof CategoryLibrary },
     {
+      header: t("page.categoryTotalColumn"),
+      accessor: (row: CategoryLibrary) => (
+        <span className="text-sm text-foreground">{row.category_count ?? 0}</span>
+      ),
+    },
+    {
       header: t("field.status"),
       accessor: (row: CategoryLibrary) => (
         <Switch

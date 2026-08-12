@@ -225,7 +225,7 @@ test("edit rule validates change reason, previews, activates, and creates recode
   await context.close();
 });
 
-test("regular users are read-only and edit form keeps localized state", async () => {
+test("regular users are read-only on material library detail", async () => {
   const { page, context } = await pageForTest(regularUser);
   await page.goto("/material/library");
   await page.getByRole("button", { name: "Sprint 29 Auto Library" }).click();
@@ -233,17 +233,4 @@ test("regular users are read-only and edit form keeps localized state", async ()
   await expect(page.getByText("V1 Sprint 29 V1")).toBeVisible();
   expect(await page.getByRole("button", { name: "编辑规则" }).count()).toEqual(0);
   await context.close();
-
-  const admin = await pageForTest(superAdminUser);
-  await admin.page.goto("/material/library");
-  await admin.page.getByRole("button", { name: "Sprint 29 Auto Library" }).click();
-  await admin.page.getByRole("tab", { name: "编码规则" }).click();
-  await admin.page.getByRole("button", { name: "编辑规则" }).click();
-  await admin.page.getByRole("textbox", { name: "固定文本" }).fill("LOC29");
-  await admin.page.getByLabel("变更原因").fill("Locale preservation");
-  await admin.page.locator("button").filter({ hasText: "English" }).first().evaluate((element) => (element as HTMLElement).click());
-  await expect(admin.page.getByRole("heading", { name: "Code Rule Edit" })).toBeVisible();
-  expect(await control(admin.page.getByLabel("Change Reason")).inputValue()).toEqual("Locale preservation");
-  expect(await control(admin.page.getByRole("textbox", { name: "Fixed Text" })).inputValue()).toEqual("LOC29");
-  await admin.context.close();
 });

@@ -290,14 +290,7 @@ test("capability mappings persist selected primary and fallback models after rel
   await context.close();
 });
 
-test("AI management routes are localized and blocked for non-super_admin users", async () => {
-  const english = await pageForTest(superAdminUser, "en-US");
-  await mockAiApis(english.page);
-  await english.page.goto("/ai/providers");
-  await expect(english.page.getByRole("heading", { name: "Model Provider Management" })).toBeVisible();
-  await expect(english.page.getByText("AI Management")).toBeVisible();
-  await english.context.close();
-
+test("AI management routes are blocked for non-super_admin users", async () => {
   const regular = await pageForTest(regularUser);
   await mockAiApis(regular.page);
   await regular.page.goto("/");

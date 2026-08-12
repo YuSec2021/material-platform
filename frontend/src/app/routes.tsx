@@ -7,7 +7,6 @@ import { LoginPage } from "./components/pages/LoginPage";
 import { ApiClientHealth } from "./components/pages/dev/ApiClientHealth";
 import { ComponentSmoke } from "./components/pages/dev/ComponentSmoke";
 import { FrontendHealth } from "./components/pages/dev/FrontendHealth";
-import { TraceDebugPage } from "./components/pages/dev/TraceDebugPage";
 import { AiCapabilityMappingsPage, AiProvidersPage, AiTokenUsagePage } from "./components/pages/ai/AIManagementPages";
 import { AiModelGatewayPage } from "./components/pages/ai/ModelGatewayPage";
 import { RuleCategoryListPage, RuleFormPage, RuleListPage } from "./components/pages/rules/RuleEnginePages";
@@ -139,7 +138,6 @@ export const router = createBrowserRouter([
           { path: "dev/frontend-health", Component: FrontendHealth },
           { path: "dev/api-client-health", Component: ApiClientHealth },
           { path: "dev/component-smoke", Component: ComponentSmoke },
-          { path: "debug/trace", Component: TraceDebugPage },
         ],
       },
     ],

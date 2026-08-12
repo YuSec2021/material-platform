@@ -83,12 +83,12 @@ const emptyForm: RuleFormState = {
   enabled: true,
 };
 
-function categoryName(category: RuleCategory, language: string) {
-  return language === "en-US" ? category.display_name_en : category.display_name_zh;
+function categoryName(category: RuleCategory) {
+  return category.display_name_zh;
 }
 
-function categoryDescription(category: RuleCategory, language: string) {
-  return language === "en-US" ? category.description_en : category.description_zh;
+function categoryDescription(category: RuleCategory) {
+  return category.description_zh;
 }
 
 function CategoryIcon({ slug }: { slug: string }) {
@@ -197,7 +197,7 @@ function RuleStatus({ enabled }: { enabled: boolean }) {
 }
 
 export function RuleCategoryListPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const categoriesQuery = useQuery({
     queryKey: ["rule-categories"],
@@ -234,14 +234,14 @@ export function RuleCategoryListPage() {
                     <CategoryIcon slug={category.slug} />
                   </span>
                   <div>
-                    <h2 className="font-semibold text-foreground">{categoryName(category, i18n.language)}</h2>
+                    <h2 className="font-semibold text-foreground">{categoryName(category)}</h2>
                     <p className="font-mono text-xs text-muted-foreground">{category.slug}</p>
                   </div>
                 </div>
                 <Badge variant="secondary">{category.rule_count}</Badge>
               </div>
               <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">
-                {categoryDescription(category, i18n.language)}
+                {categoryDescription(category)}
               </p>
             </Button>
           ))}
@@ -252,7 +252,7 @@ export function RuleCategoryListPage() {
 }
 
 export function RuleListPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const auth = useAuth();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -353,7 +353,7 @@ export function RuleListPage() {
               <SelectItem value="all">{t("rules.allCategories")}</SelectItem>
               {(categoriesQuery.data ?? []).map((category) => (
                 <SelectItem key={category.id} value={String(category.id)}>
-                  {categoryName(category, i18n.language)}
+                  {categoryName(category)}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -430,7 +430,7 @@ export function RuleListPage() {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <CategoryIcon slug={rule.category_slug} />
-                              <span>{categoryName(category, i18n.language)}</span>
+                              <span>{categoryName(category)}</span>
                             </div>
                           </TableCell>
                           <TableCell>
@@ -536,7 +536,7 @@ export function RuleListPage() {
 }
 
 export function RuleFormPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id } = useParams();
@@ -647,7 +647,7 @@ export function RuleFormPage() {
                       </SelectItem>
                       {(categoriesQuery.data ?? []).map((category) => (
                         <SelectItem key={category.id} value={String(category.id)}>
-                          {categoryName(category, i18n.language)}
+                          {categoryName(category)}
                         </SelectItem>
                       ))}
                     </SelectGroup>

@@ -62,7 +62,7 @@ test("standard and material create dialogs expose keyboard-accessible shadcn con
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("AI, rules, and trace pages retain their accessible empty and filter states", async ({ page }) => {
+test("AI and rules pages retain their accessible empty and filter states", async ({ page }) => {
   await page.goto("/ai/models");
   await expect(page.getByRole("heading", { name: /模型网关|Model Gateway/ })).toBeVisible();
   await page.getByRole("button", { name: /新增模型|Add Model/ }).click();
@@ -73,12 +73,4 @@ test("AI, rules, and trace pages retain their accessible empty and filter states
   await page.goto("/rules/categories");
   await expect(page.getByRole("heading", { name: /规则分类|Rule Categories/ })).toBeVisible();
   await expect(page.getByText(/暂无规则分类|No rule categories/)).toBeVisible();
-
-  await page.goto("/debug/trace");
-  await expect(page.getByRole("heading", { name: /AI 链路追踪|AI Trace/ })).toBeVisible();
-  await page.getByLabel(/开始日期|Start date/).fill("2099-01-01");
-  await page.getByLabel(/结束日期|End date/).fill("2099-01-01");
-  await page.getByRole("button", { name: /应用|Apply/ }).click();
-  await expect(page.getByText("0 traces")).toBeVisible();
-  await expect(page.getByText(/暂无 trace span|No trace/)).toBeVisible();
 });

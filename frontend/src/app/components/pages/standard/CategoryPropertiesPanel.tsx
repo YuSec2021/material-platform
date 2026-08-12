@@ -91,10 +91,7 @@ function formToPayload(form: AttributeFormState, sortOrder?: number): CategoryAt
   };
 }
 
-function attributeLabel(attribute: CategoryAttribute, language: string) {
-  if (language === "en-US") {
-    return attribute.display_name_en || attribute.name;
-  }
+function attributeLabel(attribute: CategoryAttribute) {
   return attribute.display_name_zh || attribute.name;
 }
 
@@ -323,7 +320,7 @@ export function CategoryPropertiesPanel({
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<CategoryAttribute | null>(null);
   const [form, setForm] = useState<AttributeFormState>(emptyAttributeForm);
@@ -515,14 +512,12 @@ export function CategoryPropertiesPanel({
           title={t("categoryProperties.inherited")}
           emptyLabel={t("categoryProperties.emptyInherited")}
           attributes={inheritedAttributes}
-          language={i18n.language}
           isInherited
         />
         <AttributeSection
           title={t("categoryProperties.own")}
           emptyLabel={t("categoryProperties.emptyOwn")}
           attributes={ownAttributes}
-          language={i18n.language}
           isInherited={false}
           canEdit={canManageAttributes}
           isReordering={reorderMutation.isPending}
@@ -735,7 +730,7 @@ export function CategoryPropertiesPanel({
             <AlertDialogTitle>{t("action.delete")}</AlertDialogTitle>
             <AlertDialogDescription>
               {attributeToDelete
-                ? t("categoryProperties.deleteConfirm", { name: attributeLabel(attributeToDelete, i18n.language) })
+                ? t("categoryProperties.deleteConfirm", { name: attributeLabel(attributeToDelete) })
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -769,7 +764,6 @@ function AttributeSection({
   title,
   emptyLabel,
   attributes,
-  language,
   isInherited,
   canEdit = false,
   isReordering = false,
@@ -782,7 +776,6 @@ function AttributeSection({
   title: string;
   emptyLabel: string;
   attributes: CategoryAttribute[];
-  language: string;
   isInherited: boolean;
   canEdit?: boolean;
   isReordering?: boolean;
@@ -823,7 +816,7 @@ function AttributeSection({
                       <GripVertical className="h-4 w-4 cursor-grab text-muted-foreground" aria-label={t("categoryProperties.dragHandle")} />
                     )}
                     {isInherited && <Lock className="h-4 w-4 text-muted-foreground" aria-label={t("categoryProperties.inherited")} />}
-                    <span className="font-medium">{attributeLabel(attribute, language)}</span>
+                    <span className="font-medium">{attributeLabel(attribute)}</span>
                     {(attribute.required || !attribute.allow_empty) && <span className="text-red-600">*</span>}
                     <Badge variant="outline">
                       {t(`categoryProperties.types.${attribute.attr_type}`)}
