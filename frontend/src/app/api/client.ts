@@ -1331,10 +1331,10 @@ export const apiClient = {
     return request<T>(path, { method: "POST", body });
   },
   auth: {
-    login(username: string) {
+    login(username: string, password: string) {
       return request<AuthUser>("/auth/login", {
         method: "POST",
-        body: { username },
+        body: { username, password },
       });
     },
     me() {

@@ -29,7 +29,7 @@ export function LoginPage() {
     setError("");
     setIsSubmitting(true);
     try {
-      await auth.login(username);
+      await auth.login(username, password);
       navigate(from, { replace: true });
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : t("login.failed"));
