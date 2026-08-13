@@ -293,7 +293,9 @@ test("category properties support spreadsheet preview and confirmed bulk import"
   await page.getByRole("button", { name: /预览导入|Preview Import/ }).click();
 
   await expect(page.getByTestId("category-attribute-import-preview")).toContainText("paper_size");
-  await expect(page.getByTestId("category-attribute-import-preview")).toContainText(/前 500 行|first 500 rows/);
+  await expect(page.getByTestId("import-filter-all")).toBeVisible();
+  await expect(page.getByTestId("import-filter-errors")).toBeVisible();
+  await expect(page.getByTestId("import-filter-valid")).toBeVisible();
   await page.getByRole("button", { name: /确认导入|Confirm Import/ }).click();
   await expect.poll(() => confirmPayloads.length).toBe(2);
   expect(confirmPayloads.map((payload) => (payload.items as unknown[]).length)).toEqual([1000, 1]);
