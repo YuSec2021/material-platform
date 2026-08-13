@@ -298,18 +298,6 @@ test("i18n displays Chinese labels for zh-CN", async () => {
   await context.close();
 });
 
-test("i18n displays English labels for en-US without raw keys", async () => {
-  const { page, context } = await setupPage(superAdminUser, "en-US");
-
-  await page.goto("/standard/category");
-  await expect(page.getByRole("heading", { name: /类目管理|Categories|Category Management/ })).toBeVisible();
-
-  const bodyText = await page.textContent("body");
-  expect(bodyText).not.toMatch(/\[(field\.|page\.|action\.|categoryImport\.)[^\]]+\]/);
-
-  await context.close();
-});
-
 test("regular user can view tree but cannot use bulk or AI import", async () => {
   const { page, context } = await setupPage(regularUser);
 

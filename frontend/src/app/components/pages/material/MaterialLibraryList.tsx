@@ -715,6 +715,10 @@ export function MaterialLibraryList() {
               </button>
               <p className="mb-3 font-mono text-sm text-muted-foreground">{item.code}</p>
               <p className="min-h-10 text-sm text-muted-foreground">{item.description || t("codeRule.noDescription")}</p>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary">
+                <Package className="h-3.5 w-3.5" />
+                <span>{t("page.totalMaterials", { count: item.material_count ?? 0 })}</span>
+              </div>
               <div className="mt-4 space-y-3 border-t border-border pt-3">
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">{t("field.materialLibraryAdmins")}</p>

@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Edit, Plus, Trash2 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   apiClient,
@@ -43,91 +42,46 @@ const emptyForm: MeasurementUnitPayload = {
 };
 
 const labels = {
-  "zh-CN": {
-    title: "计量单位管理",
-    help: "统一维护单位名称、符号和精度，正在使用的单位不能删除。",
-    add: "新增计量单位",
-    edit: "编辑计量单位",
-    search: "搜索单位名称、符号或描述...",
-    empty: "暂无计量单位",
-    name: "单位名称",
-    symbol: "单位符号",
-    type: "单位类型",
-    decimalPlaces: "小数位数",
-    usage: "使用数量",
-    status: "状态",
-    description: "描述",
-    enabled: "启用",
-    disabled: "停用",
-    system: "系统预置",
-    actions: "操作",
-    save: "保存",
-    saving: "保存中...",
-    cancel: "取消",
-    delete: "删除",
-    deleteTitle: "删除计量单位",
-    deleteConfirm: (unit: MeasurementUnit) =>
-      unit.is_system
-        ? `“${unit.name}”是系统预置单位，只能停用。`
-        : unit.usage_count > 0
-          ? `“${unit.name}”正在被 ${unit.usage_count} 条业务数据使用，不能删除。`
-          : `确定删除计量单位“${unit.name}”吗？此操作无法撤销。`,
-    saveSuccess: "计量单位已保存",
-    saveFailed: "计量单位保存失败",
-    deleteSuccess: "计量单位已删除",
-    deleteFailed: "计量单位删除失败",
-    unitTypes: {
-      quantity: "数量",
-      mass: "质量",
-      length: "长度",
-      area: "面积",
-      volume: "体积",
-      time: "时间",
-      general: "通用",
-    },
-  },
-  "en-US": {
-    title: "Measurement Units",
-    help: "Manage canonical names, symbols, and precision. Units in use cannot be deleted.",
-    add: "New Unit",
-    edit: "Edit Unit",
-    search: "Search name, symbol, or description...",
-    empty: "No measurement units",
-    name: "Name",
-    symbol: "Symbol",
-    type: "Type",
-    decimalPlaces: "Decimal Places",
-    usage: "Usage",
-    status: "Status",
-    description: "Description",
-    enabled: "Enabled",
-    disabled: "Disabled",
-    system: "System",
-    actions: "Actions",
-    save: "Save",
-    saving: "Saving...",
-    cancel: "Cancel",
-    delete: "Delete",
-    deleteTitle: "Delete Measurement Unit",
-    deleteConfirm: (unit: MeasurementUnit) =>
-      unit.is_system
-        ? `${unit.name} is a system unit and can only be disabled.`
-        : unit.usage_count > 0
-          ? `${unit.name} is used by ${unit.usage_count} records and cannot be deleted.`
-          : `Delete ${unit.name}? This action cannot be undone.`,
-    saveSuccess: "Measurement unit saved",
-    saveFailed: "Failed to save measurement unit",
-    deleteSuccess: "Measurement unit deleted",
-    deleteFailed: "Failed to delete measurement unit",
-    unitTypes: {
-      quantity: "Quantity",
-      mass: "Mass",
-      length: "Length",
-      area: "Area",
-      volume: "Volume",
-      time: "Time",
-      general: "General",
-    },
+  title: "计量单位管理",
+  help: "统一维护单位名称、符号和精度，正在使用的单位不能删除。",
+  add: "新增计量单位",
+  edit: "编辑计量单位",
+  search: "搜索单位名称、符号或描述...",
+  empty: "暂无计量单位",
+  name: "单位名称",
+  symbol: "单位符号",
+  type: "单位类型",
+  decimalPlaces: "小数位数",
+  usage: "使用数量",
+  status: "状态",
+  description: "描述",
+  enabled: "启用",
+  disabled: "停用",
+  system: "系统预置",
+  actions: "操作",
+  save: "保存",
+  saving: "保存中...",
+  cancel: "取消",
+  delete: "删除",
+  deleteTitle: "删除计量单位",
+  deleteConfirm: (unit: MeasurementUnit) =>
+    unit.is_system
+      ? `“${unit.name}”是系统预置单位，只能停用。`
+      : unit.usage_count > 0
+        ? `“${unit.name}”正在被 ${unit.usage_count} 条业务数据使用，不能删除。`
+        : `确定删除计量单位“${unit.name}”吗？此操作无法撤销。`,
+  saveSuccess: "计量单位已保存",
+  saveFailed: "计量单位保存失败",
+  deleteSuccess: "计量单位已删除",
+  deleteFailed: "计量单位删除失败",
+  unitTypes: {
+    quantity: "数量",
+    mass: "质量",
+    length: "长度",
+    area: "面积",
+    volume: "体积",
+    time: "时间",
+    general: "通用",
   },
 };
 
@@ -144,8 +98,7 @@ function unitToForm(unit: MeasurementUnit): MeasurementUnitPayload {
 }
 
 export function MeasurementUnitList() {
-  const { i18n } = useTranslation();
-  const text = i18n.language === "en-US" ? labels["en-US"] : labels["zh-CN"];
+  const text = labels;
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [form, setForm] = useState<MeasurementUnitPayload>(emptyForm);
@@ -350,8 +303,8 @@ export function MeasurementUnitList() {
               onValueChange={(value) => setForm((current) => ({ ...current, unit_type: value || current.unit_type }))}
               options={UNIT_TYPES.map((type) => ({ value: type, label: text.unitTypes[type] }))}
               placeholder={text.type}
-              searchPlaceholder={i18n.language === "en-US" ? "Search unit types..." : "搜索单位类型..."}
-              emptyText={i18n.language === "en-US" ? "No matching unit types" : "暂无匹配单位类型"}
+              searchPlaceholder="搜索单位类型..."
+              emptyText="暂无匹配单位类型"
             />
           </label>
           <label className="space-y-1 text-sm text-foreground md:col-span-2">

@@ -12,7 +12,7 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 type AuthContextValue = {
   status: AuthStatus;
   user: AuthUser | null;
-  login: (username: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   refreshCurrentUser: () => Promise<void>;
 };
@@ -46,13 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshCurrentUser();
   }, [refreshCurrentUser]);
 
-  const login = useCallback(async (username: string) => {
+  const login = useCallback(async (username: string, password: string) => {
     const normalizedUsername = username.trim();
     const userRole = normalizedUsername === "super_admin" ? "super_admin" : "user";
     writeAuthSession({ username: normalizedUsername, role: userRole });
 
     try {
-      const loggedInUser = await apiClient.auth.login(normalizedUsername);
+      const loggedInUser = await apiClient.auth.login(normalizedUsername, password);
       setUser(loggedInUser);
       setStatus("authenticated");
     } catch (error) {

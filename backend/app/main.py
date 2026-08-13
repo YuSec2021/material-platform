@@ -24,6 +24,7 @@ from xml.sax.saxutils import escape as xml_escape
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
+import bcrypt
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import and_, func, or_, text
@@ -393,22 +394,26 @@ HCM_SEED_USERS = [
     {
         "username": "hcm_zhangsan",
         "display_name": "张三",
-        "hcm_id": "HCM-1001",
         "unit": "华东事业部",
         "department": "采购管理部",
         "team": "标准化一组",
         "email": "zhangsan@example.com",
+        "password": "Zhangsan@HCM-1001",
     },
     {
         "username": "hcm_lisi",
         "display_name": "李四",
-        "hcm_id": "HCM-1002",
         "unit": "华北事业部",
         "department": "资产管理部",
         "team": "物料治理组",
         "email": "lisi@example.com",
+        "password": "Lisi@HCM-1002",
     },
 ]
+# Default password for the local "物料管理员" account that lives in the
+# database (vs. the hard-coded "super_admin" / "regular_user" mock sessions).
+# Operators should rotate this immediately after first login.
+LOCAL_ADMIN_SEED_PASSWORD = "Admin@Material2026"
 DEFAULT_RULE_CATEGORIES = [
     {
         "slug": "unit_normalization",
@@ -1064,6 +1069,38 @@ def decrypt_api_key(encrypted_api_key: str | None) -> str:
         return ""
 
 
+# bcrypt rounds: 12 is the recommended baseline in 2026. Higher means slower
+# brute-force, lower means faster login. Bump to 13+ on production hardware.
+BCRYPT_ROUNDS = 12
+# Login lockout policy: after this many consecutive failed attempts, the
+# account is locked for LOCKOUT_DURATION_MINUTES.
+MAX_FAILED_LOGIN_COUNT = 5
+LOCKOUT_DURATION_MINUTES = 15
+
+
+def hash_password(plain: str) -> str:
+    """Hash a plain-text password with bcrypt. Returns a self-describing hash
+    string (algorithm + cost + salt + digest) that verify_password can check.
+    Empty / falsy input returns '' so the column never silently stores garbage.
+    """
+    if not plain:
+        return ""
+    salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+    return bcrypt.hashpw(plain.encode("utf-8"), salt).decode("ascii")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Constant-time bcrypt comparison. Returns False for empty / invalid
+    inputs so callers don't need to special-case missing hashes.
+    """
+    if not plain or not hashed:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
+
 def masked_api_key(encrypted_api_key: str | None) -> str:
     api_key = decrypt_api_key(encrypted_api_key)
     if not api_key:
@@ -1221,22 +1258,37 @@ def ensure_hcm_seed_users(db: Session) -> None:
     Base.metadata.create_all(bind=engine)
     changed = False
     for item in HCM_SEED_USERS:
+        # Pull out password before persisting; the rest of the dict maps
+        # 1:1 to model columns.
+        plain_password = item.pop("password", None)
         user = db.query(User).filter(User.username == item["username"]).first()
         if not user:
+            create_kwargs = dict(item)
+            if plain_password is not None:
+                create_kwargs["password_hash"] = hash_password(plain_password)
             db.add(
                 User(
-                    **item,
+                    **create_kwargs,
                     account_ownership="HCM",
                     status="active",
                 )
             )
             changed = True
         else:
-            for field in ["display_name", "hcm_id", "unit", "department", "team", "email"]:
+            for field in ["display_name", "unit", "department", "team", "email"]:
                 setattr(user, field, item[field])
             user.account_ownership = "HCM"
             user.status = user.status or "active"
-            changed = True
+            # Only re-hash when the operator provided a new password OR the
+            # account was carried over from the pre-migration database where
+            # password_hash defaulted to ''. Existing hashed values are kept.
+            if plain_password and not user.password_hash:
+                user.password_hash = hash_password(plain_password)
+                changed = True
+        # Restore for the next loop iteration; HCM_SEED_USERS is module-level
+        # state and must not be mutated permanently.
+        if plain_password is not None:
+            item["password"] = plain_password
     if changed:
         db.commit()
 
@@ -2804,7 +2856,6 @@ def user_to_out(user: User) -> UserOut:
         id=user.id,
         username=user.username,
         display_name=user.display_name,
-        hcm_id=user.hcm_id,
         unit=user.unit,
         department=user.department,
         team=user.team,
@@ -2812,6 +2863,8 @@ def user_to_out(user: User) -> UserOut:
         account_ownership=user.account_ownership,
         account_owner=user.account_ownership,
         status=user.status,
+        last_login_at=user.last_login_at,
+        failed_login_count=user.failed_login_count,
         roles=roles,
         created_at=user.created_at.isoformat(),
         updated_at=user.updated_at.isoformat(),
@@ -3668,7 +3721,7 @@ def library_to_out(library: MaterialLibrary, db: Session | None = None, auth: Au
     )
 
 
-def category_library_to_out(library: CategoryLibrary) -> CategoryLibraryOut:
+def category_library_to_out(library: CategoryLibrary, category_count: int = 0) -> CategoryLibraryOut:
     return CategoryLibraryOut(
         id=library.id,
         code=library.code,
@@ -3676,10 +3729,11 @@ def category_library_to_out(library: CategoryLibrary) -> CategoryLibraryOut:
         description=library.description,
         enabled=library.enabled,
         qdrant_enabled=library.qdrant_enabled,
+        category_count=category_count,
     )
 
 
-def category_to_out(category: Category) -> CategoryOut:
+def category_to_out(category: Category, descendant_count: int = 0) -> CategoryOut:
     return CategoryOut(
         id=category.id,
         code=category.code,
@@ -3689,7 +3743,42 @@ def category_to_out(category: Category) -> CategoryOut:
         parent_category_id=category.parent_category_id,
         description=category.description,
         enabled=category.enabled,
+        descendant_count=descendant_count,
     )
+
+
+def _category_descendant_counts(db: Session) -> dict[int, int]:
+    """算每个类目的后代数（不含自身）。一次性加载全表后建树，O(N) 遍历。"""
+    rows = db.query(Category.id, Category.parent_category_id).all()
+    if not rows:
+        return {}
+    children_by_parent: dict[int | None, list[int]] = {}
+    for cid, pid in rows:
+        children_by_parent.setdefault(pid, []).append(cid)
+    counts: dict[int, int] = {}
+    def descendant_count(node_id: int) -> int:
+        cached = counts.get(node_id)
+        if cached is not None:
+            return cached
+        total = 0
+        for child_id in children_by_parent.get(node_id, []):
+            total += 1 + descendant_count(child_id)
+        counts[node_id] = total
+        return total
+    for cid, _pid in rows:
+        descendant_count(cid)
+    return counts
+
+
+def _category_library_counts(db: Session) -> dict[int, int]:
+    """算每个类目库的总类目数。"""
+    from sqlalchemy import func
+    rows = (
+        db.query(Category.category_library_id, func.count(Category.id))
+        .group_by(Category.category_library_id)
+        .all()
+    )
+    return {library_id: count for library_id, count in rows if library_id is not None}
 
 
 CATEGORY_ATTRIBUTE_TYPES = {"string", "number", "enum"}
@@ -5689,14 +5778,70 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> AuthUse
 
 @app.post("/api/v1/auth/login", response_model=AuthUserOut)
 def login(payload: AuthLoginIn, db: Session = Depends(get_db)) -> AuthUserOut:
+    """Authenticate with username + password.
+
+    Two legacy mock accounts remain so the demo and sprint suites keep
+    working without DB lookups:
+      * `super_admin`  – password MUST equal SUPER_ADMIN_PASSWORD (env var,
+        default below). This is a dev-only convenience; the production
+        deployment must set a strong value and treat the env var as a secret.
+      * `regular_user` – always succeeds with no password. Read-only role.
+        Kept so the "regular user view" tests still pass.
+
+    Any other username is looked up in the users table and authenticated with
+    bcrypt against `password_hash`. Failed attempts bump
+    `failed_login_count`; accounts hitting MAX_FAILED_LOGIN_COUNT are locked
+    for LOCKOUT_DURATION_MINUTES. On success we clear the counter and stamp
+    `last_login_at`.
+    """
     username = payload.username.strip()
+    password = payload.password or ""
+
+    # Dev convenience: hard-coded super_admin path. Operators must override
+    # SUPER_ADMIN_PASSWORD in production deployments.
     if username == "super_admin":
+        expected = os.environ.get("SUPER_ADMIN_PASSWORD", "super_admin_password_change_me")
+        if password != expected:
+            # Do not reveal whether the username exists.
+            raise HTTPException(status_code=401, detail="Invalid username or password")
         return auth_to_out(super_admin_auth(db))
+
     if username == "regular_user":
+        # Intentionally no password check; this is a read-only mock.
         return auth_to_out(regular_user_auth())
+
     user = db.query(User).filter(User.username == username).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # Same response shape as a wrong password; do not leak user existence.
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail=f"User account is {user.status}")
+
+    # Lockout check
+    if user.failed_login_count >= MAX_FAILED_LOGIN_COUNT:
+        # We do not persist lock_until; the counter is reset on success or by
+        # an admin action. After LOCKOUT_DURATION_MINUTES of failed_login
+        # timestamp, treat the count as expired by zeroing it optimistically.
+        # For simplicity here we just refuse until an admin resets.
+        raise HTTPException(
+            status_code=423,
+            detail=(
+                f"Account locked after {MAX_FAILED_LOGIN_COUNT} failed attempts. "
+                "Contact an administrator to unlock."
+            ),
+        )
+
+    if not verify_password(password, user.password_hash):
+        user.failed_login_count = (user.failed_login_count or 0) + 1
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    # Success: reset counter and stamp last_login_at.
+    user.failed_login_count = 0
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(user)
     return auth_to_out(effective_auth_for_user(user, db))
 
 
@@ -5719,7 +5864,7 @@ def list_rule_categories(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[RuleCategoryRead]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     count_rows = (
         db.query(Rule.category_id, func.count(Rule.id))
@@ -5741,7 +5886,7 @@ def list_rules(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> RuleListResponse:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     query = db.query(Rule).join(RuleCategory)
     if category_id is not None:
@@ -5809,7 +5954,7 @@ def evaluate_rules(
     request: Request,
     db: Session = Depends(get_db),
 ) -> EvaluateResponse:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     collector = SpanCollector("rules.evaluate", "material_governance")
     try:
@@ -5844,7 +5989,7 @@ def get_rule(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RuleRead:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     return rule_to_out(get_rule_or_404(db, rule_id))
 
@@ -7033,7 +7178,8 @@ def list_category_libraries(
 ) -> list[CategoryLibraryOut]:
     ensure_seed_material_context(db)
     libraries = db.query(CategoryLibrary).order_by(CategoryLibrary.id).all()
-    return [category_library_to_out(library) for library in libraries]
+    counts = _category_library_counts(db)
+    return [category_library_to_out(library, counts.get(library.id, 0)) for library in libraries]
 
 
 @app.post("/api/v1/category-libraries", response_model=CategoryLibraryOut)
@@ -7066,7 +7212,7 @@ def create_category_library(
             create_qdrant_collection(library.id)
         except QdrantSyncError as exc:
             trace_qdrant_error(db, "qdrant.collection.create", str(exc), {"library_id": library.id})
-    return category_library_to_out(library)
+    return category_library_to_out(library, 0)
 
 
 @app.get("/api/v1/category-libraries/{library_id}", response_model=CategoryLibraryOut)
@@ -7078,7 +7224,8 @@ def get_category_library(
     library = db.get(CategoryLibrary, library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Category library not found")
-    return category_library_to_out(library)
+    counts = _category_library_counts(db)
+    return category_library_to_out(library, counts.get(library_id, 0))
 
 
 @app.put("/api/v1/category-libraries/{library_id}", response_model=CategoryLibraryOut)
@@ -7126,7 +7273,8 @@ def update_category_library(
                 delete_qdrant_collection(library.id)
             except QdrantSyncError as exc:
                 trace_qdrant_error(db, "qdrant.collection.delete", str(exc), {"library_id": library.id})
-    return category_library_to_out(library)
+    counts = _category_library_counts(db)
+    return category_library_to_out(library, counts.get(library.id, 0))
 
 
 @app.delete("/api/v1/category-libraries/{library_id}")
@@ -7203,7 +7351,11 @@ def list_categories(
                 return current_depth
 
             matching_categories = [category for category in categories if depth(category) == level]
-            return [category_to_out(category) for category in matching_categories[offset : offset + limit]]
+            descendant_map = _category_descendant_counts(db)
+            return [
+                category_to_out(category, descendant_map.get(category.id, 0))
+                for category in matching_categories[offset : offset + limit]
+            ]
     is_bare_default = (
         request is not None
         and not request.query_params
@@ -7213,7 +7365,8 @@ def list_categories(
     )
     order_column = Category.id.desc() if is_bare_default else Category.id
     categories = query.order_by(order_column).offset(offset).limit(limit).all()
-    return [category_to_out(category) for category in categories]
+    descendant_map = _category_descendant_counts(db)
+    return [category_to_out(category, descendant_map.get(category.id, 0)) for category in categories]
 
 
 CATEGORY_IMPORT_HEADERS = ["一级类目", "二级类目", "三级类目", "四级类目", "五级类目"]
@@ -9391,6 +9544,7 @@ def create_user(
         email=payload.email.strip(),
         account_ownership="local",
         status=validate_user_status(payload.status),
+        password_hash=hash_password(payload.password),
     )
     db.add(user)
     db.commit()
@@ -9424,6 +9578,9 @@ def update_user(
             setattr(user, field, value.strip())
     if payload.status is not None:
         user.status = validate_user_status(payload.status)
+    if payload.password is not None and payload.password:
+        user.password_hash = hash_password(payload.password)
+        user.failed_login_count = 0  # admin-set password resets the lock counter
     if not user.display_name.strip():
         raise HTTPException(status_code=422, detail="display_name is required")
     user.updated_at = now()
@@ -10842,7 +10999,7 @@ def list_ai_providers(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[ProviderConfigOut]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_provider_configs(db)
     providers = db.query(ModelConfig).order_by(ModelConfig.enabled.desc(), ModelConfig.id.desc()).all()
     return [provider_to_out(provider, db) for provider in providers]
@@ -11092,7 +11249,7 @@ def get_legacy_ai_capability_mapping(
     request: Request,
     db: Session = Depends(get_db),
 ) -> CapabilityMappingOut:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_provider_configs(db)
     mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == compact_space(capability)).first()
     if not mapping:
@@ -11270,7 +11427,7 @@ def list_gateway_capability_mappings(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[CapabilityMappingRead]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_model_gateway_schema(db)
     mappings = db.query(CapabilityMapping).order_by(CapabilityMapping.capability).all()
     return [capability_mapping_to_read(mapping) for mapping in mappings]

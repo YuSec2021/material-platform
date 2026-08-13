@@ -141,8 +141,10 @@ test("super_admin can navigate categories and see rule management controls", asy
   const { page, context } = await pageForTest();
   await page.goto("/");
 
-  await expect(page.getByText("规则引擎")).toBeVisible();
-  await page.getByText("规则分类").click();
+  // 规则引擎菜单已隐藏，super_admin 也看不到入口；直接通过 URL 访问页面。
+  expect(await (page.getByText("规则引擎") as any).count()).toEqual(0);
+
+  await page.goto("/rules/categories");
   await expect(page.getByText("单位标准化", { exact: true })).toBeVisible();
   await expect(page.getByText("unit_normalization")).toBeVisible();
 
@@ -154,17 +156,23 @@ test("super_admin can navigate categories and see rule management controls", asy
   await context.close();
 });
 
-test("regular users can view rules but do not get write controls", async () => {
+test("rules routes are blocked for non-super_admin users", async () => {
   const { page, context } = await pageForTest(regularUser);
-  await page.goto("/rules");
+  await page.goto("/");
+  expect(await (page.getByText("规则引擎") as any).count()).toEqual(0);
 
-  await expect(page.getByText("Normalize KG")).toBeVisible();
-  expect(await page.getByRole("link", { name: "新建规则" }).count()).toEqual(0);
-  expect(await page.getByRole("link", { name: "编辑" }).count()).toEqual(0);
-  expect(await page.getByRole("switch").count()).toEqual(0);
+  // 列表页 / 详情页 / 表单页都应被 SuperAdminRoute 弹回首页。
+  await page.goto("/rules");
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
+  expect((page as any).url()).toEqual("http://localhost:24434/");
+
+  await page.goto("/rules/categories");
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
+  expect((page as any).url()).toEqual("http://localhost:24434/");
 
   await page.goto("/rules/new");
-  await expect(page.getByText("欢迎使用 AI 物料中台管理系统")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /仪表盘|Dashboard/ })).toBeVisible();
+  expect((page as any).url()).toEqual("http://localhost:24434/");
 
   await context.close();
 });

@@ -59,7 +59,7 @@ const emptyAttributeForm: AttributeFormState = {
 };
 
 const attributeTypes: CategoryAttributeType[] = ["string", "number", "enum"];
-const importPreviewDisplayLimit = 500;
+type ImportFilter = "all" | "errors" | "valid";
 
 function attributeToForm(attribute: CategoryAttribute): AttributeFormState {
   return {
@@ -91,10 +91,7 @@ function formToPayload(form: AttributeFormState, sortOrder?: number): CategoryAt
   };
 }
 
-function attributeLabel(attribute: CategoryAttribute, language: string) {
-  if (language === "en-US") {
-    return attribute.display_name_en || attribute.name;
-  }
+function attributeLabel(attribute: CategoryAttribute) {
   return attribute.display_name_zh || attribute.name;
 }
 
@@ -131,12 +128,40 @@ function CategoryAttributeImportModal({
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importStrategy, setImportStrategy] = useState<CategoryAttributeImportConflictStrategy>("skip");
   const [importPreview, setImportPreview] = useState<CategoryAttributeImportPreview | null>(null);
+  const [importFilter, setImportFilter] = useState<ImportFilter>("all");
+  const importPreviewItems = useMemo(() => {
+    if (!importPreview) return [];
+    return [...importPreview.items].sort((a, b) => {
+      const aError = a.errors.length > 0 || a.action === "error" ? 0 : 1;
+      const bError = b.errors.length > 0 || b.action === "error" ? 0 : 1;
+      if (aError !== bError) return aError - bError;
+      return a.row_number - b.row_number;
+    });
+  }, [importPreview]);
+  const importPreviewErrorCount = useMemo(
+    () => importPreview?.items.filter((item) => item.errors.length > 0 || item.action === "error").length ?? 0,
+    [importPreview],
+  );
+  const importPreviewValidCount = useMemo(
+    () => importPreview?.items.filter((item) => item.errors.length === 0 && item.action !== "error").length ?? 0,
+    [importPreview],
+  );
+  const visiblePreviewItems = useMemo(() => {
+    if (importFilter === "errors") {
+      return importPreviewItems.filter((item) => item.errors.length > 0 || item.action === "error");
+    }
+    if (importFilter === "valid") {
+      return importPreviewItems.filter((item) => item.errors.length === 0 && item.action !== "error");
+    }
+    return importPreviewItems;
+  }, [importPreviewItems, importFilter]);
 
   useEffect(() => {
     if (isOpen) {
       setImportFile(null);
       setImportPreview(null);
       setImportStrategy("skip");
+      setImportFilter("all");
     }
   }, [isOpen]);
 
@@ -265,9 +290,37 @@ function CategoryAttributeImportModal({
               <ImportSummary label={t("categoryProperties.importSkipped")} value={importPreview.skipped_count} />
               <ImportSummary label={t("categoryProperties.importErrors")} value={importPreview.error_count} />
             </div>
-            <div className="max-h-80 overflow-auto rounded-md border border-border">
+            <div
+              className="inline-flex rounded-md border border-border bg-muted/30 p-0.5 text-xs"
+              role="tablist"
+              aria-label="import-preview-filter"
+            >
+              {([
+                { value: "all" as const, label: t("categoryProperties.importFilterAll", { count: importPreview.items.length }) },
+                { value: "errors" as const, label: t("categoryProperties.importFilterErrors", { count: importPreviewErrorCount }) },
+                { value: "valid" as const, label: t("categoryProperties.importFilterValid", { count: importPreviewValidCount }) },
+              ]).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={importFilter === option.value}
+                  data-testid={`import-filter-${option.value}`}
+                  onClick={() => setImportFilter(option.value)}
+                  className={`rounded px-3 py-1 transition-colors ${
+                    importFilter === option.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("categoryProperties.importFilterHint")}</p>
+            <div className="max-h-[28rem] overflow-auto rounded-md border border-border">
               <table className="w-full min-w-[760px] text-left text-xs">
-                <thead className="sticky top-0 bg-muted text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
                   <tr>
                     <th className="p-2">{t("categoryProperties.importRow")}</th>
                     <th className="p-2">{t("categoryProperties.importCategory")}</th>
@@ -278,29 +331,37 @@ function CategoryAttributeImportModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {importPreview.items.slice(0, importPreviewDisplayLimit).map((item) => (
-                    <tr key={item.row_number} className="border-t border-border">
-                      <td className="p-2">{item.row_number}</td>
-                      <td className="p-2">{item.category_path || item.category_code}</td>
-                      <td className="p-2">{item.attribute?.name ?? "-"}</td>
-                      <td className="p-2">{item.attribute?.attr_type ?? "-"}</td>
-                      <td className="p-2">{t(`categoryProperties.importActions.${item.action}`)}</td>
-                      <td className={`p-2 ${item.errors.length ? "text-red-600" : "text-muted-foreground"}`}>
-                        {item.errors.join("；") || "-"}
+                  {visiblePreviewItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                        {t("state.emptyImportItems")}
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    visiblePreviewItems.map((item) => {
+                      const hasError = item.errors.length > 0 || item.action === "error";
+                      return (
+                        <tr
+                          key={item.row_number}
+                          data-testid={`import-row-${item.row_number}`}
+                          data-has-error={hasError ? "true" : "false"}
+                          className={`border-t border-border ${hasError ? "bg-red-50/60" : ""}`}
+                        >
+                          <td className="p-2 font-mono">{item.row_number}</td>
+                          <td className="p-2">{item.category_path || item.category_code}</td>
+                          <td className="p-2">{item.attribute?.name ?? "-"}</td>
+                          <td className="p-2">{item.attribute?.attr_type ?? "-"}</td>
+                          <td className="p-2">{t(`categoryProperties.importActions.${item.action}`)}</td>
+                          <td className={`p-2 ${hasError ? "text-red-700" : "text-muted-foreground"}`}>
+                            {item.errors.join("；") || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
-            {importPreview.items.length > importPreviewDisplayLimit && (
-              <p className="text-xs text-muted-foreground">
-                {t("categoryProperties.importPreviewLimited", {
-                  shown: importPreviewDisplayLimit,
-                  total: importPreview.items.length,
-                })}
-              </p>
-            )}
           </div>
         )}
       </div>
@@ -323,7 +384,7 @@ export function CategoryPropertiesPanel({
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<CategoryAttribute | null>(null);
   const [form, setForm] = useState<AttributeFormState>(emptyAttributeForm);
@@ -515,14 +576,12 @@ export function CategoryPropertiesPanel({
           title={t("categoryProperties.inherited")}
           emptyLabel={t("categoryProperties.emptyInherited")}
           attributes={inheritedAttributes}
-          language={i18n.language}
           isInherited
         />
         <AttributeSection
           title={t("categoryProperties.own")}
           emptyLabel={t("categoryProperties.emptyOwn")}
           attributes={ownAttributes}
-          language={i18n.language}
           isInherited={false}
           canEdit={canManageAttributes}
           isReordering={reorderMutation.isPending}
@@ -735,7 +794,7 @@ export function CategoryPropertiesPanel({
             <AlertDialogTitle>{t("action.delete")}</AlertDialogTitle>
             <AlertDialogDescription>
               {attributeToDelete
-                ? t("categoryProperties.deleteConfirm", { name: attributeLabel(attributeToDelete, i18n.language) })
+                ? t("categoryProperties.deleteConfirm", { name: attributeLabel(attributeToDelete) })
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -769,7 +828,6 @@ function AttributeSection({
   title,
   emptyLabel,
   attributes,
-  language,
   isInherited,
   canEdit = false,
   isReordering = false,
@@ -782,7 +840,6 @@ function AttributeSection({
   title: string;
   emptyLabel: string;
   attributes: CategoryAttribute[];
-  language: string;
   isInherited: boolean;
   canEdit?: boolean;
   isReordering?: boolean;
@@ -823,7 +880,7 @@ function AttributeSection({
                       <GripVertical className="h-4 w-4 cursor-grab text-muted-foreground" aria-label={t("categoryProperties.dragHandle")} />
                     )}
                     {isInherited && <Lock className="h-4 w-4 text-muted-foreground" aria-label={t("categoryProperties.inherited")} />}
-                    <span className="font-medium">{attributeLabel(attribute, language)}</span>
+                    <span className="font-medium">{attributeLabel(attribute)}</span>
                     {(attribute.required || !attribute.allow_empty) && <span className="text-red-600">*</span>}
                     <Badge variant="outline">
                       {t(`categoryProperties.types.${attribute.attr_type}`)}

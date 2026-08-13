@@ -237,7 +237,8 @@ test("super_admin can open AI management pages and create masked provider record
   await mockAiApis(page);
 
   await page.goto("/");
-  await expect(page.getByText("AI管理")).toBeVisible();
+  // AI 管理菜单已隐藏，super_admin 也看不到入口；直接通过 URL 访问页面。
+  expect(await (page.getByText("AI管理") as any).count()).toEqual(0);
 
   await page.goto("/ai/providers");
   await expect(page.getByRole("heading", { name: "模型提供商管理" })).toBeVisible();
@@ -290,14 +291,7 @@ test("capability mappings persist selected primary and fallback models after rel
   await context.close();
 });
 
-test("AI management routes are localized and blocked for non-super_admin users", async () => {
-  const english = await pageForTest(superAdminUser, "en-US");
-  await mockAiApis(english.page);
-  await english.page.goto("/ai/providers");
-  await expect(english.page.getByRole("heading", { name: "Model Provider Management" })).toBeVisible();
-  await expect(english.page.getByText("AI Management")).toBeVisible();
-  await english.context.close();
-
+test("AI management routes are blocked for non-super_admin users", async () => {
   const regular = await pageForTest(regularUser);
   await mockAiApis(regular.page);
   await regular.page.goto("/");

@@ -1,7 +1,6 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ChevronDown, ChevronRight, Edit, Plus, Search, Trash2 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient, type Category, type ProductName, type ProductNamePayload } from "@/app/api/client";
 import { ApiState } from "../../common/ApiState";
@@ -39,111 +38,56 @@ const emptyForm: FormState = {
 };
 
 const labels = {
-  "zh-CN": {
-    title: "品名管理",
-    description: "维护品名、PM编码和启停状态。",
-    create: "新增品名",
-    createTitle: "新增品名",
-    editTitle: "编辑品名",
-    code: "品名编码",
-    generatedCode: "保存后自动生成",
-    name: "品名",
-    category: "所属类目",
-    unit: "品名单位",
-    status: "状态",
+  title: "品名管理",
+  description: "维护品名、PM编码和启停状态。",
+  create: "新增品名",
+  createTitle: "新增品名",
+  editTitle: "编辑品名",
+  code: "品名编码",
+  generatedCode: "保存后自动生成",
+  name: "品名",
+  category: "所属类目",
+  unit: "品名单位",
+  status: "状态",
+  active: "启用",
+  inactive: "禁用",
+  actions: "操作",
+  edit: "编辑",
+  delete: "删除",
+  setActive: "启用",
+  setInactive: "禁用",
+  search: "搜索品名",
+  searchPlaceholder: "搜索编码、品名、类目库、类目或单位...",
+  empty: "暂无匹配品名数据",
+  categoryLibrary: "所属类目库",
+  selectCategoryLibrary: "请选择类目库",
+  selectCategory: "请选择类目",
+  selectCategoryLibraryFirst: "请先选择类目库",
+  selectedCategory: "已选类目",
+  noCategorySelected: "尚未选择类目",
+  categoryTreeEmpty: "该类目库暂无类目",
+  categoryTreeLoading: "正在加载类目...",
+  filterAllCategoryLibraries: "全部类目库",
+  filterCategoryLibrary: "按类目库筛选",
+  currentStatus: "当前状态",
+  cancel: "取消",
+  confirm: "确认",
+  save: "保存",
+  saving: "保存中...",
+  saveSuccess: "品名已保存",
+  saveFailed: "品名保存失败",
+  statusSuccess: "状态已更新",
+  statusFailed: "状态更新失败",
+  deleteSuccess: "品名已禁用",
+  deleteFailed: "品名删除失败",
+  statusTitle: "确认状态变更",
+  statusConfirm: (name: string, status: string) => `确认将品名 ${name} 设置为 ${status} 吗？`,
+  deleteTitle: "确认删除品名",
+  deleteConfirm: (name: string) => `确认删除品名 ${name} 吗？删除后记录保留并转为禁用状态。`,
+  filter: {
     active: "启用",
     inactive: "禁用",
-    actions: "操作",
-    edit: "编辑",
-    delete: "删除",
-    setActive: "启用",
-    setInactive: "禁用",
-    search: "搜索品名",
-    searchPlaceholder: "搜索编码、品名、类目库、类目或单位...",
-    empty: "暂无匹配品名数据",
-    categoryLibrary: "所属类目库",
-    selectCategoryLibrary: "请选择类目库",
-    selectCategory: "请选择类目",
-    selectCategoryLibraryFirst: "请先选择类目库",
-    selectedCategory: "已选类目",
-    noCategorySelected: "尚未选择类目",
-    categoryTreeEmpty: "该类目库暂无类目",
-    categoryTreeLoading: "正在加载类目...",
-    filterAllCategoryLibraries: "全部类目库",
-    filterCategoryLibrary: "按类目库筛选",
-    currentStatus: "当前状态",
-    cancel: "取消",
-    confirm: "确认",
-    save: "保存",
-    saving: "保存中...",
-    saveSuccess: "品名已保存",
-    saveFailed: "品名保存失败",
-    statusSuccess: "状态已更新",
-    statusFailed: "状态更新失败",
-    deleteSuccess: "品名已禁用",
-    deleteFailed: "品名删除失败",
-    statusTitle: "确认状态变更",
-    statusConfirm: (name: string, status: string) => `确认将品名 ${name} 设置为 ${status} 吗？`,
-    deleteTitle: "确认删除品名",
-    deleteConfirm: (name: string) => `确认删除品名 ${name} 吗？删除后记录保留并转为禁用状态。`,
-    filter: {
-      active: "启用",
-      inactive: "禁用",
-      all: "全部",
-    },
-  },
-  "en-US": {
-    title: "Product Names",
-    description: "Maintain product names, PM codes, and active status.",
-    create: "New Product Name",
-    createTitle: "New Product Name",
-    editTitle: "Edit Product Name",
-    code: "Product Name Code",
-    generatedCode: "Generated after save",
-    name: "Product Name",
-    category: "Category",
-    unit: "Unit",
-    status: "Status",
-    active: "active",
-    inactive: "inactive",
-    actions: "Actions",
-    edit: "Edit",
-    delete: "Delete",
-    setActive: "Activate",
-    setInactive: "Deactivate",
-    search: "Search product names",
-    searchPlaceholder: "Search code, name, category library, category, or unit...",
-    empty: "No matching product names",
-    categoryLibrary: "Category Library",
-    selectCategoryLibrary: "Select a category library",
-    selectCategory: "Select category",
-    selectCategoryLibraryFirst: "Select a category library first",
-    selectedCategory: "Selected category",
-    noCategorySelected: "No category selected",
-    categoryTreeEmpty: "No categories in this library",
-    categoryTreeLoading: "Loading categories...",
-    filterAllCategoryLibraries: "All Category Libraries",
-    filterCategoryLibrary: "Filter by category library",
-    currentStatus: "Current status",
-    cancel: "Cancel",
-    confirm: "Confirm",
-    save: "Save",
-    saving: "Saving...",
-    saveSuccess: "Product name saved",
-    saveFailed: "Product name save failed",
-    statusSuccess: "Status updated",
-    statusFailed: "Status update failed",
-    deleteSuccess: "Product name deactivated",
-    deleteFailed: "Product name delete failed",
-    statusTitle: "Confirm status change",
-    statusConfirm: (name: string, status: string) => `Set product name ${name} to ${status}?`,
-    deleteTitle: "Confirm product name delete",
-    deleteConfirm: (name: string) => `Delete product name ${name}? The record will be preserved and marked inactive.`,
-    filter: {
-      active: "Active",
-      inactive: "Inactive",
-      all: "All",
-    },
+    all: "全部",
   },
 };
 
@@ -255,8 +199,7 @@ function initialStatusFilter(): StatusFilter {
 }
 
 export function ProductNameList() {
-  const { i18n } = useTranslation();
-  const text = i18n.language === "en-US" ? labels["en-US"] : labels["zh-CN"];
+  const text = labels;
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
@@ -517,8 +460,8 @@ export function ProductNameList() {
               }))}
               placeholder={text.filterAllCategoryLibraries}
               clearLabel={text.filterAllCategoryLibraries}
-              searchPlaceholder={i18n.language === "en-US" ? "Search category libraries..." : "搜索类目库..."}
-              emptyText={i18n.language === "en-US" ? "No matching category libraries" : "暂无匹配类目库"}
+              searchPlaceholder="搜索类目库..."
+              emptyText="暂无匹配类目库"
             />
           </div>
         </div>
@@ -599,8 +542,8 @@ export function ProductNameList() {
                 keywords: library.code,
               }))}
               placeholder={text.selectCategoryLibrary}
-              searchPlaceholder={i18n.language === "en-US" ? "Search category libraries..." : "搜索类目库..."}
-              emptyText={i18n.language === "en-US" ? "No matching category libraries" : "暂无匹配类目库"}
+              searchPlaceholder="搜索类目库..."
+              emptyText="暂无匹配类目库"
             />
           </label>
           <label className="block space-y-1 md:col-span-2">
@@ -651,10 +594,10 @@ export function ProductNameList() {
                 label: `${unit.name} (${unit.symbol})`,
                 keywords: unit.symbol,
               }))}
-              placeholder={i18n.language === "en-US" ? "Select a unit" : "请选择计量单位"}
-              searchPlaceholder={i18n.language === "en-US" ? "Search units..." : "搜索计量单位..."}
-              emptyText={i18n.language === "en-US" ? "No matching units" : "暂无匹配计量单位"}
-              clearLabel={i18n.language === "en-US" ? "No unit" : "无计量单位"}
+              placeholder="请选择计量单位"
+              searchPlaceholder="搜索计量单位..."
+              emptyText="暂无匹配计量单位"
+              clearLabel="无计量单位"
             />
           </label>
           {editingProduct && (

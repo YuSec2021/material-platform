@@ -189,7 +189,7 @@ function validateModelForm(form: ModelFormState, t: (key: string) => string) {
   return "";
 }
 
-function formatDateTime(value: string | null, locale: string, fallback: string) {
+function formatDateTime(value: string | null, fallback: string) {
   if (!value) {
     return fallback;
   }
@@ -197,7 +197,7 @@ function formatDateTime(value: string | null, locale: string, fallback: string) 
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(locale, {
+  return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -457,7 +457,7 @@ function ModelCard({
   onToggle: (model: AiModel) => void;
   onDelete: (model: AiModel) => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <Card className="overflow-hidden">
@@ -497,7 +497,7 @@ function ModelCard({
             </div>
             <div>
               <dt className="text-muted-foreground">{t("modelGateway.lastTested")}</dt>
-              <dd>{formatDateTime(model.last_tested_at, i18n.language, t("modelGateway.neverTested"))}</dd>
+              <dd>{formatDateTime(model.last_tested_at, t("modelGateway.neverTested"))}</dd>
             </div>
           </div>
         </dl>

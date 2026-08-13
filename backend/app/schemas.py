@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -278,6 +279,7 @@ class CategoryLibraryOut(BaseModel):
     description: str
     enabled: bool
     qdrant_enabled: bool = False
+    category_count: int = 0
 
 
 class CategoryLibraryIn(BaseModel):
@@ -404,6 +406,7 @@ class CategoryOut(BaseModel):
     parent_category_id: int | None = None
     description: str
     enabled: bool
+    descendant_count: int = 0
 
 
 class CategoryIn(BaseModel):
@@ -1123,6 +1126,7 @@ class RoleSummaryOut(BaseModel):
 class UserIn(BaseModel):
     username: str
     display_name: str
+    password: str = ""  # optional; if empty, account is created without a usable password
     unit: str = ""
     department: str = ""
     team: str = ""
@@ -1132,6 +1136,7 @@ class UserIn(BaseModel):
 
 class UserUpdate(BaseModel):
     display_name: str | None = None
+    password: str | None = None  # when set, replace the stored password_hash
     unit: str | None = None
     department: str | None = None
     team: str | None = None
@@ -1143,13 +1148,14 @@ class UserOut(BaseModel):
     id: int
     username: str
     display_name: str
-    hcm_id: str
     unit: str
     department: str
     team: str
     email: str
     account_ownership: str
     account_owner: str
+    last_login_at: datetime | None = None
+    failed_login_count: int = 0
     status: str
     roles: list[RoleSummaryOut] = Field(default_factory=list)
     created_at: str
@@ -1231,6 +1237,7 @@ class RolePermissionsOut(BaseModel):
 
 class AuthLoginIn(BaseModel):
     username: str
+    password: str = ""
 
 
 class AuthUserOut(BaseModel):

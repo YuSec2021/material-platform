@@ -523,10 +523,14 @@ const resources = {
         categoryLibraries: "类目库管理",
         categoryLibrariesHelp: "类目库数据来自后端 API，支持新增、编辑和空库删除。",
         categories: "类目管理",
-        categoriesHelp: "类目数据来自后端 API，支持按类目库新增、编辑和删除。",
+        categoriesHelp: "",
         brands: "品牌管理",
         brandsHelp: "品牌数据来自后端 API，支持生成编码、Logo 缩略图和 CRUD 操作。",
         applicationsHelp: "当前接口类型: {{type}}",
+        totalCategories: "总类目 {{count}}",
+        totalMaterials: "总物料 {{count}}",
+        categoryTotalColumn: "类目总数",
+        materialTotalColumn: "物料总数",
       },
       action: {
         addMaterial: "新增物料",
@@ -590,6 +594,7 @@ const resources = {
         emptyCategories: "后端暂无类目数据",
         emptyBrands: "后端暂无品牌数据",
         emptyApplications: "后端暂无该类型申请",
+        emptyImportItems: "当前筛选下没有可显示的行",
         loadingApplications: "正在加载申请列表...",
         errorApplications: "申请列表加载失败",
       },
@@ -757,6 +762,10 @@ const resources = {
         importCategory: "类目",
         importAction: "处理方式",
         importMessage: "校验信息",
+        importFilterAll: "全部 {{count}}",
+        importFilterErrors: "仅错误 {{count}}",
+        importFilterValid: "仅有效 {{count}}",
+        importFilterHint: "错误项已置顶；可切换 Tab 仅看错误。",
         importActions: {
           create: "新增",
           update: "更新",
@@ -1363,10 +1372,14 @@ const resources = {
         categoryLibraries: "Category Libraries",
         categoryLibrariesHelp: "Backend-powered category libraries with create, edit, and empty-library delete actions.",
         categories: "Categories",
-        categoriesHelp: "Backend-powered categories with create, edit, delete, and category-library assignment.",
+        categoriesHelp: "",
         brands: "Brands",
         brandsHelp: "Backend-powered brand records with generated codes, logo thumbnails, and CRUD actions.",
         applicationsHelp: "Current API type: {{type}}",
+        totalCategories: "Total {{count}} categories",
+        totalMaterials: "Total {{count}} materials",
+        categoryTotalColumn: "Category Total",
+        materialTotalColumn: "Material Total",
       },
       action: {
         addMaterial: "New Material",
@@ -1430,6 +1443,7 @@ const resources = {
         emptyCategories: "No category data from backend",
         emptyBrands: "No brand data from backend",
         emptyApplications: "No applications of this type",
+        emptyImportItems: "No rows match the current filter",
         loadingApplications: "Loading applications...",
         errorApplications: "Application list failed to load",
       },
@@ -1597,6 +1611,10 @@ const resources = {
         importCategory: "Category",
         importAction: "Action",
         importMessage: "Validation",
+        importFilterAll: "All {{count}}",
+        importFilterErrors: "Errors only {{count}}",
+        importFilterValid: "Valid only {{count}}",
+        importFilterHint: "Error rows are pinned to the top; switch the tab to view errors only.",
         importActions: {
           create: "Create",
           update: "Update",
@@ -1684,18 +1702,11 @@ const resources = {
   },
 };
 
-// Persist language preference to localStorage
-const savedLang = localStorage.getItem("language");
 void i18n.use(initReactI18next).init({
   resources,
-  lng: savedLang ?? "zh-CN",
+  lng: "zh-CN",
   fallbackLng: "zh-CN",
   interpolation: { escapeValue: false },
-});
-
-// Sync language changes back to localStorage
-i18n.on("languageChanged", (lng) => {
-  localStorage.setItem("language", lng);
 });
 
 export default i18n;

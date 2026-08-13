@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Edit, Plus, Rocket, Trash2 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   apiClient,
@@ -35,70 +34,36 @@ const emptyForm: ApplicationVersionPayload = {
 };
 
 const labels = {
-  "zh-CN": {
-    title: "版本管理",
-    help: "维护产品版本和发布说明；发布后，“关于”窗口会立即显示当前版本。",
-    add: "新增版本",
-    edit: "编辑版本",
-    version: "版本号",
-    releaseTitle: "版本标题",
-    releaseNotes: "发布说明",
-    status: "状态",
-    releasedAt: "发布时间",
-    createdBy: "创建人",
-    actions: "操作",
-    draft: "草稿",
-    published: "当前版本",
-    archived: "已归档",
-    publish: "发布",
-    delete: "删除",
-    save: "保存",
-    saving: "保存中...",
-    cancel: "取消",
-    empty: "暂无版本记录",
-    publishTitle: "发布产品版本",
-    publishConfirm: (version: string) =>
-      `确定发布 v${version} 吗？当前已发布版本将自动归档。`,
-    deleteTitle: "删除版本",
-    deleteConfirm: (version: string) =>
-      `确定删除 v${version} 吗？此操作无法撤销。`,
-    saved: "版本已保存",
-    publishedMessage: "版本已发布，“关于”内容已更新",
-    deleted: "版本已删除",
-    failed: "操作失败",
-  },
-  "en-US": {
-    title: "Version Management",
-    help: "Manage product versions and release notes. Publishing updates the About dialog immediately.",
-    add: "New Version",
-    edit: "Edit Version",
-    version: "Version",
-    releaseTitle: "Title",
-    releaseNotes: "Release Notes",
-    status: "Status",
-    releasedAt: "Released At",
-    createdBy: "Created By",
-    actions: "Actions",
-    draft: "Draft",
-    published: "Current",
-    archived: "Archived",
-    publish: "Publish",
-    delete: "Delete",
-    save: "Save",
-    saving: "Saving...",
-    cancel: "Cancel",
-    empty: "No versions",
-    publishTitle: "Publish Product Version",
-    publishConfirm: (version: string) =>
-      `Publish v${version}? The current published version will be archived.`,
-    deleteTitle: "Delete Version",
-    deleteConfirm: (version: string) =>
-      `Delete v${version}? This action cannot be undone.`,
-    saved: "Version saved",
-    publishedMessage: "Version published and About content updated",
-    deleted: "Version deleted",
-    failed: "Operation failed",
-  },
+  title: "版本管理",
+  help: "维护产品版本和发布说明；发布后，“关于”窗口会立即显示当前版本。",
+  add: "新增版本",
+  edit: "编辑版本",
+  version: "版本号",
+  releaseTitle: "版本标题",
+  releaseNotes: "发布说明",
+  status: "状态",
+  releasedAt: "发布时间",
+  createdBy: "创建人",
+  actions: "操作",
+  draft: "草稿",
+  published: "当前版本",
+  archived: "已归档",
+  publish: "发布",
+  delete: "删除",
+  save: "保存",
+  saving: "保存中...",
+  cancel: "取消",
+  empty: "暂无版本记录",
+  publishTitle: "发布产品版本",
+  publishConfirm: (version: string) =>
+    `确定发布 v${version} 吗？当前已发布版本将自动归档。`,
+  deleteTitle: "删除版本",
+  deleteConfirm: (version: string) =>
+    `确定删除 v${version} 吗？此操作无法撤销。`,
+  saved: "版本已保存",
+  publishedMessage: "版本已发布，“关于”内容已更新",
+  deleted: "版本已删除",
+  failed: "操作失败",
 };
 
 function isManagedVersion(version: ApplicationVersion): version is ManagedApplicationVersion {
@@ -114,9 +79,8 @@ function toForm(version: ManagedApplicationVersion): ApplicationVersionPayload {
 }
 
 export function VersionManagement() {
-  const { i18n } = useTranslation();
-  const text = i18n.language === "en-US" ? labels["en-US"] : labels["zh-CN"];
-  const locale = i18n.language === "en-US" ? "en-US" : "zh-CN";
+  const text = labels;
+  const locale = "zh-CN";
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ApplicationVersionPayload>(emptyForm);
   const [editingVersion, setEditingVersion] = useState<ManagedApplicationVersion | null>(null);

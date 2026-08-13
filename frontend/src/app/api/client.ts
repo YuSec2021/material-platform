@@ -82,6 +82,7 @@ export type Category = {
   parent_category_id: number | null;
   description: string;
   enabled: boolean;
+  descendant_count?: number;
 };
 
 export type CategoryListParams = {
@@ -99,6 +100,7 @@ export type CategoryLibrary = {
   description: string;
   enabled: boolean;
   qdrant_enabled: boolean;
+  category_count?: number;
 };
 
 export type BrandLogo = {
@@ -1329,10 +1331,10 @@ export const apiClient = {
     return request<T>(path, { method: "POST", body });
   },
   auth: {
-    login(username: string) {
+    login(username: string, password: string) {
       return request<AuthUser>("/auth/login", {
         method: "POST",
-        body: { username },
+        body: { username, password },
       });
     },
     me() {

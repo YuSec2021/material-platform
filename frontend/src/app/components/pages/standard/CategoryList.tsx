@@ -1200,6 +1200,18 @@ export function CategoryList() {
     : selectedLibrary
       ? t("categoryImport.selectedLibrary", { name: selectedLibrary.name })
       : t("categoryImport.noSelection");
+  // 标题：未选 → 类目管理；选中类目库 → 库名；选中任意层级的类目 → 该类目名。
+  const pageTitle = selectedTree?.type === "library" && selectedLibrary
+    ? selectedLibrary.name
+    : selectedCategory
+      ? selectedCategory.name
+      : t("page.categories");
+  // 总数徽章：类目库 → 库的总类目数；任意层级类目 → 该类目下所有后代数（不含自身）。
+  const totalCountBadge = selectedTree?.type === "library" && selectedLibrary
+    ? t("page.totalCategories", { count: selectedLibrary.category_count ?? 0 })
+    : selectedCategory
+      ? t("page.totalCategories", { count: selectedCategory.descendant_count ?? 0 })
+      : null;
   const treeRows = useMemo(() => {
     const rows: CategoryTreeRow[] = [];
     enabledLibraries.forEach((library) => {
@@ -1320,9 +1332,16 @@ export function CategoryList() {
       <main data-testid="category-content-container" className="min-h-0 min-w-0 flex-1 space-y-6 overflow-y-auto pr-1">
         <div data-testid="category-content-main" className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl text-foreground">{t("page.categories")}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">{t("page.categoriesHelp")}</p>
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-2xl text-foreground" data-testid="category-content-title">{pageTitle}</h1>
+              {totalCountBadge ? (
+                <span
+                  data-testid="category-content-total"
+                  className="text-sm text-muted-foreground"
+                >
+                  {totalCountBadge}
+                </span>
+              ) : null}
             </div>
             {(isSuperAdmin || canManageAttributes) && (
               <div className="flex flex-wrap gap-2">

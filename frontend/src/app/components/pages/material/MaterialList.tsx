@@ -139,10 +139,7 @@ function categoryLibraryIdsForMaterialLibrary(library: MaterialLibrary | undefin
   return Array.from(new Set(ids.filter((id): id is number => typeof id === "number")));
 }
 
-function categoryAttributeLabel(attribute: CategoryAttribute, language: string) {
-  if (language === "en-US") {
-    return attribute.display_name_en || attribute.name;
-  }
+function categoryAttributeLabel(attribute: CategoryAttribute) {
   return attribute.display_name_zh || attribute.name;
 }
 
@@ -377,17 +374,15 @@ function MaterialLibraryCategoryRoots({
 function CategoryPropertyField({
   property,
   value,
-  language,
   onChange,
 }: {
   property: CategoryAttribute;
   value: string;
-  language: string;
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
   const required = property.required || !property.allow_empty;
-  const label = categoryAttributeLabel(property, language);
+  const label = categoryAttributeLabel(property);
   const inputClass =
     "w-full rounded-md border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/40";
 
@@ -435,7 +430,7 @@ function CategoryPropertyField({
 
 export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {}) {
   const queryClient = useQueryClient();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const auth = useAuth();
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | "">("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "">("");
@@ -550,6 +545,10 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
   const materialRows = useMemo(() => materialsQuery.data ?? [], [materialsQuery.data]);
   const libraries = librariesQuery.data ?? [];
   const selectedLibrary = libraries.find((library) => library.id === form.material_library_id);
+  const focusedLibrary =
+    typeof selectedLibraryId === "number"
+      ? libraries.find((library) => library.id === selectedLibraryId) ?? null
+      : null;
   const linkedCategoryLibraryIds = useMemo(
     () => categoryLibraryIdsForMaterialLibrary(selectedLibrary),
     [selectedLibrary],
@@ -757,7 +756,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
     if (missingRequiredCategoryProperties.length > 0) {
       toast.error(
         t("categoryProperties.missingRequired", {
-          names: missingRequiredCategoryProperties.map((property) => categoryAttributeLabel(property, i18n.language)).join(", "),
+          names: missingRequiredCategoryProperties.map((property) => categoryAttributeLabel(property)).join(", "),
         }),
       );
       return;
@@ -870,9 +869,13 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
 
       <main className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl text-foreground">{t("page.materials")}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{t("page.materialsHelp")}</p>
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-2xl text-foreground">{focusedLibrary ? focusedLibrary.name : t("page.materials")}</h1>
+            {focusedLibrary ? (
+              <span className="text-sm text-muted-foreground">
+                {t("page.totalMaterials", { count: focusedLibrary.material_count ?? 0 })}
+              </span>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -1306,7 +1309,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                           key={`${property.id}-${property.source_category_id}`}
                           property={property}
                           value={form.attributes[property.name] ?? ""}
-                          language={i18n.language}
                           onChange={(value) =>
                             setForm((current) => ({
                               ...current,
@@ -1329,7 +1331,6 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                           key={property.id}
                           property={property}
                           value={form.attributes[property.name] ?? ""}
-                          language={i18n.language}
                           onChange={(value) =>
                             setForm((current) => ({
                               ...current,
@@ -1345,7 +1346,7 @@ export function MaterialList({ fixedLibraryId }: { fixedLibraryId?: number } = {
                   <p className="text-sm text-destructive">
                     {t("categoryProperties.missingRequired", {
                       names: missingRequiredCategoryProperties
-                        .map((property) => categoryAttributeLabel(property, i18n.language))
+                        .map((property) => categoryAttributeLabel(property))
                         .join(", "),
                     })}
                   </p>
