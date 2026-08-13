@@ -110,25 +110,25 @@ export const router = createBrowserRouter([
             ],
           },
 
-          // AI管理
-          { path: "ai/models", Component: AiModelGatewayPage },
+          // AI管理（全部 super_admin 专属：菜单已隐藏，路由层兜底拦截非 super_admin）
           {
             path: "ai",
             Component: SuperAdminRoute,
             children: [
+              { path: "models", Component: AiModelGatewayPage },
               { path: "providers", Component: AiProvidersPage },
               { path: "capability-mappings", Component: AiCapabilityMappingsPage },
               { path: "token-usage", Component: AiTokenUsagePage },
             ],
           },
 
-          // 规则引擎
-          { path: "rules/categories", Component: RuleCategoryListPage },
-          { path: "rules", Component: RuleListPage },
+          // 规则引擎（全部 super_admin 专属）
           {
             path: "rules",
             Component: SuperAdminRoute,
             children: [
+              { path: "categories", Component: RuleCategoryListPage },
+              { index: true, Component: RuleListPage },
               { path: "new", Component: RuleFormPage },
               { path: ":id/edit", Component: RuleFormPage },
             ],

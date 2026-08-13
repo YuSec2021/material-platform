@@ -228,7 +228,7 @@ test("super admin can create, edit, toggle, test, and delete a model card", asyn
   await context.close();
 });
 
-test("regular user sees read-only model cards", async () => {
+test("regular user is redirected away from /ai/models", async () => {
   const context = await browser!.newContext({ baseURL: "http://localhost:24434" });
   await context.addInitScript(() => {
     window.localStorage.setItem("language", "zh-CN");
@@ -239,13 +239,10 @@ test("regular user sees read-only model cards", async () => {
   await installModelGatewayMocks(page, regularUser);
 
   await page.goto("/ai/models");
-  await expect(page.getByRole("heading", { name: /模型网关|Model Gateway/ })).toBeVisible();
-  await expect(page.getByText("当前账号为只读模式").first()).toBeVisible();
-  await expect(page.getByText("DeepSeek").first()).toBeVisible();
-  await expect(page.getByText("未测试").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /新增模型|New Model/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /编辑|Edit/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /删除|Delete/ })).toHaveCount(0);
+  // SuperAdminRoute 把非 super_admin 弹回首页，模型网关页面（包括只读模式）不向普通用户开放。
+  await page.waitForURL("http://localhost:24434/");
+  await expect(page.getByRole("heading", { name: /模型网关|Model Gateway/ })).toHaveCount(0);
+  await expect(page.getByText("当前账号为只读模式")).toHaveCount(0);
 
   await context.close();
 });

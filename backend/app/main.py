@@ -5864,7 +5864,7 @@ def list_rule_categories(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[RuleCategoryRead]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     count_rows = (
         db.query(Rule.category_id, func.count(Rule.id))
@@ -5886,7 +5886,7 @@ def list_rules(
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> RuleListResponse:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     query = db.query(Rule).join(RuleCategory)
     if category_id is not None:
@@ -5954,7 +5954,7 @@ def evaluate_rules(
     request: Request,
     db: Session = Depends(get_db),
 ) -> EvaluateResponse:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     collector = SpanCollector("rules.evaluate", "material_governance")
     try:
@@ -5989,7 +5989,7 @@ def get_rule(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RuleRead:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_rule_engine_seed(db)
     return rule_to_out(get_rule_or_404(db, rule_id))
 
@@ -10999,7 +10999,7 @@ def list_ai_providers(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[ProviderConfigOut]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_provider_configs(db)
     providers = db.query(ModelConfig).order_by(ModelConfig.enabled.desc(), ModelConfig.id.desc()).all()
     return [provider_to_out(provider, db) for provider in providers]
@@ -11249,7 +11249,7 @@ def get_legacy_ai_capability_mapping(
     request: Request,
     db: Session = Depends(get_db),
 ) -> CapabilityMappingOut:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_provider_configs(db)
     mapping = db.query(CapabilityModelMapping).filter(CapabilityModelMapping.capability == compact_space(capability)).first()
     if not mapping:
@@ -11427,7 +11427,7 @@ def list_gateway_capability_mappings(
     request: Request,
     db: Session = Depends(get_db),
 ) -> list[CapabilityMappingRead]:
-    current_auth(request, db)
+    require_super_admin(current_auth(request, db))
     ensure_model_gateway_schema(db)
     mappings = db.query(CapabilityMapping).order_by(CapabilityMapping.capability).all()
     return [capability_mapping_to_read(mapping) for mapping in mappings]
