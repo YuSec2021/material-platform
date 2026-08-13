@@ -1200,18 +1200,16 @@ export function CategoryList() {
     : selectedLibrary
       ? t("categoryImport.selectedLibrary", { name: selectedLibrary.name })
       : t("categoryImport.noSelection");
-  // 标题：未选 → 类目管理；选中类目库 → 库名；选中一级类目 → 类目名。
-  const isFirstLevelCategory =
-    selectedCategory !== null && selectedCategory.parent_category_id === null;
+  // 标题：未选 → 类目管理；选中类目库 → 库名；选中任意层级的类目 → 该类目名。
   const pageTitle = selectedTree?.type === "library" && selectedLibrary
     ? selectedLibrary.name
-    : selectedCategory && isFirstLevelCategory
+    : selectedCategory
       ? selectedCategory.name
       : t("page.categories");
-  // 总数徽章：类目库 → 库的总类目数；一级类目 → 该一级下所有后代数 + 1（自身）。
+  // 总数徽章：类目库 → 库的总类目数；任意层级类目 → 该类目下所有后代 + 1（自身）。
   const totalCountBadge = selectedTree?.type === "library" && selectedLibrary
     ? t("page.totalCategories", { count: selectedLibrary.category_count ?? 0 })
-    : selectedCategory && isFirstLevelCategory
+    : selectedCategory
       ? t("page.totalCategories", { count: (selectedCategory.descendant_count ?? 0) + 1 })
       : null;
   const treeRows = useMemo(() => {
