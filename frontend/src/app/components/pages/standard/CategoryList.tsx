@@ -1206,11 +1206,11 @@ export function CategoryList() {
     : selectedCategory
       ? selectedCategory.name
       : t("page.categories");
-  // 总数徽章：类目库 → 库的总类目数；任意层级类目 → 该类目下所有后代 + 1（自身）。
+  // 总数徽章：类目库 → 库的总类目数；任意层级类目 → 该类目下所有后代数（不含自身）。
   const totalCountBadge = selectedTree?.type === "library" && selectedLibrary
     ? t("page.totalCategories", { count: selectedLibrary.category_count ?? 0 })
     : selectedCategory
-      ? t("page.totalCategories", { count: (selectedCategory.descendant_count ?? 0) + 1 })
+      ? t("page.totalCategories", { count: selectedCategory.descendant_count ?? 0 })
       : null;
   const treeRows = useMemo(() => {
     const rows: CategoryTreeRow[] = [];
