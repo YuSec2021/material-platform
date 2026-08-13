@@ -3748,7 +3748,7 @@ def category_to_out(category: Category, descendant_count: int = 0) -> CategoryOu
 
 
 def _category_descendant_counts(db: Session) -> dict[int, int]:
-    """算每个类目下的子孙数（含自己）。一次性加载全表后建树，O(N) 遍历。"""
+    """算每个类目的后代数（不含自身）。一次性加载全表后建树，O(N) 遍历。"""
     rows = db.query(Category.id, Category.parent_category_id).all()
     if not rows:
         return {}
@@ -3756,17 +3756,17 @@ def _category_descendant_counts(db: Session) -> dict[int, int]:
     for cid, pid in rows:
         children_by_parent.setdefault(pid, []).append(cid)
     counts: dict[int, int] = {}
-    def subtree_size(node_id: int) -> int:
+    def descendant_count(node_id: int) -> int:
         cached = counts.get(node_id)
         if cached is not None:
             return cached
-        total = 1
+        total = 0
         for child_id in children_by_parent.get(node_id, []):
-            total += subtree_size(child_id)
+            total += 1 + descendant_count(child_id)
         counts[node_id] = total
         return total
     for cid, _pid in rows:
-        subtree_size(cid)
+        descendant_count(cid)
     return counts
 
 
