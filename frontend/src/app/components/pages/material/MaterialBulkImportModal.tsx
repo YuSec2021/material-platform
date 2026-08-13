@@ -40,7 +40,6 @@ function SummaryTile({ label, value, tone = "default" }: { label: string; value:
 export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLibraryId }: MaterialBulkImportModalProps) {
   const queryClient = useQueryClient();
   const [libraryId, setLibraryId] = useState<number | "">(defaultLibraryId);
-  const [templateExportedForLibraryId, setTemplateExportedForLibraryId] = useState<number | "">("");
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const [fileName, setFileName] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -50,14 +49,11 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
   useEffect(() => {
     if (isOpen) {
       setLibraryId(defaultLibraryId);
-      setTemplateExportedForLibraryId("");
       setFileName("");
       setPreview(null);
       setResult(null);
     }
   }, [isOpen]);
-
-  const templateExported = libraryId !== "" && templateExportedForLibraryId === libraryId;
 
   const downloadTemplate = async () => {
     if (libraryId === "") {
@@ -73,7 +69,6 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
       link.download = "material-import-template.xlsx";
       link.click();
       URL.revokeObjectURL(url);
-      setTemplateExportedForLibraryId(libraryId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "模板导出失败");
     } finally {
@@ -109,8 +104,8 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
   });
 
   const handleFile = (file: File) => {
-    if (!templateExported) {
-      toast.error("请先点击「导出模板」再上传填写好的文件");
+    if (libraryId === "") {
+      toast.error("请先选择物料库");
       return;
     }
     setFileName(file.name);
@@ -163,7 +158,8 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
     >
       <div className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          请按顺序操作：选择物料库 → 导出模板（模板会根据该物料库下的末级类目和所需属性自动生成）→ 按模板填写物料后上传 → 确认导入。
+          请先选择物料库，然后上传 CSV / XLSX / XLS 文件即可预览。
+          如需参考表头可点「导出模板」（模板会根据该物料库下的末级类目和所需属性自动生成），不强依赖。
         </p>
         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
           <label className="space-y-1 text-sm text-foreground">
@@ -173,7 +169,6 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
               value={libraryId === "" ? "" : String(libraryId)}
               onValueChange={(value) => {
                 setLibraryId(value ? Number(value) : "");
-                setTemplateExportedForLibraryId("");
                 setFileName("");
                 setPreview(null);
                 setResult(null);
@@ -202,14 +197,14 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
         <label
           onDragOver={(event) => {
             event.preventDefault();
-            if (templateExported) {
+            if (libraryId !== "") {
               setIsDragging(true);
             }
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           className={`flex min-h-32 flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center ${
-            !templateExported
+            libraryId === ""
               ? "cursor-not-allowed border-border bg-muted/10 opacity-60"
               : isDragging
                 ? "cursor-pointer border-blue-500 bg-blue-50 dark:bg-blue-950/30"
@@ -218,13 +213,15 @@ export function MaterialBulkImportModal({ isOpen, onClose, libraries, defaultLib
         >
           <UploadCloud className="mb-2 h-8 w-8 text-blue-600" />
           <span className="text-sm font-medium text-foreground">
-            {templateExported ? "拖拽或点击上传填写好的物料文件" : "请先点击「导出模板」后再上传"}
+            {libraryId === "" ? "请先选择物料库后再上传" : "拖拽或点击上传填写好的物料文件"}
           </span>
-          <span className="mt-1 text-xs text-muted-foreground">{fileName || "支持 CSV / XLSX / XLS"}</span>
+          <span className="mt-1 text-xs text-muted-foreground">
+            {fileName || (libraryId === "" ? "支持 CSV / XLSX / XLS" : "未导出模板也可以直接上传现有文件")}
+          </span>
           <input
             type="file"
             accept={MATERIAL_IMPORT_ACCEPT}
-            disabled={!templateExported}
+            disabled={libraryId === ""}
             className="sr-only"
             onChange={(event) => {
               const file = event.target.files?.[0];
