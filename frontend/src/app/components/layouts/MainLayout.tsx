@@ -1,7 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
-  BrainCircuit,
   ChevronDown,
   Database,
   FileText,
@@ -10,7 +9,6 @@ import {
   Menu,
   Moon,
   Package,
-  ShieldCheck,
   Settings,
   Sun,
   User,
@@ -98,31 +96,7 @@ function buildMenuItems(t: (key: string) => string, isSuperAdmin: boolean): Menu
     },
   ];
 
-  if (isSuperAdmin) {
-    items.push({
-      key: "ai",
-      title: t("nav.aiManagement"),
-      icon: <BrainCircuit className="h-5 w-5" />,
-      children: [
-        { key: "aiModels", title: t("nav.aiModels"), path: "/ai/models" },
-        { key: "aiCapabilityMappings", title: t("nav.aiCapabilityMappings"), path: "/ai/capability-mappings" },
-        { key: "aiTokenUsage", title: t("nav.aiTokenUsage"), path: "/ai/token-usage" },
-      ],
-    });
-  }
-
-  if (isSuperAdmin) {
-    items.push({
-      key: "rules",
-      title: t("nav.ruleEngine"),
-      icon: <ShieldCheck className="h-5 w-5" />,
-      children: [
-        { key: "ruleCategories", title: t("nav.ruleCategories"), path: "/rules/categories" },
-        { key: "rules", title: t("nav.rules"), path: "/rules" },
-      ],
-    });
-  }
-
+  // AI 管理 与 规则引擎 入口已隐藏（路由仍可访问，便于后续恢复或直接访问）。
   return items;
 }
 
@@ -208,8 +182,6 @@ export function MainLayout() {
     "standard",
     "material",
     "applications",
-    "ai",
-    "rules",
     "system",
   ]);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);

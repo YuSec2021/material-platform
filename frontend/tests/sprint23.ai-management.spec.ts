@@ -237,7 +237,8 @@ test("super_admin can open AI management pages and create masked provider record
   await mockAiApis(page);
 
   await page.goto("/");
-  await expect(page.getByText("AI管理")).toBeVisible();
+  // AI 管理菜单已隐藏，super_admin 也看不到入口；直接通过 URL 访问页面。
+  expect(await (page.getByText("AI管理") as any).count()).toEqual(0);
 
   await page.goto("/ai/providers");
   await expect(page.getByRole("heading", { name: "模型提供商管理" })).toBeVisible();

@@ -141,8 +141,10 @@ test("super_admin can navigate categories and see rule management controls", asy
   const { page, context } = await pageForTest();
   await page.goto("/");
 
-  await expect(page.getByText("规则引擎")).toBeVisible();
-  await page.getByText("规则分类").click();
+  // 规则引擎菜单已隐藏，super_admin 也看不到入口；直接通过 URL 访问页面。
+  expect(await (page.getByText("规则引擎") as any).count()).toEqual(0);
+
+  await page.goto("/rules/categories");
   await expect(page.getByText("单位标准化", { exact: true })).toBeVisible();
   await expect(page.getByText("unit_normalization")).toBeVisible();
 
